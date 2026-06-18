@@ -1,28 +1,27 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>MusicDedup</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.2.0/dist/tabler-icons.min.css" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23D97706'/><text y='.9em' font-size='72' x='50%' text-anchor='middle' fill='white'>♫</text></svg>"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.2.0/dist/tabler-icons.min.css"/>
 <style>
-:root {
-  --bg-base:#FFFFFF;--bg-subtle:#F9FAFB;--bg-muted:#F3F4F6;--bg-overlay:#E9EAEC;
+:root{
+  --bg-base:#FFFFFF;--bg-subtle:#F9FAFB;--bg-muted:#F3F4F6;
   --tx-primary:#111827;--tx-secondary:#374151;--tx-muted:#6B7280;--tx-faint:#9CA3AF;
-  --bd-strong:#D1D5DB;--bd-default:#E5E7EB;--bd-subtle:#F0F1F3;
+  --bd-default:#E5E7EB;--bd-subtle:#F0F1F3;--bd-strong:#D1D5DB;
   --green:#059669;--green-bg:#ECFDF5;--green-bd:#A7F3D0;
   --red:#DC2626;--red-bg:#FEF2F2;--red-bd:#FECACA;
   --amber:#D97706;--amber-bg:#FFFBEB;--amber-bd:#FDE68A;
   --blue:#2563EB;
   --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',system-ui,sans-serif;
-  --font-mono:'JetBrains Mono','Fira Code','Cascadia Code',ui-monospace,monospace;
+  --font-mono:'JetBrains Mono','Fira Code',ui-monospace,monospace;
   --r-sm:4px;--r-md:6px;--r-lg:10px;--r-xl:14px;
-  --sh-xs:0 1px 2px rgba(0,0,0,0.05);
-  --sh-sm:0 1px 3px rgba(0,0,0,0.08),0 1px 2px rgba(0,0,0,0.04);
-  --sh-md:0 4px 6px rgba(0,0,0,0.05),0 2px 4px rgba(0,0,0,0.04);
+  --sh-xs:0 1px 2px rgba(0,0,0,.05);--sh-sm:0 1px 3px rgba(0,0,0,.08);--sh-md:0 4px 6px rgba(0,0,0,.05);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:var(--bg-subtle);color:var(--tx-primary);font-family:var(--font-sans);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+html,body{height:100%;background:var(--bg-subtle);color:var(--tx-primary);font-family:var(--font-sans);font-size:13px;-webkit-font-smoothing:antialiased}
 #root{height:100%;display:flex;flex-direction:column}
 button{font-family:inherit;cursor:pointer}
 input,select,textarea{font-family:inherit;font-size:13px;color:var(--tx-primary)}
@@ -30,13 +29,13 @@ input,select,textarea{font-family:inherit;font-size:13px;color:var(--tx-primary)
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bd-strong);border-radius:3px}
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
-.spin{animation:spin 0.9s linear infinite;display:inline-block}
+.spin{animation:spin .9s linear infinite;display:inline-block}
 .blink{animation:blink 1s ease-in-out infinite}
-.fade{animation:fade 0.16s ease}
+.fade{animation:fade .16s ease}
 input[type=range]{accent-color:var(--amber);width:100%;cursor:pointer}
-input[type=checkbox]{accent-color:var(--amber);width:14px;height:14px;cursor:pointer}
+input[type=checkbox]{accent-color:var(--amber);cursor:pointer}
 </style>
 </head>
 <body>
