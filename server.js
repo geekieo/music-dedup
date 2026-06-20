@@ -153,6 +153,8 @@ app.post('/api/scan/start', async(req,res)=>{
   const s=getAllSettings(db);
   const dirs=s.scan_dirs||[], exclude=s.exclude_patterns||[];
   const threads=parseInt(s.threads||'8'), threshold=parseInt(s.threshold||'90');
+  const durationTolerance=parseInt(s.duration_tolerance||'5');
+  const qualityTiers=Array.isArray(s.quality_tiers)?s.quality_tiers:null;
   const smartScan=s.smart_scan!==false;
   const steps=req.body?.steps||['enum','meta','fp','match'];
   const force=req.body?.force===true;
@@ -166,7 +168,7 @@ app.post('/api/scan/start', async(req,res)=>{
     if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort});
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort});
     if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort});
-    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,onProgress:prog,onAbort:abort});
+    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort});
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
       await runScrape(db,{smartScan:force?false:smartScan,acoustidKey,onProgress:prog,onAbort:abort});
