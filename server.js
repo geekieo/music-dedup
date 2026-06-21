@@ -29,8 +29,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 const db = getDB();
 
 // ── Scan + Scrape state ───────────────────────────────────────────────────
-let scanState = { running:false, abortFlag:false, phase:'idle', pct:0, message:'', startTime:null };
+// `paused` is a soft stop: long-running phases check waitIfPaused() at their
+// existing batch/phase checkpoints and block there (still cancellable via
+// abortFlag while paused) instead of tearing the whole run down.
+let scanState = { running:false, abortFlag:false, paused:false, phase:'idle', pct:0, message:'', startTime:null };
 const sseClients = new Set();
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function waitIfPaused() {
+  while (scanState.paused && !scanState.abortFlag) await sleep(200);
+}
 
 function broadcast(data) {
   Object.assign(scanState, data);
@@ -52,10 +60,40 @@ function revealInExplorer(fp) {
   });
 }
 
+// ── Native "choose a folder" dialog ─────────────────────────────────────
+// This server and the browser hitting it are assumed to be on the same
+// machine (a local desktop tool) — so a server-spawned OS-native picker is
+// equivalent to a client-native one, with no extra dependency (no Electron).
+function pickFolderDialog() {
+  return new Promise(resolve => {
+    let cmd;
+    if (process.platform === 'darwin') {
+      cmd = `osascript -e 'POSIX path of (choose folder with prompt "选择要添加到音乐库的文件夹")'`;
+    } else if (process.platform === 'win32') {
+      cmd = `powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='选择要添加到音乐库的文件夹'; if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $f.SelectedPath}"`;
+    } else {
+      cmd = `zenity --file-selection --directory --title="选择要添加到音乐库的文件夹" 2>/dev/null || kdialog --getexistingdirectory ~ --title "选择要添加到音乐库的文件夹" 2>/dev/null`;
+    }
+    exec(cmd, { timeout: 5*60*1000 }, (err, stdout) => {
+      if (err) { resolve(null); return; } // user cancelled, or no dialog tool available
+      const p = stdout.toString().trim();
+      resolve(p || null);
+    });
+  });
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 app.get('/api/stats', (_,res)=>{ try{res.json({ok:true,data:statsQuery(db)});}catch(e){res.status(500).json({ok:false,error:e.message})}});
 app.get('/api/settings', (_,res)=>res.json({ok:true,data:getAllSettings(db)}));
 app.put('/api/settings', (req,res)=>{ for(const[k,v] of Object.entries(req.body))setSetting(db,k,v); res.json({ok:true}); });
+
+// ── Native folder picker — opens an OS-native "choose folder" dialog on the
+// machine running this server (assumed to be the same machine as the browser,
+// since this is a local desktop tool) and returns the absolute path chosen.
+app.post('/api/browse-folder', async(_,res)=>{
+  try { const dir = await pickFolderDialog(); res.json({ ok:true, path: dir||null }); }
+  catch(e){ res.json({ ok:false, error:e.message }); }
+});
 
 // ── Library ───────────────────────────────────────────────────────────────
 app.get('/api/library', (req,res)=>{
@@ -76,6 +114,16 @@ app.get('/api/files/:id/stream', (req,res)=>{
     '.wav':'audio/wav','.aiff':'audio/aiff','.opus':'audio/ogg'}[ext]||'audio/mpeg';
   const stat = statSync(f.path);
   const total = stat.size;
+  const lastModified = stat.mtime.toUTCString();
+  const etag = `"${f.id}-${stat.size}-${stat.mtimeMs}"`;
+  // Local files never change under our feet during a session — letting the
+  // browser cache the response avoids re-reading the same bytes from disk on
+  // every replay/seek/scrub, which was the main source of perceived playback
+  // start-up delay (especially for large lossless files).
+  res.setHeader('Cache-Control','private, max-age=86400');
+  res.setHeader('Last-Modified', lastModified);
+  res.setHeader('ETag', etag);
+  if (req.headers['if-none-match']===etag) { res.status(304).end(); return; }
   const range = req.headers.range;
   if (range) {
     const m = range.match(/bytes=(\d*)-(\d*)/);
@@ -160,23 +208,26 @@ app.post('/api/scan/start', async(req,res)=>{
   const force=req.body?.force===true;
   if(steps.includes('enum')&&!dirs.length)return res.status(400).json({ok:false,error:'未配置扫描目录'});
   res.json({ok:true,message:'扫描已启动',steps});
-  scanState={running:true,abortFlag:false,phase:'starting',pct:0,message:'准备中...',startTime:Date.now()};
+  scanState={running:true,abortFlag:false,paused:false,phase:'starting',pct:0,message:'准备中...',startTime:Date.now()};
   broadcast({type:'start',...scanState});
   const prog=evt=>broadcast({type:'progress',...evt});
   const abort=()=>scanState.abortFlag;
+  const pause=waitIfPaused;
   try{
-    if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort});
-    if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort});
-    if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort});
-    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort});
+    if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
-      await runScrape(db,{smartScan:force?false:smartScan,acoustidKey,onProgress:prog,onAbort:abort});
+      await runScrape(db,{smartScan:force?false:smartScan,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
-  finally{ scanState.running=false; broadcast({type:'done',...scanState}); }
+  finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
-app.post('/api/scan/abort', (_,res)=>{ if(!scanState.running)return res.json({ok:false}); scanState.abortFlag=true; res.json({ok:true}); });
+app.post('/api/scan/abort', (_,res)=>{ if(!scanState.running)return res.json({ok:false}); scanState.abortFlag=true; scanState.paused=false; broadcast({type:'progress',...scanState}); res.json({ok:true}); });
+app.post('/api/scan/pause', (_,res)=>{ if(!scanState.running||scanState.abortFlag)return res.json({ok:false}); scanState.paused=true; broadcast({type:'progress',...scanState,message:'已暂停 · 点击继续以恢复'}); res.json({ok:true}); });
+app.post('/api/scan/resume', (_,res)=>{ if(!scanState.running||!scanState.paused)return res.json({ok:false}); scanState.paused=false; broadcast({type:'progress',...scanState,message:'已恢复'}); res.json({ok:true}); });
 
 app.get('*', (_,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 

@@ -1,6 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
+const APP_VERSION='1.3.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -115,15 +116,40 @@ function Icon(name,style={},className){
   return e('svg',svgProps,spec.els.map(([tag,props],i)=>e(tag,{key:i,...props})));
 }
 
+/* ── Brand mark — two overlapping music notes: the front one solid, the
+   back one a hollow "ghost", reading as "duplicate → resolved to one".
+   Used for the header badge and (as a matching data-URI) the favicon. */
+const NOTE_PATH='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z';
+function Logo({size=28,radius=7}={}){
+  return e('svg',{width:size,height:size,viewBox:'0 0 28 28',style:{display:'inline-block',verticalAlign:'middle',flexShrink:0,borderRadius:radius,boxShadow:'0 1px 3px rgba(217,119,6,.25)'}},
+    e('defs',null,e('linearGradient',{id:'logoGrad',x1:0,y1:0,x2:1,y2:1},e('stop',{offset:0,stopColor:'#FDE68A'}),e('stop',{offset:1,stopColor:'#D97706'}))),
+    e('rect',{width:28,height:28,rx:radius,fill:'url(#logoGrad)'}),
+    e('g',{transform:'translate(2.5,3) scale(.6)',opacity:.55},e('path',{d:NOTE_PATH,fill:'none',stroke:'#fff',strokeWidth:2.4,strokeLinejoin:'round',strokeLinecap:'round'})),
+    e('g',{transform:'translate(9.5,9.5) scale(.6)'},e('path',{d:NOTE_PATH,fill:'#fff'}))
+  );
+}
+
 /* ── Global persistent player ───────────────────────────────────────────
    <audio> is mounted once, for the lifetime of the app, in App() itself —
-   so playback continues uninterrupted while switching tabs. */
+   so playback continues uninterrupted while switching tabs.
+
+   PERF NOTE: onTimeUpdate fires many times per second while a track plays.
+   If every consumer of this hook re-rendered on every tick, any view on
+   screen during playback (e.g. the 100-row library table) would re-render
+   at that same high frequency — that's the real source of "playback causes
+   the UI to feel laggy/delayed". So progress/duration are kept OUT of the
+   memoized `player` object that gets handed to list views; only PlayerBar
+   (the one consumer that actually needs them every tick) reads them
+   directly from this hook's return value. playTrack/toggle/etc are wrapped
+   in useCallback so their identity is stable across re-renders too. */
 function useGlobalPlayer(){
   const[current,setCurrent]=useState(null);   // {id,title,artist}
   const[playing,setPlaying]=useState(false);
   const[progress,setProgress]=useState(0);
   const[duration,setDuration]=useState(0);
+  const[volume,setVolume]=useState(1);
   const audioRef=useRef(null);
+  const queueRef=useRef([]);                  // last list playTrack was called with
 
   useEffect(()=>{
     if(!current)return;
@@ -134,44 +160,78 @@ function useGlobalPlayer(){
     el.play().catch(()=>{});
   },[current?.id]);
 
-  function playTrack(track){
-    if(current&&current.id===track.id){
-      const el=audioRef.current;
-      if(el)el.paused?el.play().catch(()=>{}):el.pause();
-      return;
-    }
-    setCurrent(track);
-  }
-  function toggle(){const el=audioRef.current;if(!el)return;el.paused?el.play().catch(()=>{}):el.pause();}
-  function seek(t){const el=audioRef.current;if(el)el.currentTime=t;}
-  function close(){const el=audioRef.current;setCurrent(null);setPlaying(false);if(el){el.pause();el.removeAttribute('src');el.load();}}
+  useEffect(()=>{ if(audioRef.current)audioRef.current.volume=volume; },[volume]);
+
+  const playTrack=useCallback((track,list)=>{
+    if(Array.isArray(list)&&list.length)queueRef.current=list;
+    setCurrent(cur=>{
+      if(cur&&cur.id===track.id){
+        const el=audioRef.current;
+        if(el)el.paused?el.play().catch(()=>{}):el.pause();
+        return cur;
+      }
+      return track;
+    });
+  },[]);
+  const toggle=useCallback(()=>{const el=audioRef.current;if(!el)return;el.paused?el.play().catch(()=>{}):el.pause();},[]);
+  const seek=useCallback(t=>{const el=audioRef.current;if(el)el.currentTime=t;},[]);
+  const close=useCallback(()=>{const el=audioRef.current;setCurrent(null);setPlaying(false);if(el){el.pause();el.removeAttribute('src');el.load();}},[]);
+  const step=useCallback(dir=>{
+    const q=queueRef.current;
+    if(!q.length)return;
+    setCurrent(cur=>{
+      const i=cur?q.findIndex(t=>t.id===cur.id):-1;
+      const next=i===-1?q[0]:q[(i+dir+q.length)%q.length];
+      return next||cur;
+    });
+  },[]);
+  const playNext=useCallback(()=>step(1),[step]);
+  const playPrev=useCallback(()=>step(-1),[step]);
+
+  const bind=useMemo(()=>({
+    onPlay:()=>setPlaying(true),onPause:()=>setPlaying(false),onEnded:()=>setPlaying(false),
+    onTimeUpdate:ev=>{setProgress(ev.target.currentTime);setDuration(ev.target.duration||0);},
+  }),[]);
+
+  // Stable-identity slice — safe to hand to heavy list views without causing
+  // a re-render every time progress/duration tick.
+  const lite=useMemo(()=>({current,playing,audioRef,playTrack,toggle,close,hasQueue:queueRef.current.length>1}),
+    [current,playing,playTrack,toggle,close]);
 
   return{
-    current,playing,progress,duration,audioRef,playTrack,toggle,seek,close,
-    bind:{
-      onPlay:()=>setPlaying(true),onPause:()=>setPlaying(false),onEnded:()=>setPlaying(false),
-      onTimeUpdate:ev=>{setProgress(ev.target.currentTime);setDuration(ev.target.duration||0);},
-    },
+    current,playing,progress,duration,volume,setVolume,audioRef,
+    playTrack,toggle,seek,close,playNext,playPrev,bind,lite,
   };
 }
 function PlayerBar({player}){
   if(!player.current)return null;
-  const{current,playing,progress,duration}=player;
-  return e('div',{className:'fade',style:{position:'fixed',left:0,right:0,bottom:0,zIndex:200,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -2px 10px rgba(0,0,0,.06)',padding:'9px 20px',display:'flex',alignItems:'center',gap:14}},
-    e('button',{onClick:player.toggle,style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}},
-      Icon(playing?'pause':'play',{fontSize:14,color:'#fff'})
-    ),
-    e('div',{style:{flex:1,minWidth:0,maxWidth:480}},
-      e('div',{style:{fontSize:12,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:4}},current.title||'—',current.artist&&e('span',{style:{color:'var(--tx-faint)',fontWeight:400}},'  ·  '+current.artist)),
-      e('div',{style:{display:'flex',alignItems:'center',gap:8}},
-        e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32}},fmtDur(progress)),
-        e('div',{style:{flex:1,height:4,background:'var(--bg-muted)',borderRadius:99,cursor:'pointer',overflow:'hidden'},onClick:ev=>{if(!duration)return;const r=ev.currentTarget.getBoundingClientRect();player.seek(((ev.clientX-r.left)/r.width)*duration);}},
-          e('div',{style:{width:(duration?progress/duration*100:0)+'%',height:'100%',background:'var(--amber)',borderRadius:99,transition:'width .3s'}})
+  const{current,playing,progress,duration,volume,setVolume}=player;
+  const hasQueue=player.lite.hasQueue;
+  return e('div',{className:'fade',style:{position:'fixed',left:0,right:0,bottom:0,zIndex:200,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -2px 10px rgba(0,0,0,.06)',padding:'9px 20px',display:'flex',justifyContent:'center'}},
+    e('div',{style:{display:'flex',alignItems:'center',gap:14,width:'100%',maxWidth:'var(--max-width)'}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:2,flexShrink:0}},
+        e('button',{onClick:player.playPrev,disabled:!hasQueue,title:'上一首',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-muted)',padding:5,display:'flex'}},Icon('chevron-left',{fontSize:16})),
+        e('button',{onClick:player.toggle,style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}},
+          Icon(playing?'pause':'play',{fontSize:14,color:'#fff'})
         ),
-        e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32,textAlign:'right'}},fmtDur(duration))
-      )
-    ),
-    e('button',{onClick:player.close,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+        e('button',{onClick:player.playNext,disabled:!hasQueue,title:'下一首',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-muted)',padding:5,display:'flex'}},Icon('chevron-right',{fontSize:16}))
+      ),
+      e('div',{style:{flex:1,minWidth:0}},
+        e('div',{style:{fontSize:12,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:4}},current.title||'—',current.artist&&e('span',{style:{color:'var(--tx-faint)',fontWeight:400}},'  ·  '+current.artist)),
+        e('div',{style:{display:'flex',alignItems:'center',gap:8}},
+          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32}},fmtDur(progress)),
+          e('div',{style:{flex:1,height:4,background:'var(--bg-muted)',borderRadius:99,cursor:'pointer',overflow:'hidden'},onClick:ev=>{if(!duration)return;const r=ev.currentTarget.getBoundingClientRect();player.seek(((ev.clientX-r.left)/r.width)*duration);}},
+            e('div',{style:{width:(duration?progress/duration*100:0)+'%',height:'100%',background:'var(--amber)',borderRadius:99,transition:'width .3s'}})
+          ),
+          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32,textAlign:'right'}},fmtDur(duration))
+        )
+      ),
+      e('div',{style:{display:'flex',alignItems:'center',gap:6,flexShrink:0,width:96}},
+        Icon(volume===0?'music-off':'music',{fontSize:13,color:'var(--tx-faint)'}),
+        e('input',{type:'range',min:0,max:1,step:0.01,value:volume,onChange:ev=>setVolume(+ev.target.value),style:{width:64}})
+      ),
+      e('button',{onClick:player.close,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+    )
   );
 }
 
@@ -192,15 +252,15 @@ function Hint({text,size=13}){
     show&&e('div',{className:'fade',style:{position:'absolute',zIndex:60,top:'140%',left:0,width:268,background:'#1F2937',color:'#F9FAFB',fontSize:11,lineHeight:1.7,padding:'9px 11px',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',fontWeight:400}},text)
   );
 }
-function MatchTag({tag}){
+function MatchTag({tag,hideTooltip}){
   const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-  return e('span',{title:MATCH_TAG_DESCRIPTIONS[tag]||'',style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',cursor:'help'}},MATCH_TAG_LABELS[tag]||tag);
+  return e('span',{title:hideTooltip?undefined:(MATCH_TAG_DESCRIPTIONS[tag]||''),style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',cursor:hideTooltip?'default':'help'}},MATCH_TAG_LABELS[tag]||tag);
 }
 function Tag({children,color='var(--tx-faint)',bg='var(--bg-muted)',border='var(--bd-default)'}){return e('span',{style:{fontSize:10,padding:'1px 7px',borderRadius:3,background:bg,color,border:`0.5px solid ${border}`,whiteSpace:'nowrap'}},children);}
 function Btn({children,onClick,variant='primary',small,disabled,icon,style:sx={}}){
   const base={display:'flex',alignItems:'center',gap:5,borderRadius:'var(--r-md)',fontFamily:'var(--font-sans)',fontWeight:500,cursor:disabled?'not-allowed':'pointer',fontSize:small?11:12,padding:small?'4px 10px':'7px 14px',transition:'all .12s',border:'none',opacity:disabled?.45:1,whiteSpace:'nowrap',...sx};
   const V={primary:{...base,background:'var(--amber)',color:'#fff'},ghost:{...base,background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'},danger:{...base,background:'var(--red-bg)',color:'var(--red)',border:'0.5px solid var(--red-bd)'},success:{...base,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}};
-  return e('button',{onClick:disabled?undefined:onClick,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14}),children);
+  return e('button',{onClick:disabled?undefined:onClick,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
 }
 // Icon-only action button — bigger touch target + a real fill color when
 // active, so the three per-track actions (打开/属性/白名单) read as buttons
@@ -288,7 +348,20 @@ function PropsModal({fileId,onClose}){
 // a path in.
 function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,compact}){
   const[newDir,setNewDir]=useState('');
+  const[browsing,setBrowsing]=useState(false);
+  const[showManual,setShowManual]=useState(false);
+  const[err,setErr]=useState('');
   function add(){if(!newDir.trim())return;onAddDir(newDir.trim());setNewDir('');}
+  async function browse(){
+    setErr('');setBrowsing(true);
+    try{
+      const r=await api.post('/api/browse-folder');
+      if(r.ok&&r.path)onAddDir(r.path);
+      else if(r.ok&&!r.path){ /* user cancelled the dialog — no error */ }
+      else setErr('未能打开系统文件夹选择器，请使用下方手动输入');
+    }catch{ setErr('未能打开系统文件夹选择器，请使用下方手动输入'); }
+    finally{ setBrowsing(false); }
+  }
   return e('div',null,
     dirs.length===0&&e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:compact?'2px 0 10px':'4px 0 8px',display:'flex',gap:5,alignItems:'center',justifyContent:compact?'center':'flex-start'}},Icon('info-circle',{}),'暂未配置扫描目录'),
     dirs.map((d,i)=>e('div',{key:i,style:{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)',marginBottom:6}},
@@ -296,18 +369,25 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,compact}){
       e('span',{title:d,style:{flex:1,fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},d),
       e('button',{onClick:()=>onRemoveDir(i),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:'2px 4px',borderRadius:'var(--r-sm)'}},Icon('x',{fontSize:13}))
     )),
-    e('div',{style:{display:'flex',gap:6}},
-      e('input',{value:newDir,onChange:ev=>setNewDir(ev.target.value),onKeyDown:ev=>ev.key==='Enter'&&add(),placeholder:'/Volumes/Music 或 D:\\Music',style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',fontFamily:'var(--font-mono)',outline:'none'}}),
-      e(Btn,{onClick:add,small:true,icon:'plus'},'添加')
+    e('div',{style:{display:'flex',gap:6,justifyContent:compact?'center':'flex-start'}},
+      e(Btn,{onClick:browse,disabled:browsing,icon:browsing?'loader':'folder-open'},browsing?'等待选择...':'添加文件夹')
     ),
-    dirs.length===0&&e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:6,lineHeight:1.6}},'添加后会自动开始扫描这个目录下的音乐文件')
+    err&&e('div',{style:{fontSize:11,color:'var(--red)',marginTop:6}},err),
+    e('button',{onClick:()=>setShowManual(v=>!v),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,padding:0,marginTop:8}},
+      e('i',{className:`ti ti-chevron-${showManual?'up':'down'}`,style:{fontSize:11}}),'手动输入路径'
+    ),
+    showManual&&e('div',{style:{display:'flex',gap:6,marginTop:6}},
+      e('input',{value:newDir,onChange:ev=>setNewDir(ev.target.value),onKeyDown:ev=>ev.key==='Enter'&&add(),placeholder:'/Volumes/Music 或 D:\\Music',style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',fontFamily:'var(--font-mono)',outline:'none'}}),
+      e(Btn,{onClick:add,small:true,variant:'ghost',icon:'plus'},'添加')
+    ),
+    dirs.length===0&&e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:6,lineHeight:1.6,textAlign:compact?'center':'left'}},'添加后会自动开始扫描这个目录下的音乐文件')
   );
 }
 
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-function LibraryView({player,dirs,onAddDir,onRemoveDir}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir}){
   const[stats,setStats]=useState(null);
   const[rows,setRows]=useState([]);
   const[total,setTotal]=useState(0);
@@ -337,6 +417,9 @@ function LibraryView({player,dirs,onAddDir,onRemoveDir}){
   const SortIcon=({col})=>sort===col?e('i',{className:`ti ti-arrow-${order==='asc'?'up':'down'}`,style:{fontSize:11,marginLeft:3}}):null;
 
   const totalPages=Math.ceil(total/LIMIT);
+  // Playable queue for prev/next — every fingerprinted row on the current page,
+  // in the order shown, so 上一首/下一首 cycles through what's on screen.
+  const playableQueue=useMemo(()=>rows.filter(r=>r.fingerprint).map(r=>({id:r.id,title:r.title,artist:r.artist})),[rows]);
 
   async function toggleWhitelist(f){
     if(f.whitelisted){await api.del(`/api/whitelist/${f.id}`);}else{await api.post(`/api/whitelist/${f.id}`);}
@@ -386,12 +469,12 @@ function LibraryView({player,dirs,onAddDir,onRemoveDir}){
 
     e('div',{style:{borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)'}},
       loading&&rows.length===0?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:28}})):
-      total===0?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)',lineHeight:2}},Icon('music-off',{fontSize:32,display:'block',marginBottom:8}),'未找到匹配的曲目'):
+      total===0?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)',lineHeight:2}},Icon('music-off',{fontSize:32,display:'block',margin:'0 auto 8px'}),'未找到匹配的曲目'):
       e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
         e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)',position:'sticky',top:0,zIndex:2}},
-          ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['大小','64px'],['操作','108px']].map(([h,w])=>
-            e('th',{key:h,onClick:h&&['标题','艺术家','专辑','格式','大小'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',大小:'size'}[h]):undefined,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',width:w||undefined,cursor:h?'pointer':undefined,userSelect:'none',whiteSpace:'nowrap'}},
-              h,['标题','艺术家','专辑','格式','大小'].includes(h)&&e(SortIcon,{col:{标题:'title',艺术家:'artist',专辑:'album',格式:'format',大小:'size'}[h]})
+          ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['时长','56px'],['大小','64px'],['操作','108px']].map(([h,w])=>
+            e('th',{key:h,onClick:h&&['标题','艺术家','专辑','格式','时长','大小'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]):undefined,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',width:w||undefined,cursor:h?'pointer':undefined,userSelect:'none',whiteSpace:'nowrap'}},
+              h,['标题','艺术家','专辑','格式','时长','大小'].includes(h)&&e(SortIcon,{col:{标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]})
             )
           )
         )),
@@ -399,7 +482,7 @@ function LibraryView({player,dirs,onAddDir,onRemoveDir}){
           const isCur=player.current?.id===f.id;
           return e('tr',{key:f.id,style:{borderBottom:'0.5px solid var(--bd-subtle)',background:f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',transition:'background .1s'},onMouseEnter:ev=>ev.currentTarget.style.background=isCur?'var(--amber-bg)':f.whitelisted?'#ECEEF0':'var(--bg-subtle)',onMouseLeave:ev=>ev.currentTarget.style.background=f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent'},
           e('td',{style:{padding:'6px 8px',width:36}},
-            f.fingerprint&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+            f.fingerprint&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist},playableQueue),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
           ),
           e('td',{style:{padding:'6px 10px',maxWidth:0,overflow:'hidden'}},
             e('div',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500,color:'var(--tx-primary)'}},f.title||'—'),
@@ -408,6 +491,7 @@ function LibraryView({player,dirs,onAddDir,onRemoveDir}){
           e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0}},f.artist||'—'),
           e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,fontSize:11}},f.album||'—'),
           e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
+          e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'nowrap'}},fmtDur(f.duration)),
           e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'nowrap'}},fmtBytes(f.size)),
           // F3: icon-only, colored, bigger action buttons — no text labels
           e('td',{style:{padding:'4px 8px'}},
@@ -432,7 +516,7 @@ function LibraryView({player,dirs,onAddDir,onRemoveDir}){
       e(Btn,{small:true,variant:'ghost',disabled:page>=totalPages,icon:'chevron-right',onClick:()=>setPage(p=>p+1)},'')
     )
   );
-}
+});
 
 /* ══════════════════════════════════════════════════════════════════════
    SCANNER VIEW — F5: simplified to 3 auto lanes (basic/fp/scrape), each
@@ -513,7 +597,8 @@ function ScannerView({scan}){
         e('div',{style:{fontSize:11,color:'var(--tx-faint)'}},'三条匹配通道一次性全部完成')),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
           e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
-          status.running&&e(Btn,{variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort')},'中止')
+          status.running&&e(Btn,{variant:'ghost',icon:status.paused?'player-play':'pause',onClick:()=>(status.paused?scan.resume():scan.pause())},status.paused?'继续':'暂停'),
+          status.running&&e(Btn,{variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort')},'停止')
         )
       ),
       e('div',{style:{marginTop:8}},
@@ -525,13 +610,16 @@ function ScannerView({scan}){
     ),
 
     // Progress
-    status.phase!=='idle'&&e('div',{style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
+    status.phase!=='idle'&&e('div',{style:{background:'var(--bg-base)',border:`0.5px solid ${status.paused?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
-        e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)'}},{idle:'就绪',enum:'文件枚举',meta:'元数据提取',fp:'声纹提取',matching:'相似度匹配',scrape:'元数据刮削',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase),
+        e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
+          status.paused&&Icon('pause',{fontSize:12,color:'var(--amber)'}),
+          status.paused?'已暂停':({idle:'就绪',enum:'文件枚举',meta:'元数据提取',fp:'声纹提取',matching:'相似度匹配',scrape:'元数据刮削',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
+        ),
         e('span',{style:{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--amber)'}},(status.pct||0)+'%')
       ),
       e('div',{style:{height:5,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
-        e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:'var(--amber)',borderRadius:99,transition:'width .3s'}}))
+        e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber)',borderRadius:99,transition:'width .3s'}}))
     ),
 
     // Log — progressive, never cleared mid-session
@@ -552,13 +640,13 @@ function ScannerView({scan}){
 /* ══════════════════════════════════════════════════════════════════════
    DUPLICATES VIEW
    ══════════════════════════════════════════════════════════════════════ */
-function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,player}){
+function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,player,queue}){
   const keep=!!track.keep,wl=!!track.whitelisted;
   const isCur=player?.current?.id===track.id;
   const bd=wl?'var(--bd-default)':keep?'var(--green-bd)':'var(--red-bd)';
   return e('div',{style:{marginBottom:8,borderRadius:'var(--r-md)',border:`1px solid ${bd}`,background:wl?'var(--bg-muted)':keep?'var(--green-bg)':'var(--red-bg)',overflow:'hidden'}},
     e('div',{style:{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px'}},
-      player&&e('button',{onClick:()=>player.playTrack({id:track.id,title:track.title,artist:track.artist}),title:'试听',style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,marginTop:1}},
+      player&&e('button',{onClick:()=>player.playTrack({id:track.id,title:track.title,artist:track.artist},queue),title:'试听',style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,marginTop:1}},
         Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'})
       ),
       e('button',{onClick:canToggle&&!wl?onToggle:undefined,title:wl?'已加入白名单':canToggle?(keep?'切换为删除':'切换为保留'):'至少保留一个',style:{background:'none',border:'none',padding:0,flexShrink:0,cursor:canToggle&&!wl?'pointer':'default',marginTop:2}},
@@ -588,7 +676,7 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,player}){
   );
 }
 
-function DuplicatesView({setPendingCount,player}){
+const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}){
   const[filter,setFilter]=useState('pending');
   const[sort,setSort]=useState('savings');
   const[groups,setGroups]=useState([]);
@@ -754,6 +842,7 @@ function DuplicatesView({setPendingCount,player}){
             ),
 
             (detail.tracks||[]).map(t=>e(TrackRow,{key:t.id,track:t,player,
+              queue:(detail.tracks||[]).filter(x=>x.fingerprint).map(x=>({id:x.id,title:x.title,artist:x.artist})),
               onToggle:()=>toggleTrack(detail.id,t.id,!t.keep,!t.keep?'手动指定保留':'手动指定删除'),
               canToggle:!detail.resolved&&!(t.keep&&(detail.tracks||[]).filter(x=>x.keep&&!x.whitelisted).length<=1),
               onWhitelist:()=>handleWL(t.id,!!t.whitelisted,detail.id),
@@ -768,7 +857,7 @@ function DuplicatesView({setPendingCount,player}){
       )
     )
   );
-}
+});
 
 /* ══════════════════════════════════════════════════════════════════════
    SETTINGS VIEW — F6: single scrollable page, anchored sections:
@@ -776,9 +865,9 @@ function DuplicatesView({setPendingCount,player}){
    A sticky left rail jumps to each anchor. Explanatory text that used to
    sit as an always-visible box is now a hover-revealed Hint next to the
    heading it explains, except 重复组标签 which IS the reference itself
-   and stays visible. Changing 扫描目录/声纹阈值/音质优先级 auto-applies:
-   saved immediately and a matching re-scan/re-match kicks off right away,
-   since that's obviously what someone wants the moment they change it.
+   and stays visible. F8: changes auto-SAVE, but applying a match-affecting
+   change (声纹阈值/时长容差/音质优先级) is a manual, explicit click on the
+   reapply banner — it only re-runs matching, never re-extracts fp/scrape.
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
   {id:'sec-dirs',    label:'扫描目录',   icon:'folders'},
@@ -832,13 +921,15 @@ function WhitelistSection({player}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,player}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,scanRunning,player}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
+  const[needsReapply,setNeedsReapply]=useState(false);
+  const[reapplying,setReapplying]=useState(false);
   const saveTimer=useRef(null);
   const isFirst=useRef(true);
-  const lastApplied=useRef(null); // {threshold, duration_tolerance, quality_tiers} snapshot
+  const lastApplied=useRef(null); // {threshold, duration_tolerance, quality_tiers} snapshot as of the last manual reapply
 
   useEffect(()=>{
     api.get('/api/settings').then(r=>{
@@ -851,6 +942,12 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,player})
     });
   },[]);
 
+  // F8: this only ever SAVES now — it no longer kicks off a re-match on its
+  // own. A background re-match triggered by typing in Settings could still
+  // be in flight when the person switched to 扫描 and clicked a lane there,
+  // producing a spurious "已有扫描进行中". Applying a match-affecting change
+  // is now always a deliberate, explicit click (see the reapply banner
+  // below), never an automatic side effect of saving.
   useEffect(()=>{
     if(!s)return;
     if(isFirst.current){isFirst.current=false;return;}
@@ -859,27 +956,33 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,player})
       api.put('/api/settings',s).then(r=>{
         if(!r.ok){setSaveState('error');return;}
         setSaveState('saved');setTimeout(()=>setSaveState('idle'),2200);
-        // F-priority-apply: 声纹阈值 / 音质优先级 changed → re-apply immediately
-        // by re-running the (cheap, non-destructive) match step alone.
         const qj=JSON.stringify(s.quality_tiers||[]);
         const changed = lastApplied.current && (
           lastApplied.current.threshold!==s.threshold ||
           lastApplied.current.duration_tolerance!==s.duration_tolerance ||
           lastApplied.current.quality_tiers!==qj
         );
-        lastApplied.current={threshold:s.threshold,duration_tolerance:s.duration_tolerance,quality_tiers:qj};
-        if(changed)onMatchAffectingChange?.();
+        if(changed)setNeedsReapply(true);
       });
     },700);
     return()=>clearTimeout(saveTimer.current);
   },[s]);
 
+  function reapply(){
+    setReapplying(true);
+    onMatchAffectingChange?.();
+    lastApplied.current={threshold:s.threshold,duration_tolerance:s.duration_tolerance,quality_tiers:JSON.stringify(s.quality_tiers||[])};
+    setNeedsReapply(false);
+    setTimeout(()=>setReapplying(false),1500);
+  }
+
   const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
+  const resetQ=()=>setS(p=>({...p,quality_tiers:[...DEFAULT_Q]}));
 
   const SI=()=>e('div',{style:{fontSize:11,height:26,display:'flex',alignItems:'center',gap:5}},
     saveState==='saving'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'保存中...'),
-    saveState==='saved'&&e('span',{className:'fade',style:{color:'var(--green)',display:'flex',alignItems:'center',gap:4}},Icon('circle-check',{fontSize:12}),'已自动应用'),
-    saveState==='idle'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},Icon('device-floppy',{fontSize:12}),'修改后自动保存并生效')
+    saveState==='saved'&&e('span',{className:'fade',style:{color:'var(--green)',display:'flex',alignItems:'center',gap:4}},Icon('circle-check',{fontSize:12}),'已保存'),
+    saveState==='idle'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},Icon('device-floppy',{fontSize:12}),'修改后自动保存')
   );
 
   function jump(id){document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});}
@@ -899,6 +1002,15 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,player})
 
     // Right — all sections concatenated, scrollable as part of <main>
     e('div',{style:{display:'flex',flexDirection:'column',gap:14}},
+
+      // F8: manual, explicit "apply" step for match-affecting settings.
+      // Re-runs ONLY the match step — existing fingerprints/scrape data are
+      // reused as-is, nothing gets re-extracted.
+      needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
+        Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
+        e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'声纹相似度 / 时长容差 / 音质优先级 已修改，尚未重新应用到现有重复组'),
+        e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配')
+      ),
 
       e(Card,{id:'sec-dirs'},
         e(SH,{title:'扫描目录'}),
@@ -958,8 +1070,11 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,player})
       ),
 
       e(Card,{id:'sec-quality'},
-        e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中按以下顺序决定保留哪个文件：① 音质档位（按本列表顺序）优先；② 相同则选年份最早的正式专辑（合辑/精选不算首发）；③ 仍相同则本地已收藏 ≥2 首的专辑版优先于单曲版；④ 最后比较标签完整度。'}),
-        q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:4,border:'0.5px solid var(--bd-subtle)'}},
+        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
+          e('div',{style:{flex:1}},e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中按以下顺序决定保留哪个文件：① 音质档位（按本列表顺序）优先；② 相同则选年份最早的正式专辑（合辑/精选不算首发）；③ 仍相同则本地已收藏 ≥2 首的专辑版优先于单曲版；④ 最后比较标签完整度。'})),
+          e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
+        ),
+        q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<3?'var(--green)':i<6?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
           e('span',{style:{flex:1,fontSize:12,color:i<6?'var(--tx-secondary)':'var(--tx-faint)'}},f),
           i===0&&e('span',{style:{fontSize:10,padding:'1px 6px',borderRadius:3,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}},'最优'),
@@ -975,7 +1090,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,player})
       e(Card,{id:'sec-tags'},
         e(SH,{title:'重复组标签说明'}),
         TAG_LEGEND.map(tag=>e('div',{key:tag,style:{display:'flex',gap:8,padding:'7px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
-          e(MatchTag,{tag}),
+          e(MatchTag,{tag,hideTooltip:true}),
           e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
         )),
         e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:8,lineHeight:1.6,display:'flex',gap:5,alignItems:'flex-start'}},Icon('adjustments',{fontSize:12,style:{flexShrink:0,marginTop:1}}),'任意重复组中都可手动切换某个曲目的保留/删除状态，覆盖自动建议；加入白名单的文件会被完全排除在重复检测之外。')
@@ -1032,7 +1147,9 @@ function useScanStream(onDone){
     if(force){setConfirm({steps,force,label});return;}
     startStep(steps,force,label);
   }
-  return{status,logs,setLogs,confirm,setConfirm,addSeparator,startStep,tryStart};
+  function pause(){api.post('/api/scan/pause');}
+  function resume(){api.post('/api/scan/resume');}
+  return{status,logs,setLogs,confirm,setConfirm,addSeparator,startStep,tryStart,pause,resume};
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1055,24 +1172,48 @@ function App(){
     api.get('/api/settings').then(r=>{if(r.ok)setSettingsState(r.data);});
   },[]);
 
-  async function addScanDir(dir,navigate){
-    const cur=settings?.scan_dirs||[];
-    if(cur.includes(dir))return;
-    const next=[...cur,dir];
-    setSettingsState(p=>({...(p||{}),scan_dirs:next}));
-    await api.put('/api/settings',{scan_dirs:next});
-    scan.startStep(['enum','meta','fp','match'],false,'扫描目录更新');
-    if(navigate)setView('scanner');
-  }
-  async function removeScanDir(i){
-    const cur=settings?.scan_dirs||[];
-    const next=cur.filter((_,j)=>j!==i);
-    setSettingsState(p=>({...(p||{}),scan_dirs:next}));
-    await api.put('/api/settings',{scan_dirs:next});
-  }
-  function onMatchAffectingChange(){
+  // Stable identities — required for React.memo on LibraryView/DuplicatesView
+  // to actually take effect (an inline arrow prop would defeat memo on every
+  // render regardless of how stable everything else is).
+  const addScanDirNav=useCallback(dir=>{
+    setSettingsState(p=>{
+      const cur=p?.scan_dirs||[];
+      if(cur.includes(dir))return p;
+      const next=[...cur,dir];
+      api.put('/api/settings',{scan_dirs:next});
+      scan.startStep(['enum','meta','fp','match'],false,'扫描目录更新');
+      return{...(p||{}),scan_dirs:next};
+    });
+    setView('scanner');
+  },[scan]);
+  const addScanDirOnly=useCallback(dir=>{
+    setSettingsState(p=>{
+      const cur=p?.scan_dirs||[];
+      if(cur.includes(dir))return p;
+      const next=[...cur,dir];
+      api.put('/api/settings',{scan_dirs:next});
+      scan.startStep(['enum','meta','fp','match'],false,'扫描目录更新');
+      return{...(p||{}),scan_dirs:next};
+    });
+  },[scan]);
+  const removeScanDir=useCallback(i=>{
+    setSettingsState(p=>{
+      const cur=p?.scan_dirs||[];
+      const next=cur.filter((_,j)=>j!==i);
+      api.put('/api/settings',{scan_dirs:next});
+      return{...(p||{}),scan_dirs:next};
+    });
+  },[]);
+  // F8: this used to fire automatically (debounced) whenever 声纹相似度/
+  // 时长容差/音质优先级 changed — but that background re-match could still
+  // be running when the person then manually triggered a lane on the 扫描
+  // page, producing a spurious "已有扫描进行中" and confusing log output.
+  // It is now ONLY called from a manual button in SettingsView, and only
+  // re-runs the match step (existing fingerprints/scrape data are reused,
+  // nothing gets re-extracted).
+  const onMatchAffectingChange=useCallback(()=>{
     scan.startStep(['match'],false,'设置变更后重新匹配');
-  }
+  },[scan]);
 
   const TABS=[
     {id:'library',    label:'音乐库', icon:'music'},
@@ -1087,28 +1228,40 @@ function App(){
   return e('div',{style:{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden',background:'var(--bg-subtle)'}},
     e('audio',{ref:player.audioRef,...player.bind,style:{display:'none'}}),
 
-    e('header',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 24px',height:50,background:'var(--bg-base)',borderBottom:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',flexShrink:0,zIndex:10}},
-      e('div',{style:{display:'flex',alignItems:'center',gap:10}},
-        e('div',{style:{width:28,height:28,background:'linear-gradient(135deg,#FDE68A,#D97706)',borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 1px 3px rgba(217,119,6,.25)',fontSize:16}},'♫'),
+    // F9: header + nav merged into one row — brand left, nav centered, status
+    // right. A 3-column grid with equal-width outer columns keeps the nav
+    // group truly centered on the row regardless of how wide the brand/status
+    // content on either side happens to be.
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',padding:'0 24px',height:54,background:'var(--bg-base)',borderBottom:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',flexShrink:0,zIndex:10}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start'}},
+        e(Logo,{size:28}),
         e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em'}},'MusicDedup'),
-        e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v1.2')
+        e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION)
       ),
-      e('div',{style:{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--tx-faint)'}},
+      e('nav',{style:{display:'flex',gap:4,justifySelf:'center'}},
+        TABS.map(t=>e('button',{key:t.id,onClick:()=>setView(t.id),style:{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:view===t.id?'var(--amber-bg)':'none',border:'none',outline:'none',borderRadius:'var(--r-md)',transition:'all .15s'}},
+          Icon(t.icon,{fontSize:15}),t.label,
+          t.badge?e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',minWidth:16,textAlign:'center'}},t.badge):null
+        ))
+      ),
+      e('div',{style:{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--tx-faint)',justifySelf:'end',whiteSpace:'nowrap'}},
         e('span',{style:{width:7,height:7,borderRadius:'50%',background:'var(--green)',display:'inline-block',boxShadow:'0 0 0 2px #D1FAE5'}}),
         '运行中',e('span',{style:{color:'var(--bd-strong)'}},'·'),location.host
       )
     ),
-    e('nav',{style:{display:'flex',borderBottom:'0.5px solid var(--bd-default)',padding:'0 24px',background:'var(--bg-base)',flexShrink:0,gap:2}},
-      TABS.map(t=>e('button',{key:t.id,onClick:()=>setView(t.id),style:{display:'flex',alignItems:'center',gap:6,padding:'9px 14px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:'none',border:'none',outline:'none',borderBottom:view===t.id?'2px solid var(--amber)':'2px solid transparent',marginBottom:-1,transition:'all .15s'}},
-        Icon(t.icon,{fontSize:15}),t.label,
-        t.badge?e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',minWidth:16,textAlign:'center'}},t.badge):null
-      ))
-    ),
-    e('main',{style:{flex:1,overflowY:'auto',padding:20,paddingBottom:hasPB?72:20}},
-      view==='library'   &&e(LibraryView,{player,dirs,onAddDir:d=>addScanDir(d,true),onRemoveDir:removeScanDir}),
-      view==='duplicates'&&e(DuplicatesView,{setPendingCount:setPending,player}),
-      view==='scanner'   &&e(ScannerView,{scan}),
-      view==='settings'  &&e(SettingsView,{dirs,onAddDir:d=>addScanDir(d,false),onRemoveDir:removeScanDir,onMatchAffectingChange,player}),
+
+    // F7: a single max-width, centered content column — the page no longer
+    // keeps stretching its line lengths/table columns on ultra-wide screens.
+    // F1: all 4 views are kept permanently mounted (display:none when not
+    // active) instead of being unmounted by `view==='x' && ...` — switching
+    // tabs no longer re-fetches/reloads anything.
+    e('main',{style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
+      e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20,paddingBottom:hasPB?72:20}},
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir})),
+        e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite})),
+        e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))
+      )
     ),
     e(PlayerBar,{player})
   );
