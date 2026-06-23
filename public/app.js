@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.5.0';
+const APP_VERSION='1.5.1';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -246,9 +246,17 @@ function PlayerBar({player,onLocate}){
     dragging.current=true;
     const p=pctFromClient(ev.clientX);
     setHoverPct(p*100);
-    if(duration)player.seek(p*duration);
-    function onMove(e){ const p=pctFromClient(e.clientX);setHoverPct(p*100);if(duration)player.seek(p*duration); }
-    function onUp(e){ const p=pctFromClient(e.clientX);if(duration)player.seek(p*duration);dragging.current=false;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp); }
+    // DO NOT seek on mousedown or mousemove — seeking while dragging causes
+    // the audio engine to fast-forward/rewind on every pixel of mouse movement,
+    // producing rapid scrubbing noise. Seek only on mouseup (commit).
+    function onMove(e){ const p=pctFromClient(e.clientX);setHoverPct(p*100); }
+    function onUp(e){
+      const p=pctFromClient(e.clientX);
+      if(duration)player.seek(p*duration); // commit seek on mouse release only
+      dragging.current=false;
+      window.removeEventListener('mousemove',onMove);
+      window.removeEventListener('mouseup',onUp);
+    }
     window.addEventListener('mousemove',onMove);
     window.addEventListener('mouseup',onUp);
   }
@@ -520,7 +528,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef}){
   // ── Filter state ───────────────────────────────────────────────────────
   // 'all' | 'scraped' | 'dup'  — the 3 interactive stat cards
   const[libFilter,setLibFilter]=useState('all');
@@ -537,6 +545,8 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   // Smart-fill state for 刮削 filter view
   const[fillResult,setFillResult]=useState(null);
   const[fillConfirm,setFillConfirm]=useState(false); // batch confirm
+  const[singleFillTarget,setSingleFillTarget]=useState(null); // single-row apply dialog
+  const[deletingScraped,setDeletingScraped]=useState(false);
   const[scrolledToBottom,setScrolledToBottom]=useState(false);
   // Virtual / infinite-scroll state
   const PAGE=80;
@@ -544,8 +554,10 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   const[hasMore,setHasMore]=useState(false);
   const[loadingMore,setLoadingMore]=useState(false);
   // Scroll position memory — persists across tab switches
-  const containerRef=useRef(null);
+  // We DON'T own the scroll container — the <main> element in App does.
+  // mainScrollRef is passed down from App so we can listen and save/restore position.
   const savedScrollTop=useRef(0);
+  const scrollSentinelRef=useRef(null); // bottom sentinel for infinite scroll
   const searchTimer=useRef(null);
   // Per-row locator: the library renders rows with data-fileid attr so
   // the player's "locate" click can scrollIntoView the right row.
@@ -594,26 +606,55 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   }
   const SortIcon=({col})=>sort===col?e('i',{className:`ti ti-arrow-${order==='asc'?'up':'down'}`,style:{fontSize:11,marginLeft:3}}):null;
 
-  // Save/restore scroll position on tab switch
+  // Save/restore scroll position when tab becomes visible/hidden
   useEffect(()=>{
-    const el=containerRef.current;
+    const el=mainScrollRef?.current;
     if(!el)return;
+    // Restore on mount
     el.scrollTop=savedScrollTop.current;
     return()=>{ savedScrollTop.current=el?.scrollTop||0; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  // Infinite scroll listener
+  // Infinite scroll + scrolledToBottom via IntersectionObserver on a
+  // sentinel div at the bottom of the list. This works correctly regardless
+  // of which ancestor element actually scrolls — avoids the "wrong container"
+  // bug where attaching to containerRef had no effect because the element
+  // didn't scroll itself (the <main> parent did).
   useEffect(()=>{
-    const el=containerRef.current;
+    const sentinel=scrollSentinelRef.current;
+    if(!sentinel)return;
+    const obs=new IntersectionObserver(entries=>{
+      const e=entries[0];
+      if(e.isIntersecting){
+        setScrolledToBottom(true);
+        if(!loadingMore&&hasMore)loadMore();
+      } else {
+        setScrolledToBottom(false);
+      }
+    },{root:mainScrollRef?.current||null,rootMargin:'200px',threshold:0});
+    obs.observe(sentinel);
+    return()=>obs.disconnect();
+  // loadMore is recreated on every render; use its stable deps instead
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[loadingMore,hasMore,rows.length,search,sort,order,fmt,libFilter,mainScrollRef]);
+
+  // Also track scroll direction for "show header" behaviour.
+  // Show header when scrolled to top or scrolling up; collapse when scrolling down.
+  const[headerVisible,setHeaderVisible]=useState(true);
+  const lastScrollY=useRef(0);
+  useEffect(()=>{
+    const el=mainScrollRef?.current;
     if(!el)return;
     function onScroll(){
-      const dist=el.scrollHeight-el.scrollTop-el.clientHeight;
-      if(dist<120&&!loadingMore&&hasMore)loadMore();
-      setScrolledToBottom(dist<200);
+      const y=el.scrollTop;
+      if(y<80||y<lastScrollY.current-10) setHeaderVisible(true);
+      else if(y>lastScrollY.current+10) setHeaderVisible(false);
+      lastScrollY.current=y;
     }
     el.addEventListener('scroll',onScroll,{passive:true});
     return()=>el.removeEventListener('scroll',onScroll);
-  },[loadingMore,hasMore,rows.length,search,sort,order,fmt,libFilter]);
+  },[mainScrollRef]);
 
   // Expose locate function upward
   useEffect(()=>{
@@ -636,8 +677,27 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
       loadFresh();
     } else setToast({msg:r.message||r.error||'无需补全',type:'info'});
   }
-  async function applyBatchFill(){
+  async function deleteScrapedForFile(f){
+    await api.del(`/api/files/${f.id}/scraped`).catch(()=>null);
+    setSingleFillTarget(null);
+    setToast({msg:'已删除刮削数据',type:'info'});
+    loadFresh();
+    loadStats();
+  }
+  async function applyBatchFill(mode){
     setFillConfirm(false);
+    if(mode==='page'){
+      // Apply only to rows currently displayed
+      let updated=0;
+      for(const f of rows){
+        const r=await api.post(`/api/files/${f.id}/apply-scraped`);
+        if(r.ok&&r.dbUpdated)updated++;
+      }
+      setFillResult({filled:updated,exact:null,skipped:rows.length-updated,total:rows.length});
+      setToast({msg:`已更新 ${updated} 首曲目（本页）`,type:'success'});
+      loadFresh();
+      return;
+    }
     const r=await api.post('/api/library/smart-fill');
     if(r.ok){
       setFillResult({filled:r.filled,exact:r.exact,skipped:r.skipped,total:r.total});
@@ -692,18 +752,41 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 
   const fs=filterStats[libFilter]||filterStats.all;
 
-  return e('div',{className:'fade',ref:containerRef,style:{height:'100%',overflowY:'auto'}},
+  return e('div',{className:'fade'},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
-    fillConfirm&&e(ConfirmModal,{
-      title:'批量补全文件属性',
-      message:`对全库 ${s.scraped||0} 首已刮削曲目执行属性补全。精确匹配结果可覆写错误的专辑/年份；模糊匹配只填空字段。此操作会修改数据库记录（不立即写入音频文件）。`,
-      onConfirm:applyBatchFill,
+    singleFillTarget&&e('div',{style:{position:'fixed',inset:0,zIndex:900,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center'},
+      onClick:ev=>{if(ev.target===ev.currentTarget)setSingleFillTarget(null);}},
+      e('div',{className:'fade',style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:420,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.18)'}},
+        e('div',{style:{fontSize:14,fontWeight:700,marginBottom:4}},'刮削数据操作'),
+        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',marginBottom:4}},singleFillTarget.title||'—',
+          singleFillTarget.artist&&e('span',{style:{color:'var(--tx-faint)'}},' · '+singleFillTarget.artist)),
+        e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:16,lineHeight:1.6}},
+          '精确匹配可补全或覆写专辑/年份，模糊匹配只填空字段。标题/艺术家不会被覆写。'),
+        e('div',{style:{display:'flex',flexDirection:'column',gap:10}},
+          e('button',{
+            onClick:()=>applySingleFill(singleFillTarget),
+            style:{padding:'10px 14px',borderRadius:'var(--r-md)',background:'var(--amber)',color:'#fff',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,display:'flex',alignItems:'center',gap:6,justifyContent:'center'}},
+            Icon('wand',{fontSize:14,color:'#fff'}),'补全属性'),
+          e('button',{
+            onClick:()=>deleteScrapedForFile(singleFillTarget),
+            style:{padding:'10px 14px',borderRadius:'var(--r-md)',background:'var(--bg-subtle)',color:'var(--red)',border:'0.5px solid var(--bd-default)',cursor:'pointer',fontSize:12,fontWeight:500,display:'flex',alignItems:'center',gap:6,justifyContent:'center'}},
+            Icon('trash',{fontSize:14}),'删除刮削数据（认为数据不准）'),
+          e('button',{onClick:()=>setSingleFillTarget(null),style:{padding:'8px',background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--tx-faint)'}}, '取消')
+        )
+      )
+    ),
+    (fillConfirm==='page'||fillConfirm==='all')&&e(ConfirmModal,{
+      title:fillConfirm==='page'?`补全本页 ${rows.length} 首曲目`:`补全全部 ${s.scraped||0} 首已刮削曲目`,
+      message:fillConfirm==='page'
+        ?`对当前显示的 ${rows.length} 首曲目应用刮削数据。精确匹配可覆写错误专辑/年份，模糊匹配只填空字段，标题/艺术家不覆写。`
+        :`对全库所有 ${s.scraped||0} 首已刮削曲目应用补全。此操作修改数据库记录（不写入音频文件本身）。`,
+      onConfirm:()=>applyBatchFill(fillConfirm),
       onClose:()=>setFillConfirm(false),
     }),
 
-    // ── Sticky header: filter cards + search ──────────────────────────────
-    e('div',{style:{position:'sticky',top:0,zIndex:5,background:'var(--bg-subtle)',paddingBottom:10,marginBottom:0}},
+    // ── Sticky header: filter cards + search — collapses on scroll down, reveals on scroll up
+    e('div',{style:{position:'sticky',top:0,zIndex:5,background:'var(--bg-subtle)',paddingBottom:10,marginBottom:0,transition:'opacity .2s,transform .2s',opacity:headerVisible?1:0,transform:headerVisible?'translateY(0)':'translateY(-8px)',pointerEvents:headerVisible?'auto':'none'}},
 
       // Filter cards row
       e('div',{style:{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}},
@@ -715,7 +798,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
           count:s.scraped,
           sub1:`专辑 ${(s.scrapedAlbums||0).toLocaleString()} · 艺术家 ${(s.scrapedArtists||0).toLocaleString()}`,
           sub2:`占全库 ${s.total?Math.round((s.scraped||0)/s.total*100):0}%`}),
-        e(FilterCard,{id:'dup',label:'重复文件',icon:'copy',active:libFilter==='dup',onClick:()=>setLibFilter('dup'),
+        e(FilterCard,{id:'dup',label:'重复曲目',icon:'copy',active:libFilter==='dup',onClick:()=>setLibFilter('dup'),
           count:s.dupFiles,
           sub1:`重复组 ${(s.dupGroups||0).toLocaleString()} 个`,
           sub2:`占用 ${fmtBytes(s.dupTotalBytes||0)}`}),
@@ -740,26 +823,30 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
       )
     ),
 
-    // ── 已刮削 mode: batch smart-fill banner ──────────────────────────────
-    libFilter==='scraped'&&e('div',{style:{marginBottom:10,padding:'12px 16px',
+    // ── 已刮削 mode: attribute fill toolbar ─────────────────────────────────
+    libFilter==='scraped'&&e('div',{style:{marginBottom:10,padding:'10px 14px',
       background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',
-      boxShadow:'var(--sh-xs)'}},
-      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}},
-        e('div',null,
-          e('div',{style:{fontSize:13,fontWeight:600,marginBottom:3,display:'flex',alignItems:'center',gap:6}},
-            Icon('wand',{fontSize:13,color:'var(--amber)'}),'库级属性补全'),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',lineHeight:1.6}},
-            '对已刮削曲目，根据刮削数据补全或修正文件属性。逐曲可点每行末的"应用"，批量操作须滚动浏览全部曲目后才能激活。')
+      boxShadow:'var(--sh-xs)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:180}},
+        Icon('wand',{fontSize:13,color:'var(--amber)',flexShrink:0}),
+        e('span',{style:{fontSize:12,fontWeight:600,color:'var(--tx-secondary)'}},'属性补全'),
+        e('span',{
+          title:'根据刮削数据补全或修正文件属性。精确匹配可覆写错误专辑/年份；模糊匹配只填空字段；标题/艺术家不覆写。',
+          style:{cursor:'help',display:'inline-flex',alignItems:'center',color:'var(--tx-faint)'}},
+          Icon('info-circle',{fontSize:13})
         ),
-        e(Btn,{
-          icon:'checks',
-          disabled:!scrolledToBottom,
-          title:scrolledToBottom?'批量补全（已浏览全部曲目）':'请先滚动浏览全部曲目后激活',
-          onClick:()=>setFillConfirm(true),
-        },scrolledToBottom?'批量补全':'滚动到底部激活批量补全')
+        fillResult&&e('span',{style:{fontSize:10,color:'var(--tx-faint)',marginLeft:6}},
+          `上次：更新 ${fillResult.filled} 首`)
       ),
-      fillResult&&e('div',{style:{marginTop:8,fontSize:11,color:'var(--tx-secondary)'}},
-        `上次补全：更新 ${fillResult.filled} 首（精确匹配 ${fillResult.exact} 首，跳过已完整 ${fillResult.skipped} 首）`)
+      e('div',{style:{display:'flex',gap:6,flexShrink:0}},
+        e(Btn,{small:true,icon:'list-check',variant:'ghost',onClick:()=>setFillConfirm('page')},
+          `补全本页（${rows.length} 首）`),
+        e(Btn,{small:true,icon:'checks',
+          disabled:!scrolledToBottom,
+          title:scrolledToBottom?'批量补全全库已刮削曲目':'滚动到底部查看全部后激活',
+          onClick:()=>setFillConfirm('all')},
+          scrolledToBottom?`全部补全（${s.scraped||0} 首）`:'↓ 滚动到底激活全部补全')
+      )
     ),
 
     // ── Table ─────────────────────────────────────────────────────────────
@@ -801,8 +888,14 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                     Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
                 ),
                 e('td',{style:{padding:'6px 10px',maxWidth:0,overflow:'hidden'}},
-                  e('div',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500,color:'var(--tx-primary)'}},f.title||'—'),
-                  f.scraped_title&&f.scraped_title!==f.title&&e('div',{style:{fontSize:10,color:'var(--amber)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},Icon('shield-check',{marginRight:3,fontSize:10}),f.scraped_title)
+                  e('div',{style:{display:'flex',alignItems:'center',gap:5,overflow:'hidden'}},
+                    e('span',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500,color:'var(--tx-primary)',flex:'1 1 0'}},f.title||'—'),
+                    f.mb_recording_id&&e('span',{
+                      title:`刮削数据 · MusicBrainz${f.scraped_title?'\n标题: '+f.scraped_title:''}${f.scraped_artist?'\n艺术家: '+f.scraped_artist:''}${f.scraped_album?'\n专辑: '+f.scraped_album:''}${f.scrape_match_basis==='exact'?' ✓ 精确匹配':' ~ 模糊匹配'}`,
+                      style:{display:'inline-flex',alignItems:'center',flexShrink:0,cursor:'help'}},
+                      Icon('shield-check',{fontSize:12,color:f.scrape_match_basis==='exact'?'var(--green)':'var(--amber)'})
+                    )
+                  )
                 ),
                 e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0}},f.artist||'—'),
                 e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,fontSize:11}},f.album||'—'),
@@ -814,7 +907,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                     e(IconAction,{icon:'folder-open',title:'在文件管理器中显示',onClick:()=>api.post(`/api/files/${f.id}/reveal`)}),
                     e(IconAction,{icon:'info-circle',title:'查看属性',onClick:()=>setPropsId(f.id)}),
                     e(IconAction,{icon:f.whitelisted?'shield-filled':'shield-plus',title:f.whitelisted?'从白名单移除':'加入白名单',active:f.whitelisted,onClick:()=>toggleWhitelist(f)}),
-                    libFilter==='scraped'&&e(IconAction,{icon:'wand',title:'应用刮削数据补全属性',onClick:()=>applySingleFill(f)})
+                    libFilter==='scraped'&&e(IconAction,{icon:'wand',title:'应用/删除刮削',onClick:()=>setSingleFillTarget(f)})
                   )
                 )
               );
@@ -822,10 +915,10 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
           )
     ),
 
-    // Infinite-scroll sentinel / loading more indicator
-    hasMore&&e('div',{style:{textAlign:'center',padding:'14px 0',color:'var(--tx-faint)',fontSize:11}},
-      loadingMore?e('span',null,e('i',{className:'ti ti-loader spin',style:{fontSize:14,marginRight:6}}),'加载更多...')
-      :e('span',null,'↓ 继续向下滚动加载更多')
+    // Infinite-scroll bottom sentinel — IntersectionObserver watches this
+    e('div',{ref:scrollSentinelRef,style:{height:1}}),
+    loadingMore&&e('div',{style:{textAlign:'center',padding:'14px 0',color:'var(--tx-faint)',fontSize:11}},
+      e('i',{className:'ti ti-loader spin',style:{fontSize:14,marginRight:6}}),'加载更多...'
     )
   );
 });
@@ -990,6 +1083,10 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,player,queue}){
   );
 }
 
+// Session-level "don't ask again" flag for keep-toggle confirm
+// (stored outside component so it survives re-renders but resets on page reload)
+let _keepToggleSkipConfirm=false;
+
 const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}){
   const[filter,setFilter]=useState('pending');
   const[sort,setSort]=useState('savings');
@@ -997,6 +1094,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
   const[tagFilter,setTagFilter]=useState(new Set());
   const[search,setSearch]=useState('');
   const[selId,setSelId]=useState(null);
+  const[keepConfirm,setKeepConfirm]=useState(null); // {groupId,fileId,currentKeep,tracks}
   const[detail,setDetail]=useState(null);
   const[detailLoading,setDetailLoading]=useState(false);
   const[listLoading,setListLoading]=useState(true);
@@ -1054,6 +1152,14 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
   }
   async function resolveAll(){setShowBatch(false);const r=await api.post('/api/duplicates/resolve-all');if(r.ok){setToast({msg:`批量完成，删除 ${r.deletedCount} 个文件`,type:'success'});loadList();setPendingCount(0);}else setToast({msg:'失败',type:'error'});}
   async function toggleTrack(gid,fid,keep,reason){const r=await api.put(`/api/duplicates/${gid}/tracks/${fid}/keep`,{keep,reason});if(r.ok)setDetail(r.data);}
+  // Guard for keep-toggle: ensures at least one non-whitelisted keep remains,
+  // shows a confirm dialog (with "don't ask again this session" checkbox).
+  function onTrackToggle(groupId,fileId,currentKeep,tracks){
+    const nonWlKeeps=(tracks||[]).filter(t=>t.keep&&!t.whitelisted&&t.id!==fileId);
+    if(currentKeep&&nonWlKeeps.length===0)return; // would leave zero kept files — block
+    if(_keepToggleSkipConfirm){ toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动指定保留':'手动指定删除'); return; }
+    setKeepConfirm({groupId,fileId,currentKeep,tracks});
+  }
   async function handleWL(fileId,isWl,groupId){
     isWl?await api.del(`/api/whitelist/${fileId}`):await api.post(`/api/whitelist/${fileId}`);
     const r=await api.get('/api/duplicates/'+groupId);
@@ -1071,6 +1177,23 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
   const GH='calc(100vh - 260px)';
 
   return e('div',{className:'fade'},
+    keepConfirm&&e('div',{style:{position:'fixed',inset:0,zIndex:900,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center'},
+      onClick:ev=>{if(ev.target===ev.currentTarget)setKeepConfirm(null);}},
+      e('div',{className:'fade',style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:380,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.18)'}},
+        e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},keepConfirm.currentKeep?'标记为删除？':'标记为保留？'),
+        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:16}},
+          keepConfirm.currentKeep?'将此曲目标记为「删除」。智能决策保留的其他曲目不受影响。':'将此曲目也标记为「保留」。同组可以同时有多首保留曲目。'
+        ),
+        e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'var(--tx-faint)',marginBottom:18,cursor:'pointer'}},
+          e('input',{type:'checkbox',onChange:ev=>{_keepToggleSkipConfirm=ev.target.checked;}}),
+          '本次打开不再提示'
+        ),
+        e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{variant:'ghost',onClick:()=>setKeepConfirm(null)},'取消'),
+          e(Btn,{onClick:()=>{const{groupId,fileId,currentKeep}=keepConfirm;setKeepConfirm(null);toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动指定保留':'手动指定删除');}},keepConfirm.currentKeep?'确认删除':'确认保留')
+        )
+      )
+    ),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
@@ -1161,8 +1284,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
 
             (detail.tracks||[]).map(t=>e(TrackRow,{key:t.id,track:t,player,
               queue:(detail.tracks||[]).filter(x=>x.fingerprint).map(x=>({id:x.id,title:x.title,artist:x.artist,src:'duplicates',groupId:detail.id})),
-              onToggle:()=>toggleTrack(detail.id,t.id,!t.keep,!t.keep?'手动指定保留':'手动指定删除'),
-              canToggle:!detail.resolved&&!(t.keep&&(detail.tracks||[]).filter(x=>x.keep&&!x.whitelisted).length<=1),
+              onToggle:()=>onTrackToggle(detail.id,t.id,t.keep,detail.tracks||[]),
+              canToggle:!detail.resolved,
               onWhitelist:()=>handleWL(t.id,!!t.whitelisted,detail.id),
               onProps:()=>setPropsId(t.id),
             })),
@@ -1379,25 +1502,21 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(Card,{id:'sec-scrape'},
-        e(SH,{title:'刮削匹配',sub:'向 MusicBrainz 查询精确的文件属性，用于重复判定与属性补全',hint:'刮削的主要目的：① 精确匹配 — 根据文件属性（标题/艺术家/专辑/时长等）查找对应的 MusicBrainz 录音和发行版；两个文件被独立刮削到同一录音（精确匹配）即视为重复确认。② 属性补全 — 对有把握的精确匹配，填补缺失的专辑名/年份/曲目号；对模糊匹配只填缺失字段，不覆写已有内容。刮削数据按原始文本存储，不做繁简转换。'}),
+        e(SH,{title:'刮削匹配',sub:'向 MusicBrainz 查询精确的文件属性，用于重复判定与属性补全',hint:'刮削的主要目的：① 精确匹配 — 根据文件属性（标题/艺术家/专辑/时长等）查找对应的 MusicBrainz 录音和发行版；两个文件被独立刮削到同一录音（精确匹配）即视为重复确认。② 属性补全 — 已移至「音乐库 → 已刮削」，可逐曲或批量操作，刮削数据按原始文本存储，不做繁简转换。'}),
         e('div',{style:{marginBottom:10}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:4}},Icon('world',{marginRight:5,fontSize:13}),'MusicBrainz'),
           e('div',{style:{fontSize:11,color:'var(--tx-faint)',padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
             Icon('check',{color:'var(--green)',marginRight:5}),'默认启用，无需配置，按文件属性精确匹配；属性极度不完整时退回标题模糊搜索。速率限制 1 次/秒。'
           )
         ),
-        e('div',{style:{marginBottom:12}},
+        e('div',null,
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:4}},Icon('key',{marginRight:5,fontSize:13}),'AcoustID API Key'),
           e('input',{value:s.acoustid_key||'',onChange:ev=>setS(p=>({...p,acoustid_key:ev.target.value})),placeholder:'在 acoustid.biz 注册获取免费 API Key',style:{width:'100%',fontSize:11,padding:'7px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后会优先用声纹指纹匹配 MusicBrainz 录音，比纯文本搜索更准确')
-        ),
-        e('div',{style:{borderTop:'0.5px solid var(--bd-subtle)',paddingTop:12}},
-          e('div',{style:{fontSize:12,fontWeight:600,marginBottom:4,display:'flex',alignItems:'center',gap:6}},'库级属性补全',e(Hint,{text:'对全库所有已刮削的曲目，按精度规则补全文件属性中的缺失字段（如专辑名、年份），精确匹配时还可覆写明显错误的字段（如路人盘/合辑中的专辑名）。限制：只填或覆写 album/year/track；标题和艺术家从不被覆写——这两个字段填错后的后果难以确认，不自动处理。'})),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:8,lineHeight:1.6}},'范围：全库（含未出现在重复组中的曲目），不只是重复组内的文件。'),
-          e(Btn,{icon:'wand',onClick:async()=>{
-            const r=await api.post('/api/library/smart-fill');
-            alert(r.ok?`已更新 ${r.filled} 首曲目（精确匹配 ${r.exact} 首，跳过 ${r.skipped} 首已完整）`:`失败: ${r.error||'unknown'}`);
-          }},'对全库执行属性补全')
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后会优先用声纹指纹匹配 MusicBrainz 录音，比纯文本搜索更准确'),
+          e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:8,padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)',display:'flex',alignItems:'center',gap:6}},
+            Icon('arrow-right',{fontSize:11}),
+            '属性补全功能已移至「音乐库 → 已刮削」，可逐曲查看并应用或删除刮削数据。'
+          )
         )
       ),
 
@@ -1568,6 +1687,7 @@ function App(){
 
   // Ref for the locate-in-library scroll function set by LibraryView
   const locateInLibraryRef=useRef(null);
+  const mainScrollRef=useRef(null); // ref to the <main> scroll container, shared with LibraryView
   // Called when user clicks the info panel in PlayerBar
   const handleLocate=useCallback(track=>{
     if(!track)return;
@@ -1603,9 +1723,9 @@ function App(){
 
     // Main content — max-width centred column. Views are permanently mounted
     // (display:none when inactive) so tab switches don't re-fetch anything.
-    e('main',{style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
+    e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}}})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
         e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))

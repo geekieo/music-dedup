@@ -172,6 +172,12 @@ app.get('/api/files/:id/scraped', (req,res)=>{
   const sm = getScrapedMeta(db,+req.params.id);
   res.json({ok:true, data:sm||null});
 });
+app.delete('/api/files/:id/scraped', (req,res)=>{
+  try {
+    db.run('DELETE FROM scraped_meta WHERE file_id=?',[+req.params.id]);
+    res.json({ok:true});
+  } catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
 
 // Library-wide smart-fill: walks every file with usable 刮削数据 and fills/
 // corrects 文件属性 per the same trust rules as the single-file apply button
