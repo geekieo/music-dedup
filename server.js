@@ -10,7 +10,7 @@ import {
   getDB, statsQuery, getGroups, getGroupDetail, resolveGroup,
   setTrackKeep, getAllSettings, getSetting, setSetting,
   addWhitelist, removeWhitelist, getWhitelist, getFileById,
-  queryLibrary, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
+  queryLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runMatcher } from './lib/matcher.js';
@@ -98,8 +98,12 @@ app.post('/api/browse-folder', async(_,res)=>{
 
 // ── Library ───────────────────────────────────────────────────────────────
 app.get('/api/library', (req,res)=>{
-  const { search='', sort='title', order='asc', page=1, limit=100, format='' } = req.query;
-  try { res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format}) }); }
+  const { search='', sort='title', order='asc', page=1, limit=100, format='', libFilter='all' } = req.query;
+  try { res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format,libFilter}) }); }
+  catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+app.get('/api/library/stats', (_,res)=>{
+  try{ res.json({ok:true,data:libraryStats(db)}); }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 
