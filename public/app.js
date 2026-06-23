@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.4.0';
+const APP_VERSION='1.5.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -103,6 +103,11 @@ const ICONS={
   diamond:{els:[['path',{d:'M12 3l5 5-5 13-5-13z'}]]},
   'git-merge':{els:[['path',{d:'M6 8.2V15.8'}],['path',{d:'M6 12c0 3.3 2.7 6 6 6h3.8'}],['circle',{cx:6,cy:6,r:2.2}],['circle',{cx:18,cy:18,r:2.2}],['circle',{cx:6,cy:18,r:2.2}]]},
   dots:{fill:1,els:[['circle',{cx:5,cy:12,r:1.6}],['circle',{cx:12,cy:12,r:1.6}],['circle',{cx:19,cy:12,r:1.6}]]},
+  // Volume / speaker icons
+  'volume':     {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M19.07 4.93a10 10 0 010 14.14'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
+  'volume-2':   {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
+  'volume-off': {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M23 9l-6 6'}],['path',{d:'M17 9l6 6'}]]},
+  wand:{els:[['path',{d:'M4 20L20 4'}],['path',{d:'M7 4l1.5 1.5L7 7'}],['path',{d:'M17 14l1.5 1.5-1.5 1.5'}],['path',{d:'M4 4l.5.5'}],['path',{d:'M20 20l-.5-.5'}]]},
 };
 function Icon(name,style={},className){
   const spec=ICONS[name];
@@ -203,98 +208,161 @@ function useGlobalPlayer(){
     playTrack,toggle,seek,close,playNext,playPrev,bind,lite,
   };
 }
-/* ── PlayerBar ─────────────────────────────────────────────────────────
-   Layout (item 1+2):
-   - The bar is NOT position:fixed. It's in normal flow at the bottom of the
-     flex column, so it pushes the scrollable main area up by exactly its
-     own height — no overlap, no extra padding needed anywhere.
-   - A "progress rail" sits ABOVE the bar border (between bar and content)
-     so the seek target is clearly separated from the transport controls.
-   - Left: album art thumbnail (fetched lazily per track) + title/artist,
-     clickable to jump to the originating page and highlight the row.
-   - Centre: prev / play/pause / next.
-   - Right: volume icon that reveals a slider on hover.
-   ──────────────────────────────────────────────────────────────────── */
+/* PlayerBar — fixed layout:
+   - Progress rail with global pointer-capture so drag never breaks
+     when the mouse leaves the rail area.
+   - Play controls absolutely centred in the viewport (position:absolute
+     + left/right:0 + margin:auto), NOT flexed against the side panels,
+     so they stay centred regardless of how wide/narrow the side panels are.
+   - Time tooltip: shows as a rounded pill ABOVE the thumb on hover/drag.
+   - Volume: icon always visible; slider expands on hover.
+   - Duplicate-group extra padding fix: the bar is in normal flow (no
+     position:fixed), so it already pushes content up; the <main>
+     element has no extra paddingBottom.
+*/
 function PlayerBar({player,onLocate}){
   if(!player.current)return null;
   const{current,playing,progress,duration,volume,setVolume}=player;
   const hasQueue=player.lite.hasQueue;
   const pct=duration?Math.min(100,progress/duration*100):0;
 
-  // Drag-to-seek: track mousedown+mousemove across the progress rail.
+  // ── Global-pointer-capture drag ─────────────────────────────────────────
+  // We attach mousemove/mouseup to the WINDOW during a drag so the seek
+  // continues even when the mouse moves outside the rail element. This is
+  // the only reliable cross-browser way to avoid "deactivation on mouse-leave".
   const railRef=useRef(null);
   const dragging=useRef(false);
-  function seekFromEvent(ev){
-    if(!duration||!railRef.current)return;
+  const[hovered,setHovered]=useState(false);
+  const[hoverPct,setHoverPct]=useState(0);
+  const active=hovered||dragging.current;
+
+  function pctFromClient(clientX){
+    if(!railRef.current)return 0;
     const r=railRef.current.getBoundingClientRect();
-    player.seek(Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))*duration);
+    return Math.max(0,Math.min(1,(clientX-r.left)/r.width));
   }
+  function onRailMouseDown(ev){
+    ev.preventDefault();
+    dragging.current=true;
+    const p=pctFromClient(ev.clientX);
+    setHoverPct(p*100);
+    if(duration)player.seek(p*duration);
+    function onMove(e){ const p=pctFromClient(e.clientX);setHoverPct(p*100);if(duration)player.seek(p*duration); }
+    function onUp(e){ const p=pctFromClient(e.clientX);if(duration)player.seek(p*duration);dragging.current=false;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp); }
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onUp);
+  }
+  function onRailMouseMove(ev){ setHoverPct(pctFromClient(ev.clientX)*100); }
+
+  // Time tooltip content: always shows "current / total"
+  const timeLabel=`${fmtDur(progress)} / ${fmtDur(duration)}`;
+  // Thumb position (clamp 0.5%–99.5% so tooltip/thumb never clips the edge)
+  const thumbPct=Math.max(0.5,Math.min(99.5,active?hoverPct:pct));
 
   return e('div',{className:'fade',style:{flexShrink:0,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -1px 8px rgba(0,0,0,.06)',zIndex:10}},
 
-    // ── Progress rail (above bar, item 2) ────────────────────────────────
+    // ── Progress rail ───────────────────────────────────────────────────────
     e('div',{
       ref:railRef,
-      style:{height:4,background:'var(--bg-muted)',cursor:'pointer',position:'relative'},
-      onMouseDown:ev=>{dragging.current=true;seekFromEvent(ev);},
-      onMouseMove:ev=>{if(dragging.current)seekFromEvent(ev);},
-      onMouseUp:ev=>{if(dragging.current){seekFromEvent(ev);dragging.current=false;}},
-      onMouseLeave:()=>{dragging.current=false;},
+      style:{position:'relative',cursor:'pointer',userSelect:'none',
+        height:active?8:4,background:active?'var(--bg-muted)':'var(--bd-subtle)',
+        transition:'height .12s ease, background .12s ease',
+        boxShadow:active?'0 0 0 3px rgba(217,119,6,.10)':'none',
+      },
+      onMouseDown:onRailMouseDown,
+      onMouseMove:onRailMouseMove,
+      onMouseEnter:ev=>{setHovered(true);setHoverPct(pctFromClient(ev.clientX)*100);},
+      onMouseLeave:()=>setHovered(false),
     },
-      // Track fill
-      e('div',{style:{position:'absolute',left:0,top:0,height:'100%',width:pct+'%',background:'var(--amber)',transition:dragging.current?'none':'width .15s'}}),
-      // Draggable thumb — always rendered but only visible when hovered or dragging
-      e('div',{style:{position:'absolute',top:'50%',left:pct+'%',transform:'translate(-50%,-50%)',width:12,height:12,borderRadius:'50%',background:'var(--amber)',boxShadow:'0 0 0 3px rgba(217,119,6,.25)',opacity:pct>0?1:0,transition:'opacity .15s',pointerEvents:'none'}})
+      // Fill
+      e('div',{style:{position:'absolute',left:0,top:0,height:'100%',
+        width:(active?hoverPct:pct)+'%',background:'var(--amber)',
+        transition:dragging.current?'none':'width .15s'}}),
+      // Thumb + time tooltip
+      active&&e('div',{style:{position:'absolute',top:'50%',left:thumbPct+'%',
+        transform:'translate(-50%,-50%)',pointerEvents:'none',zIndex:2}},
+        // Time tooltip pill above thumb
+        e('div',{style:{position:'absolute',bottom:'calc(100% + 6px)',left:'50%',transform:'translateX(-50%)',
+          background:'rgba(17,24,39,.85)',color:'#fff',fontSize:10,fontFamily:'var(--font-mono)',
+          padding:'3px 8px',borderRadius:99,whiteSpace:'nowrap',pointerEvents:'none',
+          boxShadow:'0 2px 8px rgba(0,0,0,.25)'}},timeLabel),
+        // Thumb circle
+        e('div',{style:{width:14,height:14,borderRadius:'50%',background:'var(--amber)',
+          boxShadow:'0 0 0 3px rgba(217,119,6,.3), 0 2px 6px rgba(217,119,6,.5)',
+          transition:'transform .1s',transform:'scale(1)'}})
+      )
     ),
 
-    // ── Transport bar ─────────────────────────────────────────────────────
-    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',height:58}},
-      e('div',{style:{display:'flex',alignItems:'center',gap:14,width:'100%',maxWidth:'var(--max-width)'}},
+    // ── Transport bar ───────────────────────────────────────────────────────
+    e('div',{style:{position:'relative',height:58,padding:'0 20px'}},
 
-        // Left: cover art + track info
-        e('div',{
-          onClick:()=>onLocate&&onLocate(current),
-          title:'定位到歌曲',
-          style:{display:'flex',alignItems:'center',gap:10,flex:'0 0 auto',maxWidth:'30%',cursor:'pointer',overflow:'hidden'},
-        },
-          e('div',{style:{width:38,height:38,borderRadius:'var(--r-md)',overflow:'hidden',flexShrink:0,background:'var(--bg-muted)',display:'flex',alignItems:'center',justifyContent:'center'}},
-            current.cover
-              ?e('img',{src:current.cover,style:{width:'100%',height:'100%',objectFit:'cover'}})
-              :Icon('music',{fontSize:18,color:'var(--tx-faint)'})
+      // Left: cover art + track info — absolute-positioned so it doesn't affect
+      // centering of the play controls.
+      e('div',{
+        onClick:()=>onLocate&&onLocate(current),
+        title:'定位到歌曲',
+        style:{position:'absolute',left:20,top:0,bottom:0,display:'flex',alignItems:'center',
+          gap:10,maxWidth:'calc(50% - 80px)',cursor:'pointer',overflow:'hidden'},
+      },
+        e('div',{style:{width:38,height:38,borderRadius:'var(--r-md)',overflow:'hidden',flexShrink:0,
+          background:'var(--bg-muted)',display:'flex',alignItems:'center',justifyContent:'center'}},
+          current.cover
+            ?e('img',{src:current.cover,style:{width:'100%',height:'100%',objectFit:'cover'}})
+            :Icon('music',{fontSize:18,color:'var(--tx-faint)'})
+        ),
+        e('div',{style:{overflow:'hidden',minWidth:0}},
+          e('div',{style:{fontSize:12,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',
+            whiteSpace:'nowrap',color:'var(--tx-primary)'}},current.title||'—'),
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',
+            whiteSpace:'nowrap'}},current.artist||'')
+        )
+      ),
+
+      // Centre controls — absolutely centred in the bar regardless of side
+      // panel widths, using left:0+right:0+margin:auto+width:fit-content.
+      e('div',{style:{position:'absolute',left:0,right:0,top:0,bottom:0,
+        display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}},
+        e('div',{style:{display:'flex',alignItems:'center',gap:6,pointerEvents:'auto'}},
+          e('button',{onClick:player.playPrev,disabled:!hasQueue,title:'上一曲',
+            style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',
+              opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},
+            Icon('chevron-left',{fontSize:20})),
+          e('button',{onClick:player.toggle,
+            style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:38,height:38,
+              display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,
+              boxShadow:'0 2px 8px rgba(217,119,6,.4)'}},
+            Icon(playing?'pause':'play',{fontSize:17,color:'#fff'})),
+          e('button',{onClick:player.playNext,disabled:!hasQueue,title:'下一曲',
+            style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',
+              opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},
+            Icon('chevron-right',{fontSize:20}))
+        )
+      ),
+
+      // Right: volume control — absolute-positioned mirroring the left panel.
+      e('div',{style:{position:'absolute',right:20,top:0,bottom:0,display:'flex',
+        alignItems:'center',gap:4}},
+        // Volume button always shows the speaker icon; slider expands on hover.
+        e('div',{className:'volume-ctl',style:{display:'flex',alignItems:'center',gap:4}},
+          e('button',{onClick:()=>setVolume(volume===0?0.8:0),title:volume===0?'取消静音':'静音',
+            style:{background:'none',border:'none',cursor:'pointer',display:'flex',
+              alignItems:'center',color:'var(--tx-muted)',padding:'4px 2px',flexShrink:0}},
+            Icon(volume===0?'volume-off':volume<0.5?'volume-2':'volume',{fontSize:18})
           ),
-          e('div',{style:{overflow:'hidden'}},
-            e('div',{style:{fontSize:12,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--tx-primary)'}},current.title||'—'),
-            e('div',{style:{fontSize:11,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},current.artist||'')
+          e('div',{className:'volume-slider-wrap'},
+            e('input',{type:'range',min:0,max:1,step:0.01,value:volume,
+              onChange:ev=>setVolume(+ev.target.value),style:{width:72}})
           )
         ),
-
-        // Centre: prev / play / next
-        e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:1,justifyContent:'center'}},
-          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32,textAlign:'right'}},fmtDur(progress)),
-          e('button',{onClick:player.playPrev,disabled:!hasQueue,title:'上一曲',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},Icon('chevron-left',{fontSize:18})),
-          e('button',{onClick:player.toggle,style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,boxShadow:'0 2px 6px rgba(217,119,6,.35)'}},
-            Icon(playing?'pause':'play',{fontSize:16,color:'#fff'})
-          ),
-          e('button',{onClick:player.playNext,disabled:!hasQueue,title:'下一曲',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},Icon('chevron-right',{fontSize:18})),
-          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32}},fmtDur(duration))
-        ),
-
-        // Right: volume (hover to reveal slider)
-        e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:'0 0 auto',justifyContent:'flex-end',maxWidth:'30%'}},
-          e('div',{className:'volume-ctl',style:{display:'flex',alignItems:'center',gap:6,padding:'4px 8px',borderRadius:'var(--r-md)',position:'relative'}},
-            e('button',{onClick:()=>setVolume(volume===0?0.7:0),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:2,display:'flex'}},
-              Icon(volume===0?'volume-off':volume<0.5?'volume-2':'volume',{fontSize:16})
-            ),
-            e('div',{className:'volume-slider-wrap'},
-              e('input',{type:'range',min:0,max:1,step:0.01,value:volume,onChange:ev=>setVolume(+ev.target.value),style:{width:72}})
-            )
-          ),
-          e('button',{onClick:player.close,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4,display:'flex',borderRadius:'50%'}},Icon('x',{fontSize:14}))
-        )
+        e('button',{onClick:player.close,title:'关闭播放器',
+          style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',
+            padding:4,display:'flex',borderRadius:'50%',marginLeft:2}},
+          Icon('x',{fontSize:14}))
       )
     )
   );
 }
+
 
 /* ── Shared UI ────────────────────────────────────────────────────────── */
 function QBadge({format:fmt,bitrate:br,sample_rate:sr}){
@@ -445,21 +513,20 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
         Icon(browsing?'loader':'folder-open',{fontSize:12,color:'var(--tx-muted)'},browsing?'spin':undefined),'选择文件夹')
     ),
     err&&e('div',{style:{fontSize:11,color:'var(--red)',marginBottom:6}},err),
-    onEnumOnly&&e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-      e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:onEnumOnly},'更新音乐库'),
-      e('span',{style:{fontSize:10,color:'var(--tx-faint)'}},'枚举文件树，不做声纹/刮削')
-    )
+    onEnumOnly&&e('div',{style:{display:'none'}}) // button removed — caller decides when to show banner
   );
 }
 
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly}){
-  const[stats,setStats]=useState(null);
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate}){
+  // ── Filter state ───────────────────────────────────────────────────────
+  // 'all' | 'scraped' | 'dup'  — the 3 interactive stat cards
+  const[libFilter,setLibFilter]=useState('all');
+  const[stats,setStats]=useState(null);         // from /api/library/stats
   const[rows,setRows]=useState([]);
   const[total,setTotal]=useState(0);
-  const[page,setPage]=useState(1);
   const[search,setSearch]=useState('');
   const[sort,setSort]=useState('title');
   const[order,setOrder]=useState('asc');
@@ -467,37 +534,120 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   const[loading,setLoading]=useState(false);
   const[propsId,setPropsId]=useState(null);
   const[toast,setToast]=useState(null);
+  // Smart-fill state for 刮削 filter view
+  const[fillResult,setFillResult]=useState(null);
+  const[fillConfirm,setFillConfirm]=useState(false); // batch confirm
+  const[scrolledToBottom,setScrolledToBottom]=useState(false);
+  // Virtual / infinite-scroll state
+  const PAGE=80;
+  const[page,setPage]=useState(1);
+  const[hasMore,setHasMore]=useState(false);
+  const[loadingMore,setLoadingMore]=useState(false);
+  // Scroll position memory — persists across tab switches
+  const containerRef=useRef(null);
+  const savedScrollTop=useRef(0);
   const searchTimer=useRef(null);
-  const LIMIT=100;
+  // Per-row locator: the library renders rows with data-fileid attr so
+  // the player's "locate" click can scrollIntoView the right row.
+  const rowRefs=useRef({});
 
-  function loadStats(){api.get('/api/stats').then(r=>{if(r.ok)setStats(r.data);});}
+  function loadStats(){
+    api.get('/api/library/stats').then(r=>{if(r.ok)setStats(r.data);});
+  }
   useEffect(()=>{loadStats();},[]);
 
-  function load(p=page,s=search,st=sort,o=order,f=fmt){
-    setLoading(true);
-    api.get(`/api/library?page=${p}&limit=${LIMIT}&search=${encodeURIComponent(s)}&sort=${st}&order=${o}&format=${f}`)
-      .then(r=>{if(r.ok){setRows(r.data.rows||[]);setTotal(r.data.total||0);}}).finally(()=>setLoading(false));
+  function buildUrl(p,s,st,o,f,lf){
+    return `/api/library?page=${p}&limit=${PAGE}&search=${encodeURIComponent(s)}&sort=${st}&order=${o}&format=${f}&libFilter=${lf}`;
   }
-  useEffect(()=>{load();loadStats();},[page,sort,order,fmt]);
-  function onSearch(v){setSearch(v);clearTimeout(searchTimer.current);searchTimer.current=setTimeout(()=>{setPage(1);load(1,v);},(500));}
 
-  function toggleSort(col){if(sort===col){setOrder(o=>o==='asc'?'desc':'asc');}else{setSort(col);setOrder('asc');}setPage(1);}
+  function loadFresh(s=search,st=sort,o=order,f=fmt,lf=libFilter){
+    setLoading(true);setRows([]);setPage(1);setHasMore(false);setScrolledToBottom(false);
+    api.get(buildUrl(1,s,st,o,f,lf)).then(r=>{
+      if(!r.ok)return;
+      const d=r.data;
+      setRows(d.rows||[]);setTotal(d.total||0);
+      setHasMore((d.rows||[]).length<(d.total||0));
+    }).finally(()=>{setLoading(false);loadStats();});
+  }
+  useEffect(()=>{loadFresh();},[sort,order,fmt,libFilter]);
+
+  function loadMore(){
+    if(loadingMore||!hasMore)return;
+    const nextPage=page+1;
+    setLoadingMore(true);
+    api.get(buildUrl(nextPage,search,sort,order,fmt,libFilter)).then(r=>{
+      if(!r.ok)return;
+      const d=r.data;
+      setRows(prev=>[...prev,...(d.rows||[])]);
+      setHasMore(rows.length+(d.rows||[]).length<(d.total||0));
+      setPage(nextPage);
+    }).finally(()=>setLoadingMore(false));
+  }
+
+  function onSearch(v){
+    setSearch(v);clearTimeout(searchTimer.current);
+    searchTimer.current=setTimeout(()=>loadFresh(v),400);
+  }
+  function toggleSort(col){
+    const newOrder=sort===col&&order==='asc'?'desc':'asc';
+    setSort(col);setOrder(newOrder);
+  }
   const SortIcon=({col})=>sort===col?e('i',{className:`ti ti-arrow-${order==='asc'?'up':'down'}`,style:{fontSize:11,marginLeft:3}}):null;
 
-  const totalPages=Math.ceil(total/LIMIT);
-  // Playable queue for prev/next — every fingerprinted row on the current page,
-  // in the order shown, so 上一首/下一首 cycles through what's on screen.
-  const playableQueue=useMemo(()=>rows.filter(r=>r.fingerprint).map(r=>({id:r.id,title:r.title,artist:r.artist})),[rows]);
+  // Save/restore scroll position on tab switch
+  useEffect(()=>{
+    const el=containerRef.current;
+    if(!el)return;
+    el.scrollTop=savedScrollTop.current;
+    return()=>{ savedScrollTop.current=el?.scrollTop||0; };
+  },[]);
+
+  // Infinite scroll listener
+  useEffect(()=>{
+    const el=containerRef.current;
+    if(!el)return;
+    function onScroll(){
+      const dist=el.scrollHeight-el.scrollTop-el.clientHeight;
+      if(dist<120&&!loadingMore&&hasMore)loadMore();
+      setScrolledToBottom(dist<200);
+    }
+    el.addEventListener('scroll',onScroll,{passive:true});
+    return()=>el.removeEventListener('scroll',onScroll);
+  },[loadingMore,hasMore,rows.length,search,sort,order,fmt,libFilter]);
+
+  // Expose locate function upward
+  useEffect(()=>{
+    if(onLocate)onLocate.setLocateInLibrary?.(fid=>{
+      const el=rowRefs.current[fid];
+      if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
+    });
+  },[onLocate]);
 
   async function toggleWhitelist(f){
-    if(f.whitelisted){await api.del(`/api/whitelist/${f.id}`);}else{await api.post(`/api/whitelist/${f.id}`);}
-    load();setToast({msg:f.whitelisted?'已从白名单移除':'已加入白名单',type:'success'});
+    if(f.whitelisted)await api.del(`/api/whitelist/${f.id}`);
+    else await api.post(`/api/whitelist/${f.id}`);
+    loadFresh();setToast({msg:f.whitelisted?'已从白名单移除':'已加入白名单',type:'success'});
   }
 
-  // F4: library is empty — surface the shared scan-directory editor directly
-  // instead of just telling the user to go find Settings. Adding a dir here
-  // auto-starts the scan (see App.addScanDir).
-  if(!loading&&total===0&&(!search&&!fmt)&&stats&&stats.total===0){
+  async function applySingleFill(f){
+    const r=await api.post(`/api/files/${f.id}/apply-scraped`);
+    if(r.ok&&r.dbUpdated){
+      setToast({msg:`已补全: ${Object.keys(r.filled||{}).join('、')||'已是最新'}`,type:'success'});
+      loadFresh();
+    } else setToast({msg:r.message||r.error||'无需补全',type:'info'});
+  }
+  async function applyBatchFill(){
+    setFillConfirm(false);
+    const r=await api.post('/api/library/smart-fill');
+    if(r.ok){
+      setFillResult({filled:r.filled,exact:r.exact,skipped:r.skipped,total:r.total});
+      setToast({msg:`已更新 ${r.filled} 首曲目`,type:'success'});
+      loadFresh();
+    } else setToast({msg:'失败: '+(r.error||'unknown'),type:'error'});
+  }
+
+  // ── Library empty state ────────────────────────────────────────────────
+  if(!loading&&total===0&&(!search&&!fmt&&libFilter==='all')&&stats&&(stats.total||0)===0){
     return e('div',{className:'fade',style:{maxWidth:480,margin:'40px auto'}},
       toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
       e('div',{style:{textAlign:'center',marginBottom:18}},
@@ -509,84 +659,178 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
     );
   }
 
-  return e('div',{className:'fade'},
+  // ── Stats helpers ──────────────────────────────────────────────────────
+  const s=stats||{};
+  // Per-filter derived stats to display in the active card
+  const filterStats={
+    all:   {count:s.total||0,   albums:s.albums||0,   artists:s.artists||0,   bytes:s.totalBytes||0},
+    scraped:{count:s.scraped||0, albums:s.scrapedAlbums||0, artists:s.scrapedArtists||0, bytes:null},
+    dup:   {count:s.dupFiles||0, albums:s.dupAlbums||0,   artists:s.dupArtists||0,   bytes:s.dupTotalBytes||0},
+  };
+
+  // ── Interactive filter cards ────────────────────────────────────────────
+  function FilterCard({id,label,icon,count,sub1,sub2,active,onClick}){
+    return e('button',{onClick,style:{
+      flex:1,minWidth:140,padding:'14px 16px',borderRadius:'var(--r-lg)',textAlign:'left',
+      background:active?'var(--amber-bg)':'var(--bg-base)',
+      border:`1px solid ${active?'var(--amber)':'var(--bd-default)'}`,
+      cursor:'pointer',transition:'all .15s',boxShadow:active?'0 0 0 2px rgba(217,119,6,.15)':'var(--sh-xs)',
+    }},
+      e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8}},
+        e('div',{style:{width:32,height:32,borderRadius:'var(--r-md)',background:active?'var(--amber)':'var(--bg-muted)',
+          display:'flex',alignItems:'center',justifyContent:'center',transition:'background .15s'}},
+          Icon(icon,{fontSize:15,color:active?'#fff':'var(--tx-faint)'})
+        ),
+        e('span',{style:{fontSize:12,fontWeight:600,color:active?'#92400E':'var(--tx-secondary)'}},' '+label)
+      ),
+      e('div',{style:{fontSize:22,fontWeight:700,fontFamily:'var(--font-mono)',color:active?'var(--amber)':'var(--tx-primary)',letterSpacing:'-.02em',lineHeight:1}},
+        count===null?'—':(count||0).toLocaleString()),
+      e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:5,lineHeight:1.6}},sub1||''),
+      sub2&&e('div',{style:{fontSize:10,color:'var(--tx-faint)',lineHeight:1.6}},sub2||'')
+    );
+  }
+
+  const fs=filterStats[libFilter]||filterStats.all;
+
+  return e('div',{className:'fade',ref:containerRef,style:{height:'100%',overflowY:'auto'}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
+    fillConfirm&&e(ConfirmModal,{
+      title:'批量补全文件属性',
+      message:`对全库 ${s.scraped||0} 首已刮削曲目执行属性补全。精确匹配结果可覆写错误的专辑/年份；模糊匹配只填空字段。此操作会修改数据库记录（不立即写入音频文件）。`,
+      onConfirm:applyBatchFill,
+      onClose:()=>setFillConfirm(false),
+    }),
 
-    // Stats bar
-    stats&&stats.total>0&&e('div',{style:{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}},
-      e(SC,{label:'总曲目',val:fmtN(stats.total),sub:fmtBytes(stats.totalBytes)}),
-      e(SC,{label:'专辑',val:fmtN(stats.albums)}),
-      e(SC,{label:'艺术家',val:fmtN(stats.artists)}),
-      e(SC,{label:'已提取声纹',val:fmtN(stats.withFP),col:stats.withFP===stats.total?'var(--green)':'var(--amber)'}),
-      stats.dupGroups>0&&e(SC,{label:'重复组',val:fmtN(stats.dupGroups),col:'var(--red)',sub:fmtBytes(stats.dupBytes)+' 可释放'}),
-    ),
+    // ── Sticky header: filter cards + search ──────────────────────────────
+    e('div',{style:{position:'sticky',top:0,zIndex:5,background:'var(--bg-subtle)',paddingBottom:10,marginBottom:0}},
 
-    // Search + filter bar
-    e('div',{style:{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap',alignItems:'center'}},
-      e('div',{style:{position:'relative',flex:1,minWidth:200}},
-        Icon('search',{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--tx-faint)',pointerEvents:'none'}),
-        e('input',{value:search,onChange:ev=>onSearch(ev.target.value),placeholder:'搜索标题、艺术家、专辑...',style:{width:'100%',paddingLeft:32,paddingRight:10,paddingTop:7,paddingBottom:7,borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontSize:12}})
+      // Filter cards row
+      e('div',{style:{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}},
+        e(FilterCard,{id:'all',label:'全部曲目',icon:'music',active:libFilter==='all',onClick:()=>setLibFilter('all'),
+          count:s.total,
+          sub1:`专辑 ${(s.albums||0).toLocaleString()} · 艺术家 ${(s.artists||0).toLocaleString()}`,
+          sub2:fmtBytes(s.totalBytes)}),
+        e(FilterCard,{id:'scraped',label:'已刮削',icon:'cloud-download',active:libFilter==='scraped',onClick:()=>setLibFilter('scraped'),
+          count:s.scraped,
+          sub1:`专辑 ${(s.scrapedAlbums||0).toLocaleString()} · 艺术家 ${(s.scrapedArtists||0).toLocaleString()}`,
+          sub2:`占全库 ${s.total?Math.round((s.scraped||0)/s.total*100):0}%`}),
+        e(FilterCard,{id:'dup',label:'重复文件',icon:'copy',active:libFilter==='dup',onClick:()=>setLibFilter('dup'),
+          count:s.dupFiles,
+          sub1:`重复组 ${(s.dupGroups||0).toLocaleString()} 个`,
+          sub2:`占用 ${fmtBytes(s.dupTotalBytes||0)}`}),
       ),
-      e('select',{value:fmt,onChange:ev=>{setFmt(ev.target.value);setPage(1);},style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
-        e('option',{value:''},'全部格式'),
-        ...['FLAC','MP3','M4A','OGG','WAV','AIFF'].map(f=>e('option',{key:f,value:f},f))
-      ),
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',whiteSpace:'nowrap'}},`${fmtN(total)} 首`)
-    ),
 
-    e('div',{style:{borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)'}},
-      loading&&rows.length===0?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:28}})):
-      total===0?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)',lineHeight:2}},Icon('music-off',{fontSize:32,display:'block',margin:'0 auto 8px'}),'未找到匹配的曲目'):
-      e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
-        e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)',position:'sticky',top:0,zIndex:2}},
-          ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['时长','56px'],['大小','64px'],['操作','108px']].map(([h,w])=>
-            e('th',{key:h,onClick:h&&['标题','艺术家','专辑','格式','时长','大小'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]):undefined,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',width:w||undefined,cursor:h?'pointer':undefined,userSelect:'none',whiteSpace:'nowrap'}},
-              h,['标题','艺术家','专辑','格式','时长','大小'].includes(h)&&e(SortIcon,{col:{标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]})
-            )
-          )
-        )),
-        e('tbody',null,rows.map(f=>{
-          const isCur=player.current?.id===f.id;
-          return e('tr',{key:f.id,style:{borderBottom:'0.5px solid var(--bd-subtle)',background:f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',transition:'background .1s'},onMouseEnter:ev=>ev.currentTarget.style.background=isCur?'var(--amber-bg)':f.whitelisted?'#ECEEF0':'var(--bg-subtle)',onMouseLeave:ev=>ev.currentTarget.style.background=f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent'},
-          e('td',{style:{padding:'6px 8px',width:36}},
-            f.fingerprint&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist},playableQueue),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
-          ),
-          e('td',{style:{padding:'6px 10px',maxWidth:0,overflow:'hidden'}},
-            e('div',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500,color:'var(--tx-primary)'}},f.title||'—'),
-            f.scraped_title&&f.scraped_title!==f.title&&e('div',{style:{fontSize:10,color:'var(--amber)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},Icon('shield-check',{marginRight:3,fontSize:10}),f.scraped_title)
-          ),
-          e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0}},f.artist||'—'),
-          e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,fontSize:11}},f.album||'—'),
-          e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
-          e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'nowrap'}},fmtDur(f.duration)),
-          e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'nowrap'}},fmtBytes(f.size)),
-          // F3: icon-only, colored, bigger action buttons — no text labels
-          e('td',{style:{padding:'4px 8px'}},
-            e('div',{style:{display:'flex',gap:4}},
-              e(IconAction,{icon:'folder-open',title:'在文件管理器中显示',onClick:()=>api.post(`/api/files/${f.id}/reveal`)}),
-              e(IconAction,{icon:'info-circle',title:'查看属性',onClick:()=>setPropsId(f.id)}),
-              e(IconAction,{icon:f.whitelisted?'shield-filled':'shield-plus',title:f.whitelisted?'从白名单移除':'加入白名单',active:f.whitelisted,onClick:()=>toggleWhitelist(f)})
-            )
-          )
-        );}))
+      // Search + format filter
+      e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
+        e('div',{style:{position:'relative',flex:1,minWidth:200}},
+          Icon('search',{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--tx-faint)',pointerEvents:'none'}),
+          e('input',{value:search,onChange:ev=>onSearch(ev.target.value),placeholder:'搜索标题、艺术家、专辑...',
+            style:{width:'100%',paddingLeft:32,paddingRight:10,paddingTop:7,paddingBottom:7,
+              borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',
+              boxShadow:'var(--sh-xs)',outline:'none',fontSize:12}})
+        ),
+        e('select',{value:fmt,onChange:ev=>{setFmt(ev.target.value);},
+          style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
+            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
+          e('option',{value:''},'全部格式'),
+          ...['FLAC','MP3','M4A','OGG','WAV','AIFF'].map(f=>e('option',{key:f,value:f},f))
+        ),
+        e('span',{style:{fontSize:11,color:'var(--tx-faint)',whiteSpace:'nowrap'}},`显示 ${rows.length} / ${total.toLocaleString()} 首`)
       )
     ),
 
-    // Pagination
-    totalPages>1&&e('div',{style:{display:'flex',gap:4,justifyContent:'center',alignItems:'center',marginTop:10,flexWrap:'wrap'}},
-      e(Btn,{small:true,variant:'ghost',disabled:page<=1,icon:'chevron-left',onClick:()=>setPage(p=>p-1)},''),
-      ...[...Array(Math.min(totalPages,7))].map((_,i)=>{
-        let p;if(totalPages<=7)p=i+1;else if(page<=4)p=i+1;else if(page>=totalPages-3)p=totalPages-6+i;else p=page-3+i;
-        if(p<1||p>totalPages)return null;
-        return e('button',{key:p,onClick:()=>setPage(p),style:{padding:'4px 10px',borderRadius:'var(--r-sm)',border:`0.5px solid ${p===page?'var(--amber)':'var(--bd-default)'}`,background:p===page?'var(--amber)':'var(--bg-base)',color:p===page?'#fff':'var(--tx-secondary)',cursor:'pointer',fontSize:11,fontWeight:p===page?600:400}},p);
-      }),
-      e(Btn,{small:true,variant:'ghost',disabled:page>=totalPages,icon:'chevron-right',onClick:()=>setPage(p=>p+1)},'')
+    // ── 已刮削 mode: batch smart-fill banner ──────────────────────────────
+    libFilter==='scraped'&&e('div',{style:{marginBottom:10,padding:'12px 16px',
+      background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',
+      boxShadow:'var(--sh-xs)'}},
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}},
+        e('div',null,
+          e('div',{style:{fontSize:13,fontWeight:600,marginBottom:3,display:'flex',alignItems:'center',gap:6}},
+            Icon('wand',{fontSize:13,color:'var(--amber)'}),'库级属性补全'),
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',lineHeight:1.6}},
+            '对已刮削曲目，根据刮削数据补全或修正文件属性。逐曲可点每行末的"应用"，批量操作须滚动浏览全部曲目后才能激活。')
+        ),
+        e(Btn,{
+          icon:'checks',
+          disabled:!scrolledToBottom,
+          title:scrolledToBottom?'批量补全（已浏览全部曲目）':'请先滚动浏览全部曲目后激活',
+          onClick:()=>setFillConfirm(true),
+        },scrolledToBottom?'批量补全':'滚动到底部激活批量补全')
+      ),
+      fillResult&&e('div',{style:{marginTop:8,fontSize:11,color:'var(--tx-secondary)'}},
+        `上次补全：更新 ${fillResult.filled} 首（精确匹配 ${fillResult.exact} 首，跳过已完整 ${fillResult.skipped} 首）`)
+    ),
+
+    // ── Table ─────────────────────────────────────────────────────────────
+    e('div',{style:{borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)',marginTop:0}},
+      loading&&rows.length===0
+        ?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:28}}))
+        :total===0
+          ?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)',lineHeight:2}},
+            Icon('music-off',{fontSize:32,display:'block',margin:'0 auto 8px'}),'未找到匹配的曲目')
+          :e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+            e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)',position:'sticky',top:0,zIndex:2}},
+              ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['时长','56px'],['大小','64px'],['操作',libFilter==='scraped'?'136px':'108px']].map(([h,w])=>
+                e('th',{key:h,
+                  onClick:['标题','艺术家','专辑','格式','时长','大小'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]):undefined,
+                  style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',
+                    width:w||undefined,cursor:h?'pointer':undefined,userSelect:'none',whiteSpace:'nowrap'}},
+                  h,['标题','艺术家','专辑','格式','时长','大小'].includes(h)&&e(SortIcon,{col:{标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]})
+                )
+              )
+            )),
+            e('tbody',null,rows.map((f,idx)=>{
+              const isCur=player.current?.id===f.id;
+              const playableQueue=rows.filter(r=>r.fingerprint).map(r=>({id:r.id,title:r.title,artist:r.artist,src:'library',rowIdx:idx}));
+              return e('tr',{
+                key:f.id,
+                ref:el=>{if(el)rowRefs.current[f.id]=el;},
+                'data-fileid':f.id,
+                style:{borderBottom:'0.5px solid var(--bd-subtle)',
+                  background:f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
+                  transition:'background .1s'},
+                onMouseEnter:ev=>ev.currentTarget.style.background=isCur?'var(--amber-bg)':f.whitelisted?'#ECEEF0':'var(--bg-subtle)',
+                onMouseLeave:ev=>ev.currentTarget.style.background=f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
+              },
+                e('td',{style:{padding:'6px 8px',width:36}},
+                  f.fingerprint&&e('button',{
+                    onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'library',rowIdx:idx},playableQueue),
+                    style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,
+                      display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
+                    Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+                ),
+                e('td',{style:{padding:'6px 10px',maxWidth:0,overflow:'hidden'}},
+                  e('div',{style:{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500,color:'var(--tx-primary)'}},f.title||'—'),
+                  f.scraped_title&&f.scraped_title!==f.title&&e('div',{style:{fontSize:10,color:'var(--amber)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},Icon('shield-check',{marginRight:3,fontSize:10}),f.scraped_title)
+                ),
+                e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0}},f.artist||'—'),
+                e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:0,fontSize:11}},f.album||'—'),
+                e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
+                e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'nowrap'}},fmtDur(f.duration)),
+                e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:11,whiteSpace:'nowrap'}},fmtBytes(f.size)),
+                e('td',{style:{padding:'4px 8px'}},
+                  e('div',{style:{display:'flex',gap:4}},
+                    e(IconAction,{icon:'folder-open',title:'在文件管理器中显示',onClick:()=>api.post(`/api/files/${f.id}/reveal`)}),
+                    e(IconAction,{icon:'info-circle',title:'查看属性',onClick:()=>setPropsId(f.id)}),
+                    e(IconAction,{icon:f.whitelisted?'shield-filled':'shield-plus',title:f.whitelisted?'从白名单移除':'加入白名单',active:f.whitelisted,onClick:()=>toggleWhitelist(f)}),
+                    libFilter==='scraped'&&e(IconAction,{icon:'wand',title:'应用刮削数据补全属性',onClick:()=>applySingleFill(f)})
+                  )
+                )
+              );
+            }))
+          )
+    ),
+
+    // Infinite-scroll sentinel / loading more indicator
+    hasMore&&e('div',{style:{textAlign:'center',padding:'14px 0',color:'var(--tx-faint)',fontSize:11}},
+      loadingMore?e('span',null,e('i',{className:'ti ti-loader spin',style:{fontSize:14,marginRight:6}}),'加载更多...')
+      :e('span',null,'↓ 继续向下滚动加载更多')
     )
   );
 });
 
-/* ══════════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════════════
    SCANNER VIEW — F5: simplified to 3 auto lanes (basic/fp/scrape), each
    bundles its own prerequisites (enum/meta) and always finishes with a
    global match — no more standalone "文件枚举" / "相似度匹配" buttons.
@@ -696,7 +940,9 @@ function ScannerView({scan}){
         e('div',{style:{display:'flex',alignItems:'center',gap:6}},Icon('terminal-2',{fontSize:13,color:'var(--tx-faint)'}),e('span',{style:{fontSize:11,fontWeight:500,color:'var(--tx-muted)'}},'运行日志')),
         e('button',{onClick:()=>setLogs([]),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4}},Icon('trash',{fontSize:12}),'清空')
       ),
-      e('div',{ref:logRef,style:{padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,height:200,overflowY:'auto'}},
+      e('div',{ref:logRef,style:{padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,
+        height:'calc(100vh - 520px)',minHeight:180,maxHeight:'calc(100vh - 300px)',
+        overflowY:'auto'}},
         logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始... 历史日志在此渐进显示，执行新步骤时不会清空'),
         logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),l.msg))),
         status.running&&e('span',{className:'blink',style:{color:'var(--amber)'}},'█')
@@ -714,7 +960,7 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,player,queue}){
   const bd=wl?'var(--bd-default)':keep?'var(--green-bd)':'var(--red-bd)';
   return e('div',{style:{marginBottom:8,borderRadius:'var(--r-md)',border:`1px solid ${bd}`,background:wl?'var(--bg-muted)':keep?'var(--green-bg)':'var(--red-bg)',overflow:'hidden'}},
     e('div',{style:{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px'}},
-      player&&e('button',{onClick:()=>player.playTrack({id:track.id,title:track.title,artist:track.artist},queue),title:'试听',style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,marginTop:1}},
+      player&&e('button',{onClick:()=>player.playTrack({id:track.id,title:track.title,artist:track.artist,src:queue?.[0]?.src||'library',groupId:queue?.[0]?.groupId},queue),title:'试听',style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,marginTop:1}},
         Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'})
       ),
       e('button',{onClick:canToggle&&!wl?onToggle:undefined,title:wl?'已加入白名单':canToggle?(keep?'切换为删除':'切换为保留'):'至少保留一个',style:{background:'none',border:'none',padding:0,flexShrink:0,cursor:canToggle&&!wl?'pointer':'default',marginTop:2}},
@@ -816,7 +1062,11 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
   }
 
   const pending=groups.filter(g=>!g.resolved);
-  const savings=pending.reduce((a,g)=>a+(g.savings_bytes||0),0);
+  // BUG FIX: compute savings from the VISIBLE (filtered) pending groups,
+  // not from all pending groups — so the count/bytes update when the user
+  // applies a tag or search filter (previously showed unfiltered total always).
+  const visiblePending=visibleGroups.filter(g=>!g.resolved);
+  const savings=visiblePending.reduce((a,g)=>a+(g.savings_bytes||0),0);
 
   const GH='calc(100vh - 260px)';
 
@@ -850,14 +1100,14 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
           e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索曲名、艺术家...',style:{width:160,paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontSize:11}})
         )
       ),
-      filter!=='done'&&pending.length>0&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
-        e('span',{style:{fontSize:11,color:'var(--tx-faint)'}},`${visibleGroups.filter(g=>!g.resolved).length} 组 · ${fmtBytes(savings)}`),
+      filter!=='done'&&visiblePending.length>0&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
+        e('span',{style:{fontSize:11,color:'var(--tx-faint)'}},`${visiblePending.length} 组 · ${fmtBytes(savings)}`),
         e(Btn,{onClick:()=>setShowBatch(true),icon:'checks',small:true},'批量确认全部')
       )
     ),
 
     showBatch&&e('div',{className:'fade',style:{background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}},
-      e('div',{style:{flex:1}},e('div',{style:{fontSize:13,fontWeight:600,color:'#92400E',marginBottom:3}},'确认批量操作'),e('div',{style:{fontSize:12,color:'#A16207'}},'处理 ',e('b',null,pending.length),' 个重复组，释放约 ',e('b',null,fmtBytes(savings)),'，文件移入回收站。')),
+      e('div',{style:{flex:1}},e('div',{style:{fontSize:13,fontWeight:600,color:'#92400E',marginBottom:3}},'确认批量操作'),e('div',{style:{fontSize:12,color:'#A16207'}},'处理 ',e('b',null,visiblePending.length),' 个重复组，释放约 ',e('b',null,fmtBytes(savings)),'，文件移入回收站。')),
       e('div',{style:{display:'flex',gap:8}},e(Btn,{onClick:resolveAll,icon:'check'},'确认'),e(Btn,{variant:'ghost',onClick:()=>setShowBatch(false),icon:'x'},'取消'))
     ),
 
@@ -910,7 +1160,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
             ),
 
             (detail.tracks||[]).map(t=>e(TrackRow,{key:t.id,track:t,player,
-              queue:(detail.tracks||[]).filter(x=>x.fingerprint).map(x=>({id:x.id,title:x.title,artist:x.artist})),
+              queue:(detail.tracks||[]).filter(x=>x.fingerprint).map(x=>({id:x.id,title:x.title,artist:x.artist,src:'duplicates',groupId:detail.id})),
               onToggle:()=>toggleTrack(detail.id,t.id,!t.keep,!t.keep?'手动指定保留':'手动指定删除'),
               canToggle:!detail.resolved&&!(t.keep&&(detail.tracks||[]).filter(x=>x.keep&&!x.whitelisted).length<=1),
               onWhitelist:()=>handleWL(t.id,!!t.whitelisted,detail.id),
@@ -989,7 +1239,7 @@ function WhitelistSection({player}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onMatchAffectingChange,scanRunning,player}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -1078,6 +1328,12 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onMatchAffectingChan
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
         e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'声纹相似度 / 时长容差 / 音质优先级 已修改，尚未重新应用到现有重复组'),
         e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配')
+      ),
+
+      dirChanged&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',marginBottom:2}},
+        Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
+        e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'音乐目录已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）'),
+        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:onEnumOnly},scanRunning?'扫描进行中...':'立即更新音乐库')
       ),
 
       e(Card,{id:'sec-dirs'},
@@ -1268,8 +1524,7 @@ function App(){
       if(cur.includes(dir))return p;
       const next=[...cur,dir];
       api.put('/api/settings',{scan_dirs:next});
-      scan.startStep(['enum','meta','fp','match'],false,'扫描目录更新');
-      return{...(p||{}),scan_dirs:next};
+      return{...(p||{}),scan_dirs:next,_dirChanged:true};
     });
   },[scan]);
   const removeScanDir=useCallback(i=>{
@@ -1311,12 +1566,20 @@ function App(){
       .catch(()=>{ cur.cover=null; });
   },[player.current?.id]);
 
-  // Jump to the originating tab+row when the user clicks the left info area
-  // of PlayerBar (item 2).
+  // Ref for the locate-in-library scroll function set by LibraryView
+  const locateInLibraryRef=useRef(null);
+  // Called when user clicks the info panel in PlayerBar
   const handleLocate=useCallback(track=>{
     if(!track)return;
-    if(track.groupId){ setView('duplicates'); return; }
+    if(track.src==='duplicates'||track.groupId){
+      setView('duplicates');
+      return;
+    }
+    // Library: switch to library tab and scroll to the row
     setView('library');
+    if(track.id&&locateInLibraryRef.current){
+      setTimeout(()=>locateInLibraryRef.current?.(track.id),120);
+    }
   },[]);
 
   return e('div',{style:{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden',background:'var(--bg-subtle)'}},
@@ -1342,10 +1605,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');}})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}}})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,onEnumOnly:()=>scan.startStep(['enum'],false,'音乐库更新'),onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
