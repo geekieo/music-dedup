@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.3.0';
+const APP_VERSION='1.4.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -203,34 +203,95 @@ function useGlobalPlayer(){
     playTrack,toggle,seek,close,playNext,playPrev,bind,lite,
   };
 }
-function PlayerBar({player}){
+/* ── PlayerBar ─────────────────────────────────────────────────────────
+   Layout (item 1+2):
+   - The bar is NOT position:fixed. It's in normal flow at the bottom of the
+     flex column, so it pushes the scrollable main area up by exactly its
+     own height — no overlap, no extra padding needed anywhere.
+   - A "progress rail" sits ABOVE the bar border (between bar and content)
+     so the seek target is clearly separated from the transport controls.
+   - Left: album art thumbnail (fetched lazily per track) + title/artist,
+     clickable to jump to the originating page and highlight the row.
+   - Centre: prev / play/pause / next.
+   - Right: volume icon that reveals a slider on hover.
+   ──────────────────────────────────────────────────────────────────── */
+function PlayerBar({player,onLocate}){
   if(!player.current)return null;
   const{current,playing,progress,duration,volume,setVolume}=player;
   const hasQueue=player.lite.hasQueue;
-  return e('div',{className:'fade',style:{position:'fixed',left:0,right:0,bottom:0,zIndex:200,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -2px 10px rgba(0,0,0,.06)',padding:'9px 20px',display:'flex',justifyContent:'center'}},
-    e('div',{style:{display:'flex',alignItems:'center',gap:14,width:'100%',maxWidth:'var(--max-width)'}},
-      e('div',{style:{display:'flex',alignItems:'center',gap:2,flexShrink:0}},
-        e('button',{onClick:player.playPrev,disabled:!hasQueue,title:'上一首',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-muted)',padding:5,display:'flex'}},Icon('chevron-left',{fontSize:16})),
-        e('button',{onClick:player.toggle,style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:32,height:32,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}},
-          Icon(playing?'pause':'play',{fontSize:14,color:'#fff'})
-        ),
-        e('button',{onClick:player.playNext,disabled:!hasQueue,title:'下一首',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-muted)',padding:5,display:'flex'}},Icon('chevron-right',{fontSize:16}))
-      ),
-      e('div',{style:{flex:1,minWidth:0}},
-        e('div',{style:{fontSize:12,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:4}},current.title||'—',current.artist&&e('span',{style:{color:'var(--tx-faint)',fontWeight:400}},'  ·  '+current.artist)),
-        e('div',{style:{display:'flex',alignItems:'center',gap:8}},
-          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32}},fmtDur(progress)),
-          e('div',{style:{flex:1,height:4,background:'var(--bg-muted)',borderRadius:99,cursor:'pointer',overflow:'hidden'},onClick:ev=>{if(!duration)return;const r=ev.currentTarget.getBoundingClientRect();player.seek(((ev.clientX-r.left)/r.width)*duration);}},
-            e('div',{style:{width:(duration?progress/duration*100:0)+'%',height:'100%',background:'var(--amber)',borderRadius:99,transition:'width .3s'}})
+  const pct=duration?Math.min(100,progress/duration*100):0;
+
+  // Drag-to-seek: track mousedown+mousemove across the progress rail.
+  const railRef=useRef(null);
+  const dragging=useRef(false);
+  function seekFromEvent(ev){
+    if(!duration||!railRef.current)return;
+    const r=railRef.current.getBoundingClientRect();
+    player.seek(Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))*duration);
+  }
+
+  return e('div',{className:'fade',style:{flexShrink:0,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -1px 8px rgba(0,0,0,.06)',zIndex:10}},
+
+    // ── Progress rail (above bar, item 2) ────────────────────────────────
+    e('div',{
+      ref:railRef,
+      style:{height:4,background:'var(--bg-muted)',cursor:'pointer',position:'relative'},
+      onMouseDown:ev=>{dragging.current=true;seekFromEvent(ev);},
+      onMouseMove:ev=>{if(dragging.current)seekFromEvent(ev);},
+      onMouseUp:ev=>{if(dragging.current){seekFromEvent(ev);dragging.current=false;}},
+      onMouseLeave:()=>{dragging.current=false;},
+    },
+      // Track fill
+      e('div',{style:{position:'absolute',left:0,top:0,height:'100%',width:pct+'%',background:'var(--amber)',transition:dragging.current?'none':'width .15s'}}),
+      // Draggable thumb — always rendered but only visible when hovered or dragging
+      e('div',{style:{position:'absolute',top:'50%',left:pct+'%',transform:'translate(-50%,-50%)',width:12,height:12,borderRadius:'50%',background:'var(--amber)',boxShadow:'0 0 0 3px rgba(217,119,6,.25)',opacity:pct>0?1:0,transition:'opacity .15s',pointerEvents:'none'}})
+    ),
+
+    // ── Transport bar ─────────────────────────────────────────────────────
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',padding:'0 20px',height:58}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:14,width:'100%',maxWidth:'var(--max-width)'}},
+
+        // Left: cover art + track info
+        e('div',{
+          onClick:()=>onLocate&&onLocate(current),
+          title:'定位到歌曲',
+          style:{display:'flex',alignItems:'center',gap:10,flex:'0 0 auto',maxWidth:'30%',cursor:'pointer',overflow:'hidden'},
+        },
+          e('div',{style:{width:38,height:38,borderRadius:'var(--r-md)',overflow:'hidden',flexShrink:0,background:'var(--bg-muted)',display:'flex',alignItems:'center',justifyContent:'center'}},
+            current.cover
+              ?e('img',{src:current.cover,style:{width:'100%',height:'100%',objectFit:'cover'}})
+              :Icon('music',{fontSize:18,color:'var(--tx-faint)'})
           ),
-          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32,textAlign:'right'}},fmtDur(duration))
+          e('div',{style:{overflow:'hidden'}},
+            e('div',{style:{fontSize:12,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--tx-primary)'}},current.title||'—'),
+            e('div',{style:{fontSize:11,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},current.artist||'')
+          )
+        ),
+
+        // Centre: prev / play / next
+        e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:1,justifyContent:'center'}},
+          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32,textAlign:'right'}},fmtDur(progress)),
+          e('button',{onClick:player.playPrev,disabled:!hasQueue,title:'上一曲',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},Icon('chevron-left',{fontSize:18})),
+          e('button',{onClick:player.toggle,style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,boxShadow:'0 2px 6px rgba(217,119,6,.35)'}},
+            Icon(playing?'pause':'play',{fontSize:16,color:'#fff'})
+          ),
+          e('button',{onClick:player.playNext,disabled:!hasQueue,title:'下一曲',style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},Icon('chevron-right',{fontSize:18})),
+          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:32}},fmtDur(duration))
+        ),
+
+        // Right: volume (hover to reveal slider)
+        e('div',{style:{display:'flex',alignItems:'center',gap:6,flex:'0 0 auto',justifyContent:'flex-end',maxWidth:'30%'}},
+          e('div',{className:'volume-ctl',style:{display:'flex',alignItems:'center',gap:6,padding:'4px 8px',borderRadius:'var(--r-md)',position:'relative'}},
+            e('button',{onClick:()=>setVolume(volume===0?0.7:0),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:2,display:'flex'}},
+              Icon(volume===0?'volume-off':volume<0.5?'volume-2':'volume',{fontSize:16})
+            ),
+            e('div',{className:'volume-slider-wrap'},
+              e('input',{type:'range',min:0,max:1,step:0.01,value:volume,onChange:ev=>setVolume(+ev.target.value),style:{width:72}})
+            )
+          ),
+          e('button',{onClick:player.close,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4,display:'flex',borderRadius:'50%'}},Icon('x',{fontSize:14}))
         )
-      ),
-      e('div',{style:{display:'flex',alignItems:'center',gap:6,flexShrink:0,width:96}},
-        Icon(volume===0?'music-off':'music',{fontSize:13,color:'var(--tx-faint)'}),
-        e('input',{type:'range',min:0,max:1,step:0.01,value:volume,onChange:ev=>setVolume(+ev.target.value),style:{width:64}})
-      ),
-      e('button',{onClick:player.close,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+      )
     )
   );
 }
@@ -346,48 +407,55 @@ function PropsModal({fileId,onClose}){
 // not two copies that can drift — and adding a dir here kicks off a scan
 // immediately, since that's obviously what someone wants right after typing
 // a path in.
-function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,compact}){
+// ScanDirsEditor — item 7: manual path + browse-button on ONE row; blur or
+// Enter on the manual field saves immediately (no separate Add button for the
+// text). Browse button sits inside the right end of the same line. After any
+// dir change the default action is only an enumeration pass (no meta/fp/scrape)
+// so the library stays fast to update; a separate "智能执行" shortcut lets the
+// user trigger a fuller scan without going to the 扫描 page.
+function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
   const[newDir,setNewDir]=useState('');
   const[browsing,setBrowsing]=useState(false);
-  const[showManual,setShowManual]=useState(false);
   const[err,setErr]=useState('');
-  function add(){if(!newDir.trim())return;onAddDir(newDir.trim());setNewDir('');}
+  function commit(){if(!newDir.trim())return;onAddDir(newDir.trim());setNewDir('');}
   async function browse(){
     setErr('');setBrowsing(true);
     try{
       const r=await api.post('/api/browse-folder');
       if(r.ok&&r.path)onAddDir(r.path);
-      else if(r.ok&&!r.path){ /* user cancelled the dialog — no error */ }
-      else setErr('未能打开系统文件夹选择器，请使用下方手动输入');
-    }catch{ setErr('未能打开系统文件夹选择器，请使用下方手动输入'); }
+      else if(!r.ok)setErr('未能打开系统文件夹选择器');
+    }catch{ setErr('未能打开系统文件夹选择器'); }
     finally{ setBrowsing(false); }
   }
+  const inputStyle={flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',fontFamily:'var(--font-mono)',outline:'none',borderRight:'none',borderTopRightRadius:0,borderBottomRightRadius:0};
+  const browseStyle={padding:'6px 12px',background:'var(--bg-muted)',border:'0.5px solid var(--bd-default)',borderLeft:'none',borderRadius:0,borderTopRightRadius:'var(--r-md)',borderBottomRightRadius:'var(--r-md)',cursor:browsing?'wait':'pointer',fontSize:11,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,flexShrink:0};
   return e('div',null,
-    dirs.length===0&&e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:compact?'2px 0 10px':'4px 0 8px',display:'flex',gap:5,alignItems:'center',justifyContent:compact?'center':'flex-start'}},Icon('info-circle',{}),'暂未配置扫描目录'),
+    dirs.length===0&&e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:'4px 0 8px',display:'flex',gap:5,alignItems:'center'}},Icon('info-circle',{}),'暂未配置音乐目录'),
     dirs.map((d,i)=>e('div',{key:i,style:{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)',marginBottom:6}},
       Icon('folder-filled',{fontSize:13,color:'var(--amber)',flexShrink:0}),
       e('span',{title:d,style:{flex:1,fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},d),
       e('button',{onClick:()=>onRemoveDir(i),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:'2px 4px',borderRadius:'var(--r-sm)'}},Icon('x',{fontSize:13}))
     )),
-    e('div',{style:{display:'flex',gap:6,justifyContent:compact?'center':'flex-start'}},
-      e(Btn,{onClick:browse,disabled:browsing,icon:browsing?'loader':'folder-open'},browsing?'等待选择...':'添加文件夹')
+    e('div',{style:{display:'flex',borderRadius:'var(--r-md)',overflow:'hidden',marginBottom:6}},
+      e('input',{value:newDir,onChange:ev=>setNewDir(ev.target.value),
+        onKeyDown:ev=>ev.key==='Enter'&&commit(),
+        onBlur:commit,
+        placeholder:'/Volumes/Music 或 D:\\Music',style:inputStyle}),
+      e('button',{onClick:browse,disabled:browsing,style:browseStyle},
+        Icon(browsing?'loader':'folder-open',{fontSize:12,color:'var(--tx-muted)'},browsing?'spin':undefined),'选择文件夹')
     ),
-    err&&e('div',{style:{fontSize:11,color:'var(--red)',marginTop:6}},err),
-    e('button',{onClick:()=>setShowManual(v=>!v),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,padding:0,marginTop:8}},
-      e('i',{className:`ti ti-chevron-${showManual?'up':'down'}`,style:{fontSize:11}}),'手动输入路径'
-    ),
-    showManual&&e('div',{style:{display:'flex',gap:6,marginTop:6}},
-      e('input',{value:newDir,onChange:ev=>setNewDir(ev.target.value),onKeyDown:ev=>ev.key==='Enter'&&add(),placeholder:'/Volumes/Music 或 D:\\Music',style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',fontFamily:'var(--font-mono)',outline:'none'}}),
-      e(Btn,{onClick:add,small:true,variant:'ghost',icon:'plus'},'添加')
-    ),
-    dirs.length===0&&e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:6,lineHeight:1.6,textAlign:compact?'center':'left'}},'添加后会自动开始扫描这个目录下的音乐文件')
+    err&&e('div',{style:{fontSize:11,color:'var(--red)',marginBottom:6}},err),
+    onEnumOnly&&e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+      e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:onEnumOnly},'更新音乐库'),
+      e('span',{style:{fontSize:10,color:'var(--tx-faint)'}},'枚举文件树，不做声纹/刮削')
+    )
   );
 }
 
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly}){
   const[stats,setStats]=useState(null);
   const[rows,setRows]=useState([]);
   const[total,setTotal]=useState(0);
@@ -437,7 +505,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
         e('div',{style:{fontSize:15,fontWeight:600,color:'var(--tx-primary)',marginTop:10}},'音乐库还是空的'),
         e('div',{style:{fontSize:12,color:'var(--tx-faint)',marginTop:4}},'添加一个目录，立即开始扫描')
       ),
-      e(Card,null,e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir,compact:true}))
+      e(Card,null,e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir,onEnumOnly,compact:true}))
     );
   }
 
@@ -527,7 +595,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
    switches — see useScanStream().
    ══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
-  basic:  {label:'基础匹配',  sub:'元数据',  desc:'枚举音频文件、读取标题/艺术家/时长等标签，并据此比对重复——这是最可靠的判定依据，不依赖声纹。',icon:'tag',          steps:['enum','meta','match']},
+  basic:  {label:'基础匹配',  sub:'文件属性',  desc:'枚举音频文件，读取文件属性（标题/艺术家/专辑/时长等）并据此比对重复——这是最可靠的判定依据，不依赖声纹。',icon:'tag',          steps:['enum','meta','match']},
   fp:     {label:'声纹匹配',  sub:'',        desc:'计算频谱指纹，作为声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['enum','meta','fp','match']},
   scrape: {label:'刮削匹配',  sub:'',        desc:'从 MusicBrainz（及可选的 AcoustID）查询第三方录音信息，两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['enum','meta','scrape','match']},
 };
@@ -593,7 +661,7 @@ function ScannerView({scan}){
     // Full pipeline control
     e(Card,{style:{marginBottom:12}},
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
-        e('div',null,e('div',{style:{fontSize:13,fontWeight:600,marginBottom:2,display:'flex',alignItems:'center'}},'智能执行全部',e(Hint,{text:'依次执行枚举 → 元数据 → 声纹 → 刮削 → 匹配，按文件修改时间与是否存在自动跳过未变更/已删除的文件。'})),
+        e('div',null,e('div',{style:{fontSize:13,fontWeight:600,marginBottom:2,display:'flex',alignItems:'center'}},'智能执行全部',e(Hint,{text:'依次执行枚举 → 文件属性 → 声纹 → 刮削 → 匹配，按文件修改时间与是否存在自动跳过未变更/已删除的文件。'})),
         e('div',{style:{fontSize:11,color:'var(--tx-faint)'}},'三条匹配通道一次性全部完成')),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
           e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
@@ -614,7 +682,7 @@ function ScannerView({scan}){
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
         e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
           status.paused&&Icon('pause',{fontSize:12,color:'var(--amber)'}),
-          status.paused?'已暂停':({idle:'就绪',enum:'文件枚举',meta:'元数据提取',fp:'声纹提取',matching:'相似度匹配',scrape:'元数据刮削',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
+          status.paused?'已暂停':({idle:'就绪',enum:'文件枚举',meta:'文件属性提取',fp:'声纹提取',matching:'相似度匹配',scrape:'元数据刮削',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
         ),
         e('span',{style:{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--amber)'}},(status.pct||0)+'%')
       ),
@@ -870,7 +938,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player}
    reapply banner — it only re-runs matching, never re-extracts fp/scrape.
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
-  {id:'sec-dirs',    label:'扫描目录',   icon:'folders'},
+  {id:'sec-dirs',    label:'音乐目录',   icon:'folders'},
   {id:'sec-basic',   label:'基础匹配',   icon:'tag'},
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
@@ -921,7 +989,7 @@ function WhitelistSection({player}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,scanRunning,player}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onMatchAffectingChange,scanRunning,player}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -1013,8 +1081,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,scanRunn
       ),
 
       e(Card,{id:'sec-dirs'},
-        e(SH,{title:'扫描目录'}),
-        e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir}),
+        e(SH,{title:'音乐目录',sub:'添加包含音乐文件的文件夹到音乐库'}),
+        e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir,onEnumOnly}),
         e('button',{onClick:()=>setShowExclude(v=>!v),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4,padding:0,marginTop:10}},
           e('i',{className:`ti ti-chevron-${showExclude?'up':'down'}`,style:{fontSize:12}}),'高级：排除规则 / 并发线程 / 增量扫描'
         ),
@@ -1055,17 +1123,25 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onMatchAffectingChange,scanRunn
       ),
 
       e(Card,{id:'sec-scrape'},
-        e(SH,{title:'刮削匹配',sub:'用于校正标签、并作为重复判定的额外证据',hint:'两个文件若被刮削到同一条 MusicBrainz 录音，会被直接判定为重复（标注"MusicBrainz确认"），不依赖声纹或本地标签。刮削到的繁体中文会在写入前自动转换为简体。'}),
+        e(SH,{title:'刮削匹配',sub:'向 MusicBrainz 查询精确的文件属性，用于重复判定与属性补全',hint:'刮削的主要目的：① 精确匹配 — 根据文件属性（标题/艺术家/专辑/时长等）查找对应的 MusicBrainz 录音和发行版；两个文件被独立刮削到同一录音（精确匹配）即视为重复确认。② 属性补全 — 对有把握的精确匹配，填补缺失的专辑名/年份/曲目号；对模糊匹配只填缺失字段，不覆写已有内容。刮削数据按原始文本存储，不做繁简转换。'}),
         e('div',{style:{marginBottom:10}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:4}},Icon('world',{marginRight:5,fontSize:13}),'MusicBrainz'),
           e('div',{style:{fontSize:11,color:'var(--tx-faint)',padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
-            Icon('check',{color:'var(--green)',marginRight:5}),'默认启用，无需配置，按标题/艺术家文本检索。速率限制 1 次/秒。'
+            Icon('check',{color:'var(--green)',marginRight:5}),'默认启用，无需配置，按文件属性精确匹配；属性极度不完整时退回标题模糊搜索。速率限制 1 次/秒。'
           )
         ),
-        e('div',null,
+        e('div',{style:{marginBottom:12}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:4}},Icon('key',{marginRight:5,fontSize:13}),'AcoustID API Key'),
           e('input',{value:s.acoustid_key||'',onChange:ev=>setS(p=>({...p,acoustid_key:ev.target.value})),placeholder:'在 acoustid.biz 注册获取免费 API Key',style:{width:'100%',fontSize:11,padding:'7px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后会优先用声纹指纹去匹配 MusicBrainz 录音，比纯文本检索更准确')
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后会优先用声纹指纹匹配 MusicBrainz 录音，比纯文本搜索更准确')
+        ),
+        e('div',{style:{borderTop:'0.5px solid var(--bd-subtle)',paddingTop:12}},
+          e('div',{style:{fontSize:12,fontWeight:600,marginBottom:4,display:'flex',alignItems:'center',gap:6}},'库级属性补全',e(Hint,{text:'对全库所有已刮削的曲目，按精度规则补全文件属性中的缺失字段（如专辑名、年份），精确匹配时还可覆写明显错误的字段（如路人盘/合辑中的专辑名）。限制：只填或覆写 album/year/track；标题和艺术家从不被覆写——这两个字段填错后的后果难以确认，不自动处理。'})),
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:8,lineHeight:1.6}},'范围：全库（含未出现在重复组中的曲目），不只是重复组内的文件。'),
+          e(Btn,{icon:'wand',onClick:async()=>{
+            const r=await api.post('/api/library/smart-fill');
+            alert(r.ok?`已更新 ${r.filled} 首曲目（精确匹配 ${r.exact} 首，跳过 ${r.skipped} 首已完整）`:`失败: ${r.error||'unknown'}`);
+          }},'对全库执行属性补全')
         )
       ),
 
@@ -1222,16 +1298,31 @@ function App(){
     {id:'settings',   label:'设置',   icon:'settings'},
   ];
 
-  const hasPB=!!player.current;
   const dirs=settings?.scan_dirs||[];
+
+  // Fetch cover art when the playing track changes. Stored on the track
+  // object itself so the cover survives tab switches without re-fetching.
+  useEffect(()=>{
+    const cur=player.current;
+    if(!cur||cur.cover!==undefined)return;
+    fetch(`/api/files/${cur.id}/cover`)
+      .then(r=>r.ok?r.blob():null)
+      .then(blob=>{ if(blob)cur.cover=URL.createObjectURL(blob); else cur.cover=null; })
+      .catch(()=>{ cur.cover=null; });
+  },[player.current?.id]);
+
+  // Jump to the originating tab+row when the user clicks the left info area
+  // of PlayerBar (item 2).
+  const handleLocate=useCallback(track=>{
+    if(!track)return;
+    if(track.groupId){ setView('duplicates'); return; }
+    setView('library');
+  },[]);
 
   return e('div',{style:{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden',background:'var(--bg-subtle)'}},
     e('audio',{ref:player.audioRef,...player.bind,style:{display:'none'}}),
 
-    // F9: header + nav merged into one row — brand left, nav centered, status
-    // right. A 3-column grid with equal-width outer columns keeps the nav
-    // group truly centered on the row regardless of how wide the brand/status
-    // content on either side happens to be.
+    // Header + nav: single row, 3-column grid — brand left, nav centre, empty right.
     e('div',{style:{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',padding:'0 24px',height:54,background:'var(--bg-base)',borderBottom:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',flexShrink:0,zIndex:10}},
       e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start'}},
         e(Logo,{size:28}),
@@ -1244,26 +1335,21 @@ function App(){
           t.badge?e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',minWidth:16,textAlign:'center'}},t.badge):null
         ))
       ),
-      e('div',{style:{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--tx-faint)',justifySelf:'end',whiteSpace:'nowrap'}},
-        e('span',{style:{width:7,height:7,borderRadius:'50%',background:'var(--green)',display:'inline-block',boxShadow:'0 0 0 2px #D1FAE5'}}),
-        '运行中',e('span',{style:{color:'var(--bd-strong)'}},'·'),location.host
-      )
+      e('div',{style:{justifySelf:'end'}})
     ),
 
-    // F7: a single max-width, centered content column — the page no longer
-    // keeps stretching its line lengths/table columns on ultra-wide screens.
-    // F1: all 4 views are kept permanently mounted (display:none when not
-    // active) instead of being unmounted by `view==='x' && ...` — switching
-    // tabs no longer re-fetches/reloads anything.
+    // Main content — max-width centred column. Views are permanently mounted
+    // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
-      e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20,paddingBottom:hasPB?72:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir})),
+      e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');}})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,onEnumOnly:()=>scan.startStep(['enum'],false,'音乐库更新'),onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))
       )
     ),
-    e(PlayerBar,{player})
+    // PlayerBar in normal flow — pushes content up, never overlaps.
+    e(PlayerBar,{player,onLocate:handleLocate})
   );
 }
 ReactDOM.createRoot(document.getElementById('root')).render(e(App));
