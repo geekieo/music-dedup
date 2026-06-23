@@ -37,6 +37,12 @@ input,select,textarea{font-family:inherit;font-size:13px;color:var(--tx-primary)
 .fade{animation:fade .16s ease}
 input[type=range]{accent-color:var(--amber);width:100%;cursor:pointer}
 input[type=checkbox]{accent-color:var(--amber);cursor:pointer}
+/* Volume control: slider hidden by default, slides in on hover */
+.volume-slider-wrap{width:0;overflow:hidden;transition:width .2s ease;}
+.volume-ctl:hover .volume-slider-wrap{width:80px;}
+/* Progress rail: thickens on hover for easier targeting */
+.player-rail{height:4px;background:var(--bg-muted);cursor:pointer;position:relative;transition:height .12s ease;}
+.player-rail:hover{height:6px;}
 .ti{display:inline-block;width:1em;height:1em;background-color:currentColor;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;vertical-align:-0.125em;flex-shrink:0}
 </style>
 </head>

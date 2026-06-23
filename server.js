@@ -15,7 +15,8 @@ import {
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runMatcher } from './lib/matcher.js';
 import { runScrape } from './lib/scraper.js';
-import { renameFile, applyScrapedToFile, buildFilename } from './lib/tagger.js';
+import { renameFile, applyScrapedToFile, applySmartFillLibrary, buildFilename } from './lib/tagger.js';
+import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app  = express();
@@ -138,6 +139,23 @@ app.get('/api/files/:id/stream', (req,res)=>{
   }
 });
 
+// On-demand cover-art extraction. The bulk metadata scan deliberately skips
+// embedded pictures (parseFile(..., {skipCovers:true})) to stay fast across
+// a whole library — covers are only ever needed for whichever one track is
+// currently playing, so we just re-read that single file's picture here.
+app.get('/api/files/:id/cover', async(req,res)=>{
+  const f = getFileById(db,+req.params.id);
+  if(!f||!existsSync(f.path)) return res.status(404).end();
+  try{
+    const meta = await parseFile(f.path,{ duration:false, skipCovers:false });
+    const pic = meta?.common?.picture?.[0];
+    if(!pic) return res.status(404).end();
+    res.setHeader('Content-Type', pic.format||'image/jpeg');
+    res.setHeader('Cache-Control','private, max-age=86400');
+    res.end(Buffer.from(pic.data));
+  }catch{ res.status(404).end(); }
+});
+
 app.post('/api/files/:id/rename', (req,res)=>{
   const { newName } = req.body;
   if(!newName) return res.status(400).json({ok:false,error:'newName required'});
@@ -149,6 +167,15 @@ app.post('/api/files/:id/apply-scraped', (req,res)=>{ res.json(applyScrapedToFil
 app.get('/api/files/:id/scraped', (req,res)=>{
   const sm = getScrapedMeta(db,+req.params.id);
   res.json({ok:true, data:sm||null});
+});
+
+// Library-wide smart-fill: walks every file with usable 刮削数据 and fills/
+// corrects 文件属性 per the same trust rules as the single-file apply button
+// (see computeSmartFill in lib/tagger.js) — not limited to duplicate-group
+// members, since most of the library never ends up in a group at all.
+app.post('/api/library/smart-fill', (_,res)=>{
+  try{ res.json(applySmartFillLibrary(db)); }
+  catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 
 // ── Whitelist ─────────────────────────────────────────────────────────────
