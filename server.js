@@ -11,11 +11,12 @@ import {
   setTrackKeep, getAllSettings, getSetting, setSetting,
   addWhitelist, removeWhitelist, getWhitelist, getFileById,
   queryLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
+  getTagSnapshots, getAllTagSnapshots, getTagSnapshot,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runMatcher } from './lib/matcher.js';
-import { runScrape } from './lib/scraper.js';
-import { renameFile, applyScrapedToFile, applySmartFillLibrary, buildFilename } from './lib/tagger.js';
+import { runScrape, scrapeSingleFile } from './lib/scraper.js';
+import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromSnapshot, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -166,26 +167,56 @@ app.post('/api/files/:id/rename', (req,res)=>{
   res.json(renameFile(db,+req.params.id,newName));
 });
 
-app.post('/api/files/:id/apply-scraped', (req,res)=>{ res.json(applyScrapedToFile(db,+req.params.id)); });
+// Read actual file tags (from the audio file itself, not the database)
+app.get('/api/files/:id/live-tags', async(req,res)=>{
+  const f = getFileById(db,+req.params.id);
+  if(!f) return res.status(404).json({ok:false,error:'Not found'});
+  try{ res.json({ok:true,data:await readTagsFromFile(f.path)}); }
+  catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
 
+// On-demand single-file scrape (called from ScrapeDialog)
+app.post('/api/files/:id/scrape-single', async(req,res)=>{
+  const s = getAllSettings(db);
+  try{
+    const result = await scrapeSingleFile(db,+req.params.id,s.acoustid_key||'');
+    res.json({ok:true,data:result});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// Safe tag write with snapshot (three-phase: snapshot → write → verify)
+app.post('/api/files/:id/write-tags', async(req,res)=>{
+  const {fields} = req.body;
+  if(!fields||!Object.keys(fields).length) return res.status(400).json({ok:false,error:'fields required'});
+  try{ res.json(await writeTagsWithSnapshot(db,+req.params.id,fields)); }
+  catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// Scrape data CRUD
 app.get('/api/files/:id/scraped', (req,res)=>{
   const sm = getScrapedMeta(db,+req.params.id);
   res.json({ok:true, data:sm||null});
 });
 app.delete('/api/files/:id/scraped', (req,res)=>{
-  try {
-    db.run('DELETE FROM scraped_meta WHERE file_id=?',[+req.params.id]);
-    res.json({ok:true});
-  } catch(e){ res.status(500).json({ok:false,error:e.message}); }
+  try { db.run('DELETE FROM scraped_meta WHERE file_id=?',[+req.params.id]); res.json({ok:true}); }
+  catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 
-// Library-wide smart-fill: walks every file with usable 刮削数据 and fills/
-// corrects 文件属性 per the same trust rules as the single-file apply button
-// (see computeSmartFill in lib/tagger.js) — not limited to duplicate-group
-// members, since most of the library never ends up in a group at all.
-app.post('/api/library/smart-fill', (_,res)=>{
-  try{ res.json(applySmartFillLibrary(db)); }
+// Tag snapshots (write history + revert)
+app.get('/api/files/:id/snapshots', (req,res)=>{
+  res.json({ok:true,data:getTagSnapshots(db,+req.params.id)});
+});
+app.get('/api/snapshots', (_,res)=>{
+  res.json({ok:true,data:getAllTagSnapshots(db)});
+});
+app.post('/api/snapshots/:id/revert', async(req,res)=>{
+  try{ res.json(await revertFromSnapshot(db,+req.params.id)); }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// exiftool availability (shown in ScrapeDialog write section)
+app.get('/api/system/exiftool', async(_,res)=>{
+  res.json({ok:true,data:await getExiftoolStatus()});
 });
 
 // ── Whitelist ─────────────────────────────────────────────────────────────
