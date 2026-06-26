@@ -306,6 +306,21 @@ app.post('/api/scan/abort', (_,res)=>{ if(!scanState.running)return res.json({ok
 app.post('/api/scan/pause', (_,res)=>{ if(!scanState.running||scanState.abortFlag)return res.json({ok:false}); scanState.paused=true; broadcast({type:'progress',...scanState,message:'已暂停 · 点击继续以恢复'}); res.json({ok:true}); });
 app.post('/api/scan/resume', (_,res)=>{ if(!scanState.running||!scanState.paused)return res.json({ok:false}); scanState.paused=false; broadcast({type:'progress',...scanState,message:'已恢复'}); res.json({ok:true}); });
 
+// Cover art — extracted from embedded file tags
+app.get('/api/files/:id/cover', async(req,res)=>{
+  try{
+    const file=db.get('SELECT path FROM files WHERE id=?',[+req.params.id]);
+    if(!file)return res.status(404).end();
+    const {parseFile}=await import('music-metadata');
+    const meta=await parseFile(file.path,{skipCovers:false,duration:false});
+    const pic=meta.common.picture?.[0];
+    if(!pic)return res.status(404).end();
+    res.setHeader('Content-Type',pic.format||'image/jpeg');
+    res.setHeader('Cache-Control','public, max-age=86400');
+    res.send(Buffer.from(pic.data));
+  }catch{res.status(404).end();}
+});
+
 // AcoustID API key validation
 app.post('/api/validate-acoustid', async(req,res)=>{
   const { key } = req.body;
