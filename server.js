@@ -244,8 +244,15 @@ app.post('/api/duplicates/resolve-all', async(req,res)=>{
 app.put('/api/duplicates/:id/tracks/:fid/keep', (req,res)=>{
   const gid=+req.params.id, fid=+req.params.fid; const {keep,reason}=req.body;
   const g=getGroupDetail(db,gid); if(!g)return res.status(404).json({ok:false});
-  if(keep){ for(const t of g.tracks)setTrackKeep(db,gid,t.id,t.id===fid,t.id===fid?(reason||'手动指定保留'):'手动指定删除',1); }
-  else{ if(!g.tracks.filter(t=>t.keep&&t.id!==fid).length)return res.status(400).json({ok:false,error:'至少保留一个'}); setTrackKeep(db,gid,fid,false,'手动指定删除',1); }
+  if(keep){
+    // Only mark the specified track as keep — do NOT touch other tracks' keep state
+    setTrackKeep(db,gid,fid,true,reason||'手动指定保留',1);
+  } else {
+    // Ensure at least one other non-whitelisted track remains as keep
+    if(!g.tracks.filter(t=>t.keep&&t.id!==fid&&!t.whitelisted).length)
+      return res.status(400).json({ok:false,error:'至少保留一个'});
+    setTrackKeep(db,gid,fid,false,'手动指定删除',1);
+  }
   res.json({ok:true,data:getGroupDetail(db,gid)});
 });
 
@@ -285,17 +292,41 @@ app.post('/api/scan/start', async(req,res)=>{
     if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort,onPause:pause});
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
     if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
-    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    // Scrape MUST run before match so mb_recording_id data is available for union logic
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
+      if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合声纹指纹进行刮削匹配...'});
       await runScrape(db,{smartScan:force?false:smartScan,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
+    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
 app.post('/api/scan/abort', (_,res)=>{ if(!scanState.running)return res.json({ok:false}); scanState.abortFlag=true; scanState.paused=false; broadcast({type:'progress',...scanState}); res.json({ok:true}); });
 app.post('/api/scan/pause', (_,res)=>{ if(!scanState.running||scanState.abortFlag)return res.json({ok:false}); scanState.paused=true; broadcast({type:'progress',...scanState,message:'已暂停 · 点击继续以恢复'}); res.json({ok:true}); });
 app.post('/api/scan/resume', (_,res)=>{ if(!scanState.running||!scanState.paused)return res.json({ok:false}); scanState.paused=false; broadcast({type:'progress',...scanState,message:'已恢复'}); res.json({ok:true}); });
+
+// AcoustID API key validation
+app.post('/api/validate-acoustid', async(req,res)=>{
+  const { key } = req.body;
+  if (!key || !key.trim()) return res.json({ ok:false, error:'请输入 API Key' });
+  try {
+    // Send a lookup with a minimal valid-format request; AcoustID returns error code 3 for invalid key
+    const params = new URLSearchParams({ client: key.trim(), duration: '240', fingerprint: 'AQAAA', meta: 'recordings' });
+    const r = await fetch(`https://api.acoustid.org/v2/lookup?${params}`, {
+      headers: { 'User-Agent': 'MusicDedup/1.7' }
+    });
+    const d = await r.json();
+    // Error code 3 = invalid API key; code 5 = invalid fingerprint (key itself is valid)
+    if (d.status === 'ok' || (d.status === 'error' && d.error?.code !== 3)) {
+      res.json({ ok: true });
+    } else {
+      res.json({ ok: false, error: d.error?.message || '无效的 API Key，请在 acoustid.biz 注册后获取' });
+    }
+  } catch(e) {
+    res.json({ ok: false, error: '网络错误: ' + e.message });
+  }
+});
 
 app.get('*', (_,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
