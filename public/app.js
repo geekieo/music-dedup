@@ -443,19 +443,25 @@ function ConfirmModal({title,message,onConfirm,onClose,danger}){
 
 
 /* ── Scrape-status tier helper ───────────────────────────────────────────
-   Returns 'green' | 'yellow' | 'red' | null
-   green:  精确匹配（title+artist+album 一致）且文件属性完整、无推荐写入
+   green:  精确匹配（title+artist+album 实际值都一致）且文件属性完整、无推荐写入
    yellow: 精确匹配但文件存在缺失字段（有推荐写入）
-   red:    模糊匹配（非精确匹配）
+   red:    模糊匹配 — 任意一个字段（title/artist/album）不一致，或 match_basis=fuzzy
    null:   无可用刮削数据
 */
 function scrapeStatusTier(file, scraped) {
   if (!scraped || !scraped.title || scraped.source === 'none') return null;
-  if (scraped.match_basis !== 'exact') return 'red';
-  // Use autoSelectFields to check all writable fields for completeness
+  // "精确匹配" = scraper 判断为 exact，且 title/artist/album 实际值都一致（或文件缺失该字段）
+  function consistent(fileVal, scrapedVal) {
+    if (!fileVal || !scrapedVal) return true; // 一侧为空 → 中性，不算不一致
+    return normCmp(String(fileVal)) === normCmp(String(scrapedVal));
+  }
+  const titleOk  = consistent(file.title,  scraped.title);
+  const artistOk = consistent(file.artist, scraped.artist);
+  const albumOk  = consistent(file.album,  scraped.album);
+  const isExact  = titleOk && artistOk && albumOk && scraped.match_basis === 'exact';
+  if (!isExact) return 'red';
   const { selected } = autoSelectFields(file, scraped);
-  const hasRecommendedWrites = Object.values(selected).some(Boolean);
-  return hasRecommendedWrites ? 'yellow' : 'green';
+  return Object.values(selected).some(Boolean) ? 'yellow' : 'green';
 }
 const TIER_COLOR = { green:'var(--green)', yellow:'var(--amber)', red:'var(--red)' };
 
@@ -671,8 +677,11 @@ function ScrapeDialog({fileId,onClose,onUpdated}){
 
         // Field checkboxes with reasons
         WRITE_FIELDS.map(({key,label})=>{
-          const sv=scraped?.[key];
-          const fv=liveTags?.[key];
+          const rawSv=scraped?.[key];
+          const rawFv=liveTags?.[key];
+          // For numeric fields (album_year, track_number), 0 means "no data"
+          const sv = rawSv != null && rawSv !== 0 && rawSv !== '' ? rawSv : null;
+          const fv = rawFv != null && rawFv !== 0 && rawFv !== '' ? rawFv : null;
           const disabled=!sv;
           const rec=sel[key];
           return e('label',{key,style:{display:'flex',alignItems:'flex-start',gap:8,padding:'5px 0',cursor:disabled?'default':'pointer',opacity:disabled?.4:1}},
@@ -683,7 +692,7 @@ function ScrapeDialog({fileId,onClose,onUpdated}){
               e('div',{style:{fontSize:12,fontWeight:rec?600:400,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},
                 label,
                 rec&&e('span',{style:{fontSize:10,color:'var(--amber)',fontWeight:400}},'推荐'),
-                sv&&fv&&normCmp(String(fv))!==normCmp(String(sv))&&e('span',{style:{fontSize:10,color:'var(--tx-faint)'}},
+                !!sv&&!!fv&&normCmp(String(fv))!==normCmp(String(sv))&&e('span',{style:{fontSize:10,color:'var(--tx-faint)'}},
                   ` ${fv} → ${sv}`)
               ),
               e('div',{style:{fontSize:10,color:'var(--tx-faint)'}},reasons[key]||'')
@@ -723,7 +732,7 @@ function ScrapeDialog({fileId,onClose,onUpdated}){
           e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认写入文件'),
           e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:12}},
             '将直接修改以下字段到音频文件：'),
-          WRITE_FIELDS.filter(({key})=>sel[key]&&scraped[key]).map(({key,label})=>
+          WRITE_FIELDS.filter(({key})=>sel[key]&&scraped[key]!=null&&scraped[key]!==0&&scraped[key]!=='').map(({key,label})=>
             e('div',{key,style:{fontSize:11,padding:'4px 8px',background:'var(--bg-subtle)',borderRadius:'var(--r-sm)',marginBottom:4,display:'flex',gap:8}},
               e('span',{style:{color:'var(--tx-faint)',width:42,flexShrink:0}},label+':'),
               e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--amber)'}},String(scraped[key]))
@@ -746,14 +755,31 @@ function ScrapeDialog({fileId,onClose,onUpdated}){
 function PropsModal({fileId,onClose}){
   const[data,setData]=useState(null);
   const[scraped,setScraped]=useState(null);
+  const[coverUrl,setCoverUrl]=useState(null);
+  const[coverBig,setCoverBig]=useState(false);
   useEffect(()=>{
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setData(r.data);});
     api.get(`/api/files/${fileId}/scraped`).then(r=>{if(r.ok&&r.data?.title)setScraped(r.data);});
+    // Try loading cover art
+    fetch(`/api/files/${fileId}/cover`).then(r=>{if(r.ok)setCoverUrl(`/api/files/${fileId}/cover`);}).catch(()=>{});
   },[fileId]);
   if(!data)return e(Modal,{title:'文件属性',onClose},e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})));
   const fpMethodLabel={spectral:'声纹（频谱指纹）',metadata:'元数据近似指纹（无法解码音频）'}[data.fingerprint_method]||'未提取';
   const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['修改时间',fmtDate(data.file_mtime)],['声纹方法',fpMethodLabel]];
   return e(Modal,{title:'文件属性',onClose,width:560},
+    // Cover art row
+    coverUrl&&e('div',{style:{display:'flex',justifyContent:'center',marginBottom:12}},
+      e('img',{src:coverUrl,onClick:()=>setCoverBig(true),
+        style:{width:90,height:90,objectFit:'cover',borderRadius:'var(--r-md)',cursor:'pointer',
+          border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-sm)'},
+        title:'点击放大'})
+    ),
+    // Cover art lightbox
+    coverBig&&e('div',{onClick:()=>setCoverBig(false),
+      style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
+      e('img',{src:coverUrl,style:{maxWidth:'min(600px,90vw)',maxHeight:'80vh',borderRadius:'var(--r-lg)',objectFit:'contain'},
+        onClick:e=>e.stopPropagation()})
+    ),
     rows.map(([k,v,mono])=>e('div',{key:k,style:{display:'flex',gap:12,padding:'6px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},
       e('div',{style:{fontSize:11,color:'var(--tx-faint)',width:72,flexShrink:0,paddingTop:1}},k),
       e('div',{style:{fontSize:12,color:'var(--tx-primary)',fontFamily:mono?'var(--font-mono)':undefined,wordBreak:'break-all',flex:1}},String(v))
@@ -762,7 +788,7 @@ function PropsModal({fileId,onClose}){
       e('div',{style:{fontSize:11,fontWeight:600,color:'#92400E',marginBottom:6,display:'flex',alignItems:'center',gap:5}},Icon('shield-check',{fontSize:13}),'刮削数据 · 来源 '+(scraped.source==='musicbrainz'?'MusicBrainz':scraped.source==='acoustid'?'AcoustID':scraped.source),
         scraped.confidence<0.85&&e('span',{style:{color:'#A16207',fontWeight:400}},`（匹配度较低 ${(scraped.confidence*100).toFixed(0)}%，请核对后再应用）`)
       ),
-      [['标题',scraped.title],['艺术家',scraped.artist],['专辑',scraped.album],['年份',scraped.album_year]].map(([k,v])=>v&&e('div',{key:k,style:{fontSize:11,color:'#92400E',display:'flex',gap:8}},e('span',{style:{color:'#A16207',width:36}},k+':'),v))
+      [['标题',scraped.title],['艺术家',scraped.artist],['专辑',scraped.album],['年份',scraped.album_year||'']].map(([k,v])=>v?e('div',{key:k,style:{fontSize:11,color:'#92400E',display:'flex',gap:8}},e('span',{style:{color:'#A16207',width:36}},k+':'),v):null)
     ),
     e('div',{style:{marginTop:14,display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-start',alignItems:'center'}},
       e(Btn,{icon:'folder-open',small:true,variant:'ghost',onClick:()=>api.post(`/api/files/${fileId}/reveal`)},'在文件管理器中显示'),
@@ -823,7 +849,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,onWhitelistChange}){
   // ── Filter state ───────────────────────────────────────────────────────
   // 'all' | 'scraped' | 'dup'  — the 3 interactive stat cards
   const[libFilter,setLibFilter]=useState('all');
@@ -958,6 +984,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
     // Update only this row in state — no full reload
     setRows(prev=>prev.map(r=>r.id===f.id?{...r,whitelisted:f.whitelisted?0:1}:r));
     loadStats();
+    onWhitelistChange?.(); // notify App → SettingsView → WhitelistSection
     setToast({msg:f.whitelisted?'已从白名单移除':'已加入白名单',type:'success'});
   }
 
@@ -1253,7 +1280,7 @@ function ScannerView({scan}){
       e('div',{ref:logRef,style:{padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,
         height:'calc(100vh - 520px)',minHeight:180,maxHeight:'calc(100vh - 300px)',
         overflowY:'auto'}},
-        logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始... 历史日志在此渐进显示，执行新步骤时不会清空'),
+        logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始...'),
         logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),l.msg))),
         status.running&&e('span',{className:'blink',style:{color:'var(--amber)'}},'█')
       )
@@ -1523,7 +1550,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
           return e('div',{key:g.id,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
             e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:3}},
               e('span',{style:{fontSize:12,fontWeight:600,color:isSel?'#92400E':'var(--tx-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,maxWidth:160}},title),
-              g.resolved&&e('i',{className:'ti ti-circle-check',style:{fontSize:13,color:'var(--green)',flexShrink:0,marginLeft:4}})
+              !!g.resolved&&e('i',{className:'ti ti-circle-check',style:{fontSize:13,color:'var(--green)',flexShrink:0,marginLeft:4}})
             ),
             artist&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},artist),
             e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
@@ -1610,110 +1637,126 @@ function WriteHistorySection(){
     else setToast({msg:'撤销失败: '+(r.error||''),type:'error'});
   }
   async function revertAll(){
-    if(!confirm(`撤销全部 ${rows.length} 条写入历史？将恢复所有文件的原始标签。`))return;
-    for(const r of rows) await api.post(`/api/snapshots/${r.id}/revert`);
+    if(!confirm(`撤销全部写入历史？将恢复所有文件的原始标签。`))return;
+    for(const r of written) await api.post(`/api/snapshots/${r.id}/revert`);
     setToast({msg:'已全部撤销',type:'success'});load();
   }
-  const written=rows?.filter(r=>r.status==='written')||[];
+  const written=(rows||[]).filter(r=>r.status==='written');
   const q=search.trim().toLowerCase();
   const filtered=q?written.filter(s=>(s.title||'').toLowerCase().includes(q)||(s.path||'').toLowerCase().includes(q)):written;
-  return e(Card,{id:'sec-history'},
+
+  return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}},
       e('div',{style:{display:'flex',alignItems:'center',gap:7}},
         Icon('history',{fontSize:15,color:'var(--amber)'}),
-        e(SH,{title:`写入历史（${written.length} 条）`,sub:'已写入文件的标签变更，可逐条撤销'})
+        e(SH,{title:`写入历史${rows?`（${written.length} 条）`:''}`,sub:'已写入文件的标签变更，可逐条撤销'})
       ),
       written.length>0&&e(Btn,{small:true,variant:'ghost',icon:'history',onClick:revertAll},'全部撤销')
     ),
-    written.length>0&&e('div',{style:{position:'relative',marginBottom:8}},
-      Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
-      e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索文件名...',
-        style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
-          borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
-    ),
-    rows===null?e('div',{style:{textAlign:'center',padding:20}},e('i',{className:'ti ti-loader spin',style:{fontSize:20}})):
-    written.length===0?e('div',{style:{fontSize:12,color:'var(--tx-faint)',padding:'12px 0'}},
-      Icon('check',{color:'var(--green)',marginRight:5}),'暂无写入记录'):
-    e('div',{style:{maxHeight:320,overflowY:'auto'}},
-      e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
-        e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)'}},
-          ...['文件','修改字段','时间','操作'].map(h=>e('th',{key:h,style:{padding:'5px 8px',textAlign:'left',fontWeight:600,color:'var(--tx-faint)',fontSize:10}},h))
-        )),
-        e('tbody',null,filtered.map(snap=>{
-          const written_fields=snap.written_tags?Object.keys(JSON.parse(snap.written_tags)).join('、'):'';
-          const dt=new Date(snap.snapshot_time);
-          const dtStr=`${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
-          const filename=snap.path?snap.path.split(/[\/]/).pop():'';
-          return e('tr',{key:snap.id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
-            e('td',{style:{padding:'7px 8px',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
-              e('span',{title:snap.path},snap.title||filename||`ID ${snap.file_id}`)),
-            e('td',{style:{padding:'7px 8px',color:'var(--tx-secondary)'}},written_fields),
-            e('td',{style:{padding:'7px 8px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
-            e('td',{style:{padding:'7px 8px'}},
-              e('button',{onClick:()=>revert(snap.id),
-                style:{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-sm)',background:'var(--bg-muted)',
-                  border:'0.5px solid var(--bd-default)',cursor:'pointer',color:'var(--tx-secondary)'}},'撤销'))
-          );
-        }))
-      )
-    )
+    rows===null
+      ? e('div',{style:{textAlign:'center',padding:20}},e('i',{className:'ti ti-loader spin',style:{fontSize:20}}))
+      : written.length===0
+        ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
+            Icon('history',{fontSize:28,display:'block',margin:'0 auto 8px'}),
+            '暂无写入记录',e('br'),
+            e('span',{style:{fontSize:11}},'在"音乐库"中刮削数据后，可将字段写入文件')
+          )
+        : e('div',null,
+            e('div',{style:{position:'relative',marginBottom:8}},
+              Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
+              e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索文件名...',
+                style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
+                  borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
+            ),
+            e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto'}},
+              e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
+                e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)'}},
+                  ...['文件','修改字段','时间','操作'].map(h=>e('th',{key:h,style:{padding:'5px 8px',textAlign:'left',fontWeight:600,color:'var(--tx-faint)',fontSize:10}},h))
+                )),
+                e('tbody',null,filtered.length===0
+                  ? e('tr',null,e('td',{colSpan:4,style:{padding:'14px',textAlign:'center',color:'var(--tx-faint)'}},'无匹配结果'))
+                  : filtered.map(snap=>{
+                      const wf=snap.written_tags?Object.keys(JSON.parse(snap.written_tags)).join('、'):'';
+                      const dt=new Date(snap.snapshot_time);
+                      const dtStr=`${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
+                      const filename=snap.path?snap.path.split(/[\/\\]/).pop():'';
+                      return e('tr',{key:snap.id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
+                        e('td',{style:{padding:'7px 8px',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
+                          e('span',{title:snap.path},snap.title||filename||`ID ${snap.file_id}`)),
+                        e('td',{style:{padding:'7px 8px',color:'var(--tx-secondary)'}},wf),
+                        e('td',{style:{padding:'7px 8px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
+                        e('td',{style:{padding:'7px 8px'}},
+                          e('button',{onClick:()=>revert(snap.id),
+                            style:{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-sm)',background:'var(--bg-muted)',
+                              border:'0.5px solid var(--bd-default)',cursor:'pointer',color:'var(--tx-secondary)'}},'撤销'))
+                      );
+                    })
+                )
+              )
+            )
+          )
   );
 }
 
-function WhitelistSection({player}){
+function WhitelistSection({player,whitelistKey}){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
   function load(){setLoading(true);api.get('/api/whitelist').then(r=>{if(r.ok)setRows(r.data||[]);}).finally(()=>setLoading(false));}
   useEffect(()=>{load();},[]);
+  // Refresh when Library toggles whitelist (whitelistKey increments)
+  useEffect(()=>{if(whitelistKey>0)load();},[whitelistKey]);
   async function remove(id){await api.del(`/api/whitelist/${id}`);setToast({msg:'已从白名单移除',type:'success'});load();}
 
   const q=search.trim().toLowerCase();
   const filtered=q?rows.filter(f=>(f.title||'').toLowerCase().includes(q)||(f.artist||'').toLowerCase().includes(q)||(f.album||'').toLowerCase().includes(q)):rows;
 
-  return e(Card,{id:'sec-wl'},
+  return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     e(SH,{title:`白名单（${rows.length} 个文件）`,sub:'白名单中的文件不参与重复检测'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
-      ? e('div',{style:{textAlign:'center',padding:'34px 0',color:'var(--tx-faint)',lineHeight:2}},
-          Icon('shield-check',{fontSize:30,display:'block',margin:'0 auto 8px'}),
+      ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
+          Icon('shield-check',{fontSize:28,display:'block',margin:'0 auto 8px'}),
           '白名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入白名单'))
       : e('div',null,
-          e('div',{style:{position:'relative',marginBottom:8}},
+          rows.length>0&&e('div',{style:{position:'relative',marginBottom:8}},
             Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
             e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索标题、艺术家、专辑...',
               style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
                 borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
           ),
-          e('div',{style:{maxHeight:320,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',overflow:'hidden'}},
+          e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',overflow:'hidden'}},
             e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
                 ...['','标题','艺术家','专辑','格式','操作'].map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap'}},h))
               )),
-              e('tbody',null,filtered.map(f=>{
-                const isCur=player?.current?.id===f.id;
-                return e('tr',{key:f.id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
-                  e('td',{style:{padding:'6px 8px',width:36}},
-                    f.fingerprint&&player&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
-                      Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
-                  ),
-                  e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}},f.title||'—'),
-                  e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160}},f.artist||'—'),
-                  e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160,fontSize:11}},f.album||'—'),
-                  e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
-                  e('td',{style:{padding:'4px 8px'}},e(IconAction,{icon:'shield',title:'移除白名单',danger:true,active:true,activeColor:'var(--red)',onClick:()=>remove(f.id)}))
-                );
-              }))
+              e('tbody',null,filtered.length===0
+                ? e('tr',null,e('td',{colSpan:6,style:{padding:'18px',textAlign:'center',color:'var(--tx-faint)',fontSize:12}},'无匹配结果'))
+                : filtered.map(f=>{
+                    const isCur=player?.current?.id===f.id;
+                    return e('tr',{key:f.id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
+                      e('td',{style:{padding:'6px 8px',width:36}},
+                        f.fingerprint&&player&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
+                          Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+                      ),
+                      e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}},f.title||'—'),
+                      e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160}},f.artist||'—'),
+                      e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160,fontSize:11}},f.album||'—'),
+                      e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
+                      e('td',{style:{padding:'4px 8px'}},e(IconAction,{icon:'shield',title:'移除白名单',danger:true,active:true,activeColor:'var(--red)',onClick:()=>remove(f.id)}))
+                    );
+                  })
+              )
             )
           )
         )
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player,whitelistKey}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -1926,7 +1969,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ))
       ),
 
-      e(WhitelistSection,{player}),
+      e(WhitelistSection,{player,whitelistKey}),
+      e(WriteHistorySection),
     )
   );
 }
@@ -1993,6 +2037,7 @@ function App(){
   const[pending,setPending]=useState(0);
   const[settings,setSettingsState]=useState(null);
   const[scanDoneKey,setScanDoneKey]=useState(0);
+  const[whitelistKey,setWhitelistKey]=useState(0);
   const player=useGlobalPlayer();
 
   function refreshStats(){
@@ -2109,10 +2154,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite,whitelistKey}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
