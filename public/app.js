@@ -534,23 +534,22 @@ function autoSelectFields(file, scraped) {
   else if (file.track_number===scraped.track_number)    { sel.track_number=false; rsn.track_number='与文件属性一致'; }
   else                                                  { sel.track_number=false; rsn.track_number=`曲目号不同（${file.track_number} vs ${scraped.track_number}），请手动确认`; }
 
+  // Genre
+  if (!scraped.genre)                                    { sel.genre=false; rsn.genre='刮削无数据'; }
+  else if (!file.genre)                                  { sel.genre=true;  rsn.genre='文件属性为空，建议写入'; }
+  else if (normCmp(file.genre)===normCmp(scraped.genre)) { sel.genre=false; rsn.genre='与文件属性一致'; }
+  else                                                   { sel.genre=false; rsn.genre='流派不同，请手动确认'; }
+
   return { selected:sel, reasons:rsn };
 }
 
-/* ── ScrapeDialog ────────────────────────────────────────────────────────
-   All scrape operations in one modal:
-   · View: shows live file tags vs scraped data side-by-side with diff colors
-   · Scrape: trigger on-demand scrape for this single file
-   · Cancel scrape: delete scraped_meta record
-   · Write fields: three-phase safe write with snapshot
-   · After write: undo button
-*/
 const WRITE_FIELDS = [
-  { key:'title',        label:'标题',  },
+  { key:'title',        label:'标题'   },
   { key:'artist',       label:'艺术家' },
   { key:'album',        label:'专辑'   },
   { key:'album_year',   label:'年份'   },
   { key:'track_number', label:'曲目号' },
+  { key:'genre',        label:'流派'   },
 ];
 
 function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
@@ -1128,7 +1127,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                 e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
                 e('td',{style:{padding:'4px 6px',textAlign:'center'}},
                   (()=>{
-                    const tier=scrapeStatusTier(f,{title:f.scraped_title,artist:f.scraped_artist,album:f.scraped_album,album_year:f.scraped_album_year||0,track_number:f.scraped_track_number||0,match_basis:f.scrape_match_basis,source:f.mb_recording_id?'musicbrainz':'none'});
+                    const tier=scrapeStatusTier(f,{title:f.scraped_title,artist:f.scraped_artist,album:f.scraped_album,album_year:f.scraped_album_year||0,track_number:f.scraped_track_number||0,genre:f.scraped_genre||null,match_basis:f.scrape_match_basis,source:f.mb_recording_id?'musicbrainz':'none'});
                     if(!tier)return null;
                     const tipLines=[
                       `刮削数据 · MusicBrainz`,
@@ -1633,65 +1632,71 @@ function WriteHistorySection({writeHistoryKey}){
   function load(){api.get('/api/snapshots').then(r=>{if(r.ok)setRows(r.data||[]);});}
   useEffect(()=>{load();},[]);
   useEffect(()=>{if(writeHistoryKey>0)load();},[writeHistoryKey]);
-  async function revert(id){
-    const r=await api.post(`/api/snapshots/${id}/revert`);
-    if(r.ok){setToast({msg:'已撤销，文件标签已恢复',type:'success'});load();}
+
+  async function revert(fileId){
+    const r=await api.post(`/api/snapshots/${fileId}/revert`);
+    if(r.ok){setToast({msg:'已撤销至首次写入前的原始状态',type:'success'});load();}
     else setToast({msg:'撤销失败: '+(r.error||''),type:'error'});
   }
   async function revertAll(){
-    if(!confirm(`撤销全部写入历史？将恢复所有文件的原始标签。`))return;
-    for(const r of written) await api.post(`/api/snapshots/${r.id}/revert`);
+    if(!rows?.length)return;
+    if(!confirm(`撤销全部 ${rows.length} 条写入历史？将恢复所有文件的原始标签。`))return;
+    for(const r of rows)await api.post(`/api/snapshots/${r.file_id}/revert`);
     setToast({msg:'已全部撤销',type:'success'});load();
   }
-  const written=(rows||[]).filter(r=>r.status==='written');
+
   const q=search.trim().toLowerCase();
-  const filtered=q?written.filter(s=>(s.title||'').toLowerCase().includes(q)||(s.path||'').toLowerCase().includes(q)):written;
+  const filtered=(rows||[]).filter(r=>!q||
+    (r.file_title||'').toLowerCase().includes(q)||
+    (r.file_artist||'').toLowerCase().includes(q)||
+    (r.file_path||'').toLowerCase().includes(q));
 
   return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}},
       e('div',{style:{display:'flex',alignItems:'center',gap:7}},
         Icon('history',{fontSize:15,color:'var(--amber)'}),
-        e(SH,{title:`写入历史${rows?`（${written.length} 条）`:''}`,sub:'已写入文件的标签变更，可逐条撤销'})
+        e(SH,{title:`写入历史${rows?`（${rows.length} 条）`:''}`,sub:'以文件为单位，保存首次写入前的原始状态，撤销可一步恢复'})
       ),
-      written.length>0&&e(Btn,{small:true,variant:'ghost',icon:'history',onClick:revertAll},'全部撤销')
+      rows?.length>0&&e(Btn,{small:true,variant:'ghost',icon:'history',onClick:revertAll},'全部撤销')
     ),
     rows===null
       ? e('div',{style:{textAlign:'center',padding:20}},e('i',{className:'ti ti-loader spin',style:{fontSize:20}}))
-      : written.length===0
+      : rows.length===0
         ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
-            Icon('history',{fontSize:28,display:'block',margin:'0 auto 8px'}),
-            '暂无写入记录',e('br'),
-            e('span',{style:{fontSize:11}},'在"音乐库"中刮削数据后，可将字段写入文件')
+            Icon('history',{fontSize:28,display:'block',margin:'0 auto 8px',color:'var(--amber)'}),
+            '写入历史为空',e('br'),
+            e('span',{style:{fontSize:11}},'在刮削列中写入字段后，这里会保存原始状态以供撤销')
           )
         : e('div',null,
             e('div',{style:{position:'relative',marginBottom:8}},
               Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
-              e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索文件名...',
+              e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索标题、艺术家...',
                 style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
                   borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
             ),
-            e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto'}},
-              e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
-                e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)'}},
-                  ...['文件','修改字段','时间','操作'].map(h=>e('th',{key:h,style:{padding:'5px 8px',textAlign:'left',fontWeight:600,color:'var(--tx-faint)',fontSize:10}},h))
+            e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
+              e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+                e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
+                  ...['标题','艺术家','修改字段','写入次数','最近时间','操作'].map(h=>
+                    e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11}},h))
                 )),
-                e('tbody',null,filtered.length===0
-                  ? e('tr',null,e('td',{colSpan:4,style:{padding:'14px',textAlign:'center',color:'var(--tx-faint)'}},'无匹配结果'))
-                  : filtered.map(snap=>{
-                      const wf=snap.written_tags?Object.keys(JSON.parse(snap.written_tags)).join('、'):'';
-                      const dt=new Date(snap.snapshot_time);
+                e('tbody',null, filtered.length===0
+                  ? e('tr',null,e('td',{colSpan:6,style:{padding:'14px',textAlign:'center',color:'var(--tx-faint)'}},'无匹配结果'))
+                  : filtered.map(r=>{
+                      const fields=JSON.parse(r.modified_fields||'[]');
+                      const dt=new Date(r.last_written_at);
                       const dtStr=`${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
-                      const filename=snap.path?snap.path.split(/[\/\\]/).pop():'';
-                      return e('tr',{key:snap.id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
-                        e('td',{style:{padding:'7px 8px',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
-                          e('span',{title:snap.path},snap.title||filename||`ID ${snap.file_id}`)),
-                        e('td',{style:{padding:'7px 8px',color:'var(--tx-secondary)'}},wf),
-                        e('td',{style:{padding:'7px 8px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
-                        e('td',{style:{padding:'7px 8px'}},
-                          e('button',{onClick:()=>revert(snap.id),
-                            style:{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-sm)',background:'var(--bg-muted)',
-                              border:'0.5px solid var(--bd-default)',cursor:'pointer',color:'var(--tx-secondary)'}},'撤销'))
+                      return e('tr',{key:r.file_id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
+                        e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}},
+                          r.file_title||r.cur_title||'—'),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:140}},
+                          r.file_artist||r.cur_artist||'—'),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',fontSize:11}},fields.join('、')||'—'),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',textAlign:'center',fontSize:11}},r.write_count||1),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
+                        e('td',{style:{padding:'4px 8px'}},
+                          e(IconAction,{icon:'history',title:'撤销至原始状态',onClick:()=>revert(r.file_id),danger:true}))
                       );
                     })
                 )
@@ -1748,7 +1753,11 @@ function WhitelistSection({player,whitelistKey}){
                       e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160}},f.artist||'—'),
                       e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160,fontSize:11}},f.album||'—'),
                       e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
-                      e('td',{style:{padding:'4px 8px'}},e(IconAction,{icon:'shield',title:'移除白名单',danger:true,active:true,activeColor:'var(--red)',onClick:()=>remove(f.id)}))
+                      e('td',{style:{padding:'4px 8px',whiteSpace:'nowrap'}},
+                        e(IconAction,{icon:'library',title:'在音乐库中查看',onClick:()=>api.post(`/api/files/${f.id}/locate`,{target:'library'})}),
+                        e(IconAction,{icon:'layout-sidebar',title:'在重复组中查看',onClick:()=>api.post(`/api/files/${f.id}/locate`,{target:'duplicates'})}),
+                        e(IconAction,{icon:'shield',title:'移除白名单',danger:true,active:true,activeColor:'var(--red)',onClick:()=>remove(f.id)})
+                      )
                     );
                   })
               )

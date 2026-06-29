@@ -11,12 +11,12 @@ import {
   setTrackKeep, getAllSettings, getSetting, setSetting,
   addWhitelist, removeWhitelist, getWhitelist, getFileById,
   queryLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
-  getTagSnapshots, getAllTagSnapshots, getTagSnapshot,
+  getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
-import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromSnapshot, buildFilename, getExiftoolStatus } from './lib/tagger.js';
+import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
 import { parseFile } from 'music-metadata';
 
@@ -208,10 +208,10 @@ app.get('/api/files/:id/snapshots', (req,res)=>{
   res.json({ok:true,data:getTagSnapshots(db,+req.params.id)});
 });
 app.get('/api/snapshots', (_,res)=>{
-  res.json({ok:true,data:getAllTagSnapshots(db)});
+  res.json({ok:true, data: getWriteHistory(db)});
 });
-app.post('/api/snapshots/:id/revert', async(req,res)=>{
-  try{ res.json(await revertFromSnapshot(db,+req.params.id)); }
+app.post('/api/snapshots/:fileId/revert', async(req,res)=>{
+  try{ res.json(await revertFromWriteHistory(db, +req.params.fileId)); }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 
@@ -300,7 +300,7 @@ app.post('/api/scan/start', async(req,res)=>{
     // Scrape MUST run before match so mb_recording_id data is available for union logic
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
-      if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合声纹指纹进行刮削匹配...'});
+      if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹指纹（fpcalc）进行刮削匹配...'});
       await runScrape(db,{smartScan:force?false:smartScan,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
