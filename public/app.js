@@ -553,7 +553,7 @@ const WRITE_FIELDS = [
   { key:'track_number', label:'曲目号' },
 ];
 
-function ScrapeDialog({fileId,onClose,onUpdated}){
+function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const[liveTags,setLiveTags]=useState(null);   // actual file tags
   const[scraped,setScraped]=useState(undefined);// undefined=loading, null=none
   const[scraping,setScraping]=useState(false);
@@ -604,11 +604,11 @@ function ScrapeDialog({fileId,onClose,onUpdated}){
     }
     const r=await api.post(`/api/files/${fileId}/write-tags`,{fields});
     setWriting(false); setWriteResult(r);
-    if(r.ok){ reload(); onUpdated&&onUpdated(); }
+    if(r.ok){ reload(); onUpdated?.(); onTagsWritten?.(); }
   }
   async function doRevert(snapshotId){
     const r=await api.post(`/api/snapshots/${snapshotId}/revert`);
-    if(r.ok){ reload(); setWriteResult(null); onUpdated&&onUpdated(); }
+    if(r.ok){ reload(); setWriteResult(null); onUpdated?.(); onTagsWritten?.(); }
     else alert('撤销失败: '+r.error);
   }
 
@@ -849,7 +849,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,onWhitelistChange}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,onWhitelistChange,onTagsWritten}){
   // ── Filter state ───────────────────────────────────────────────────────
   // 'all' | 'scraped' | 'dup'  — the 3 interactive stat cards
   const[libFilter,setLibFilter]=useState('all');
@@ -1036,7 +1036,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 
   return e('div',{className:'fade'},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
-    scrapeTarget&&e(ScrapeDialog,{fileId:scrapeTarget,onClose:()=>setScrapeTarget(null),onUpdated:()=>{loadFresh();loadStats();}}),
+    scrapeTarget&&e(ScrapeDialog,{fileId:scrapeTarget,onClose:()=>setScrapeTarget(null),onUpdated:()=>{loadFresh();loadStats();onTagsWritten?.();}}),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
 
@@ -1479,7 +1479,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
   return e('div',{className:'fade'},
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
-      onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}}}),
+      onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
+      onTagsWritten:()=>{}}),
     keepConfirm&&e('div',{style:{position:'fixed',inset:0,zIndex:900,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center'},
       onClick:ev=>{if(ev.target===ev.currentTarget)setKeepConfirm(null);}},
       e('div',{className:'fade',style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:380,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.18)'}},
@@ -1625,12 +1626,13 @@ const SETTINGS_SECTIONS=[
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
 const TAG_LEGEND=['exact_copy','same_recording','fp_diff','mb_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
 
-function WriteHistorySection(){
+function WriteHistorySection({writeHistoryKey}){
   const[rows,setRows]=useState(null);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
   function load(){api.get('/api/snapshots').then(r=>{if(r.ok)setRows(r.data||[]);});}
   useEffect(()=>{load();},[]);
+  useEffect(()=>{if(writeHistoryKey>0)load();},[writeHistoryKey]);
   async function revert(id){
     const r=await api.post(`/api/snapshots/${id}/revert`);
     if(r.ok){setToast({msg:'已撤销，文件标签已恢复',type:'success'});load();}
@@ -1728,7 +1730,7 @@ function WhitelistSection({player,whitelistKey}){
               style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
                 borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
           ),
-          e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',overflow:'hidden'}},
+          e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
             e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
                 ...['','标题','艺术家','专辑','格式','操作'].map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap'}},h))
@@ -1756,7 +1758,7 @@ function WhitelistSection({player,whitelistKey}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player,whitelistKey}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player,whitelistKey,writeHistoryKey}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -1766,7 +1768,9 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   const[acoustidValidResult,setAcoustidValidResult]=useState(null); // null|{ok,error}
   const[acoustidKeyDirty,setAcoustidKeyDirty]=useState(false);
   const[needsScrapeReapply,setNeedsScrapeReapply]=useState(false);
+  const[fpcalc,setFpcalc]=useState(null);
   const saveTimer=useRef(null);
+  useEffect(()=>{api.get('/api/system/fpcalc').then(r=>{if(r.ok)setFpcalc(r.data);});},[]);
   const isFirst=useRef(true);
   const lastApplied=useRef(null); // {threshold, duration_tolerance, quality_tiers} snapshot as of the last manual reapply
 
@@ -1939,7 +1943,15 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
             Icon(acoustidValidResult.ok?'circle-check':'alert-circle',{fontSize:12}),
             acoustidValidResult.ok?'API Key 有效✓':'验证失败: '+(acoustidValidResult.error||'')
           ),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后刮削时会用声纹指纹向 AcoustID 查询，比纯文本搜索更准确')
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后刮削时会用声纹指纹向 AcoustID 查询，比纯文本搜索更准确'),
+          fpcalc&&e('div',{style:{marginTop:6,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',
+            background:fpcalc.available?'var(--green-bg)':'var(--bg-muted)',
+            border:`0.5px solid ${fpcalc.available?'var(--green-bd)':'var(--bd-default)'}`,
+            color:fpcalc.available?'var(--green)':'var(--tx-faint)',display:'flex',gap:5,alignItems:'flex-start'}},
+            Icon(fpcalc.available?'circle-check':'info-circle',{fontSize:12,flexShrink:0,marginTop:1}),
+            fpcalc.available?`fpcalc 已就绪：AcoustID 声纹指纹将在下次声纹提取时自动生成`:
+              '未检测到 fpcalc。请将 fpcalc 可执行文件放入项目根目录，或安装 Chromaprint 工具包，再重新提取声纹即可启用 AcoustID 声纹匹配。详见 acoustid.org/chromaprint'
+          )
         )
       ),
 
@@ -1970,7 +1982,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(WhitelistSection,{player,whitelistKey}),
-      e(WriteHistorySection),
+      e(WriteHistorySection,{writeHistoryKey}),
     )
   );
 }
@@ -2038,6 +2050,7 @@ function App(){
   const[settings,setSettingsState]=useState(null);
   const[scanDoneKey,setScanDoneKey]=useState(0);
   const[whitelistKey,setWhitelistKey]=useState(0);
+  const[writeHistoryKey,setWriteHistoryKey]=useState(0);
   const player=useGlobalPlayer();
 
   function refreshStats(){
@@ -2154,10 +2167,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1)})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite,whitelistKey}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
