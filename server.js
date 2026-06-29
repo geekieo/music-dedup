@@ -17,6 +17,7 @@ import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromSnapshot, buildFilename, getExiftoolStatus } from './lib/tagger.js';
+import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,6 +218,10 @@ app.post('/api/snapshots/:id/revert', async(req,res)=>{
 // exiftool availability (shown in ScrapeDialog write section)
 app.get('/api/system/exiftool', async(_,res)=>{
   res.json({ok:true,data:await getExiftoolStatus()});
+});
+app.get('/api/system/fpcalc', async(_,res)=>{
+  const p = await detectFpcalc();
+  res.json({ok:true,available:!!p,path:p||null,note:p?'fpcalc 已找到，Chromaprint 声纹将在下次声纹提取时生成':'fpcalc 未安装。将 fpcalc 可执行文件放入项目根目录，或安装 Chromaprint 工具包 (acoustid.org/chromaprint)'});
 });
 
 // ── Whitelist ─────────────────────────────────────────────────────────────
