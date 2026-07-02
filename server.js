@@ -10,7 +10,7 @@ import {
   getDB, statsQuery, getGroups, getGroupDetail, resolveGroup,
   setTrackKeep, getAllSettings, getSetting, setSetting,
   addWhitelist, removeWhitelist, getWhitelist, getFileById,
-  queryLibrary, queryLibraryAllForTier, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
+  queryLibrary, queryLibraryByTier, locateFileInLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
   getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
@@ -18,7 +18,6 @@ import { runMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
-import { computeScrapeTier, tierRank } from './lib/tier.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -101,27 +100,14 @@ app.post('/api/browse-folder', async(_,res)=>{
 
 // ── Library ───────────────────────────────────────────────────────────────
 app.get('/api/library', (req,res)=>{
-  const { search='', sort='title', order='asc', page=1, limit=100, format='', libFilter='all' } = req.query;
+  const { search='', sort='title', order='asc', page=1, limit=100, format='', libFilter='all', scrapeTier='' } = req.query;
   try {
-    if (sort === 'scrape_tier') {
-      // Tier depends on Traditional/Simplified folding — not expressible in
-      // SQL. Fetch the full filtered set, compute tier in JS, sort, paginate.
-      const allRows = queryLibraryAllForTier(db, { search, format, libFilter });
-      const withTier = allRows.map(f => {
-        const scraped = {
-          title: f.scraped_title, artist: f.scraped_artist, album: f.scraped_album,
-          album_year: f.scraped_album_year || 0, track_number: f.scraped_track_number || 0,
-          genre: f.scraped_genre || null, match_basis: f.scrape_match_basis,
-          source: f.scrape_source || (f.mb_recording_id ? 'musicbrainz' : 'none'),
-        };
-        return { ...f, _tier: computeScrapeTier(f, scraped) };
-      });
-      const dir = order === 'desc' ? -1 : 1;
-      withTier.sort((a, b) => dir * (tierRank(a._tier) - tierRank(b._tier)));
-      const total = withTier.length;
-      const start = (+page - 1) * +limit;
-      const rows = withTier.slice(start, start + +limit).map(({ _tier, ...rest }) => rest);
-      return res.json({ ok:true, data:{ total, page:+page, limit:+limit, rows } });
+    // Tier depends on Traditional/Simplified folding — not expressible in
+    // SQL. Needed either when sorting BY tier, or when filtering to a
+    // specific 刮削分类 — both fetch the full filtered set, compute tier in
+    // JS, sort/filter, then paginate (see queryLibraryByTier).
+    if (sort === 'scrape_tier' || scrapeTier) {
+      return res.json({ ok:true, data: queryLibraryByTier(db,{search,sort,order,page:+page,limit:+limit,format,libFilter,scrapeTier}) });
     }
     res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format,libFilter}) });
   }
@@ -130,6 +116,17 @@ app.get('/api/library', (req,res)=>{
 app.get('/api/library/stats', (_,res)=>{
   try{ res.json({ok:true,data:libraryStats(db)}); }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+// Locate a file's zero-based index under the whole (unfiltered) library for
+// a given sort/order — lets the client jump straight to the right page
+// instead of paging through results looking for it. See public/app.js
+// LibraryView's locate handler.
+app.get('/api/library/locate/:id', (req,res)=>{
+  try {
+    const { sort='title', order='asc' } = req.query;
+    const index = locateFileInLibrary(db, +req.params.id, { sort, order });
+    res.json({ ok:true, index });
+  } catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 
 // ── Files ─────────────────────────────────────────────────────────────────
@@ -384,7 +381,12 @@ app.post('/api/validate-acoustid', async(req,res)=>{
     if (d.status === 'ok' || (d.status === 'error' && d.error?.code !== 3)) {
       res.json({ ok: true });
     } else {
-      res.json({ ok: false, error: d.error?.message || '无效的 API Key，请在 acoustid.biz 注册后获取' });
+      const base = d.error?.message || '无效的 API Key';
+      // Code 3 is very often caused by pasting the personal/user key (shown
+      // right after login) instead of an application/client key, which
+      // requires registering an application separately — the two look
+      // identical but only one works for lookups.
+      res.json({ ok: false, error: `${base}（请确认使用的是 acoustid.org 注册应用后获得的 "client" 密钥，而非登录后看到的个人 "user" 密钥）` });
     }
   } catch(e) {
     res.json({ ok: false, error: '网络错误: ' + e.message });
