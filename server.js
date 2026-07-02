@@ -10,7 +10,7 @@ import {
   getDB, statsQuery, getGroups, getGroupDetail, resolveGroup,
   setTrackKeep, getAllSettings, getSetting, setSetting,
   addWhitelist, removeWhitelist, getWhitelist, getFileById,
-  queryLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
+  queryLibrary, queryLibraryAllForTier, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
   getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
@@ -18,6 +18,7 @@ import { runMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
+import { computeScrapeTier, tierRank } from './lib/tier.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -101,7 +102,29 @@ app.post('/api/browse-folder', async(_,res)=>{
 // ── Library ───────────────────────────────────────────────────────────────
 app.get('/api/library', (req,res)=>{
   const { search='', sort='title', order='asc', page=1, limit=100, format='', libFilter='all' } = req.query;
-  try { res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format,libFilter}) }); }
+  try {
+    if (sort === 'scrape_tier') {
+      // Tier depends on Traditional/Simplified folding — not expressible in
+      // SQL. Fetch the full filtered set, compute tier in JS, sort, paginate.
+      const allRows = queryLibraryAllForTier(db, { search, format, libFilter });
+      const withTier = allRows.map(f => {
+        const scraped = {
+          title: f.scraped_title, artist: f.scraped_artist, album: f.scraped_album,
+          album_year: f.scraped_album_year || 0, track_number: f.scraped_track_number || 0,
+          genre: f.scraped_genre || null, match_basis: f.scrape_match_basis,
+          source: f.scrape_source || (f.mb_recording_id ? 'musicbrainz' : 'none'),
+        };
+        return { ...f, _tier: computeScrapeTier(f, scraped) };
+      });
+      const dir = order === 'desc' ? -1 : 1;
+      withTier.sort((a, b) => dir * (tierRank(a._tier) - tierRank(b._tier)));
+      const total = withTier.length;
+      const start = (+page - 1) * +limit;
+      const rows = withTier.slice(start, start + +limit).map(({ _tier, ...rest }) => rest);
+      return res.json({ ok:true, data:{ total, page:+page, limit:+limit, rows } });
+    }
+    res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format,libFilter}) });
+  }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 app.get('/api/library/stats', (_,res)=>{
@@ -208,20 +231,40 @@ app.get('/api/files/:id/snapshots', (req,res)=>{
   res.json({ok:true,data:getTagSnapshots(db,+req.params.id)});
 });
 app.get('/api/snapshots', (_,res)=>{
+  // Auto-purge entries past their 30-day retention window
+  db.run('DELETE FROM write_history WHERE expires_at > 0 AND expires_at < ?', [Date.now()]);
   res.json({ok:true, data: getWriteHistory(db)});
 });
 app.post('/api/snapshots/:fileId/revert', async(req,res)=>{
   try{ res.json(await revertFromWriteHistory(db, +req.params.fileId)); }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
+app.delete('/api/snapshots/:fileId', (req,res)=>{
+  db.run('DELETE FROM write_history WHERE file_id=?', [+req.params.fileId]);
+  res.json({ok:true});
+});
 
 // exiftool availability (shown in ScrapeDialog write section)
 app.get('/api/system/exiftool', async(_,res)=>{
   res.json({ok:true,data:await getExiftoolStatus()});
 });
-app.get('/api/system/fpcalc', async(_,res)=>{
-  const p = await detectFpcalc();
-  res.json({ok:true,available:!!p,path:p||null,note:p?'fpcalc 已找到，Chromaprint 声纹将在下次声纹提取时生成':'fpcalc 未安装。将 fpcalc 可执行文件放入项目根目录，或安装 Chromaprint 工具包 (acoustid.org/chromaprint)'});
+app.get('/api/system/fpcalc', async(req,res)=>{
+  // ?path=... lets the client live-test a candidate path before saving it.
+  // Falls back to the saved setting when no query param is given.
+  const s = getAllSettings(db);
+  const testPath = req.query.path !== undefined ? req.query.path : (s.fpcalc_path || '');
+  if (req.query.path !== undefined) resetFpcalcDetection(); // force fresh check for live test
+  const p = await detectFpcalc(testPath);
+  res.json({ok:true, data:{
+    available: !!p,
+    path: p || null,
+    usingCustomPath: !!testPath,
+    note: p
+      ? `fpcalc 已找到（${p}），Chromaprint 声纹将在下次声纹提取时生成`
+      : testPath
+        ? `在配置的路径中未找到 fpcalc: ${testPath}`
+        : 'fpcalc 未安装。将 fpcalc 可执行文件放入项目根目录，或在下方填写路径',
+  }});
 });
 
 // ── Whitelist ─────────────────────────────────────────────────────────────
@@ -296,7 +339,7 @@ app.post('/api/scan/start', async(req,res)=>{
   try{
     if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort,onPause:pause});
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
-    if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:prog,onAbort:abort,onPause:pause});
     // Scrape MUST run before match so mb_recording_id data is available for union logic
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';

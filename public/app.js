@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.7.0';
+const APP_VERSION='1.7.4';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -108,6 +108,13 @@ const ICONS={
   'volume-2':   {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
   'volume-off': {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M23 9l-6 6'}],['path',{d:'M17 9l6 6'}]]},
   wand:{els:[['path',{d:'M4 20L20 4'}],['path',{d:'M7 4l1.5 1.5L7 7'}],['path',{d:'M17 14l1.5 1.5-1.5 1.5'}],['path',{d:'M4 4l.5.5'}],['path',{d:'M20 20l-.5-.5'}]]},
+  edit:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
+  pencil:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
+  'arrow-back-up':{els:[['path',{d:'M9 13l-4-4 4-4'}],['path',{d:'M5 9h9a5 5 0 010 10h-2'}]]},
+  books:{els:[['path',{d:'M5 4a1 1 0 011-1h3a1 1 0 011 1v16a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M11 6h3a1 1 0 011 1v13a1 1 0 01-1 1h-3'}],['path',{d:'M17.3 5.2l2.4.7a1 1 0 01.7 1.2l-3.6 13a1 1 0 01-1.2.7l-1.9-.5'}]]},
+  'shield-x':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9.5 9.5l5 5'}],['path',{d:'M14.5 9.5l-5 5'}]]},
+  'toggle-left':{els:[['path',{d:'M4 12a6 6 0 016-6h4a6 6 0 010 12H10a6 6 0 01-6-6z'}],['circle',{cx:9.5,cy:12,r:2.6,fill:'currentColor'}]]},
+  'file-music':{els:[['path',{d:'M14 3v4a1 1 0 001 1h4'}],['path',{d:'M5 4a1 1 0 011-1h7l5 5v11a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M9.5 17v-4.5l4-1v4.5'}],['circle',{cx:8.7,cy:17,r:1.2,fill:'currentColor'}],['circle',{cx:12.7,cy:15.5,r:1.2,fill:'currentColor'}]]},
 };
 function Icon(name,style={},className){
   const spec=ICONS[name];
@@ -442,28 +449,60 @@ function ConfirmModal({title,message,onConfirm,onClose,danger}){
 }
 
 
+// T2S_PAIRS: compact Traditional→Simplified single-character map, generated from
+// opencc-js's STCharacters.js dictionary (2714 BMP character pairs, "TS" repeated).
+// Used ONLY for lightweight client-side comparison (does file text vs scraped text
+// differ only by Traditional/Simplified spelling?) — not for display conversion.
+const T2S_PAIRS = `㐷傌㐹㑶㐽偑㑇㑳㑈倲㑔㑯㑩儸㓥劏㓰劃㔉劚㖊噚㖞喎㘎㘚㚯㜄㛀媰㛣㜏㛤孋㟆㠏㟥嵾㡎幓㤘㥮㤽懤㥪慺㧏掆㧐㩳㧑撝㧟擓㧰擽㨫㩜㭎棡㭏椲㭤樢㭴樫㱩殰㱮殨㲿瀇㳔濧㳕灡㳠澾㳡濄㳽瀰㴋潚㶉鸂㶶燶㶽煱㺍獱㻅璯䀥䁻䁖瞜䂵碽䃅磾䅉稏䅟穇䇲筴䉤籔䌶䊷䌷紬䌸縳䌹絅䌺䋙䌻䋚䌼綐䌽綵䌾䋻䌿䋹䍀繿䍁繸䍠䍦䎬䎱䏝膞䓓薵䓕薳䓖藭䓨罃䗖螮䙌䙡䙓襬䜣訢䜤鿁䜧䜀䜩讌䝙貙䞍䝼䞐賰䟢躎䥺釾䥽鏺䥾䥱䦂䥇䦃鐯䦅鐥䦆钁䦶䦛䦷䦟䩄靦䯄騧䯅䯀䲝䱽䲟鮣䲠鰆䲡鰌䲢鰧䲣䱷䴓鳾䴔鵁䴕鴷䴖鶄䴗鶪䴘鷉䴙鸊䶮龑万萬与與丑醜专專业業丛叢东東丝絲丢丟两兩严嚴丧喪个個丰豐临臨为爲丽麗举舉么麼义義乌烏乐樂乔喬习習乡鄉书書买買乱亂争爭于於亏虧云雲亘亙亚亞产產亩畝亲親亵褻亸嚲亿億仅僅仆僕从從仑侖仓倉仪儀们們价價众衆优優伙夥会會伛傴伞傘伟偉传傳伡俥伣俔伤傷伥倀伦倫伧傖伪僞伫佇体體余餘佣傭佥僉侠俠侣侶侥僥侦偵侧側侨僑侩儈侪儕侬儂侭儘俣俁俦儔俨儼俩倆俪儷俫倈俭儉债債倾傾偬傯偻僂偾僨偿償傤儎傥儻傧儐储儲傩儺儿兒兑兌兖兗党黨兰蘭关關兴興兹茲养養兽獸冁囅内內冈岡册冊写寫军軍农農冯馮冲衝决決况況冻凍净淨凄悽准準凉涼减減凑湊凛凜几幾凤鳳凫鳧凭憑凯凱凶兇击擊凿鑿刍芻划劃刘劉则則刚剛创創删刪别別刬剗刭剄刹剎刽劊刾㓨刿劌剀剴剂劑剐剮剑劍剥剝剧劇劝勸办辦务務劢勱动動励勵劲勁劳勞势勢勋勳勚勩匀勻匦匭匮匱区區医醫华華协協单單卖賣占佔卢盧卤滷卧臥卫衛却卻卺巹厂廠厅廳历歷厉厲压壓厌厭厍厙厐龎厕廁厘釐厢廂厣厴厦廈厨廚厩廄厮廝县縣叁叄参參叆靉叇靆双雙发發变變叙敘叠疊台臺叶葉号號叹嘆叽嘰吁籲吃喫后後吓嚇吕呂吗嗎吨噸听聽启啓吴吳呐吶呒嘸呓囈呕嘔呖嚦呗唄员員呙咼呛嗆呜嗚咏詠咙嚨咛嚀咝噝咤吒咨諮咸鹹响響哑啞哒噠哓嘵哔嗶哕噦哗譁哙噲哜嚌哝噥哟喲唇脣唛嘜唝嗊唠嘮唡啢唢嗩唤喚啧嘖啬嗇啭囀啮齧啯嘓啰囉啴嘽啸嘯喷噴喽嘍喾嚳嗫囁嗳噯嘘噓嘤嚶嘱囑噜嚕嚣囂团團园園囱囪围圍囵圇国國图圖圆圓圣聖圹壙场場坏壞块塊坚堅坛壇坜壢坝壩坞塢坟墳坠墜垄壟垅壠垆壚垒壘垦墾垩堊垫墊垭埡垯墶垱壋垲塏垴堖埘塒埙壎埚堝堑塹堕墮塆壪墙牆壮壯声聲壳殼壶壺壸壼处處备備复復够夠头頭夸誇夹夾夺奪奁奩奂奐奋奮奖獎奥奧妆妝妇婦妈媽妩嫵妪嫗妫嬀姗姍姹奼娄婁娅婭娆嬈娇嬌娈孌娱娛娲媧娴嫺婳嫿婴嬰婵嬋婶嬸媪媼媭嬃嫒嬡嫔嬪嫱嬙嬷嬤孙孫学學孪孿宁寧宝寶实實宠寵审審宪憲宫宮宽寬宾賓寝寢对對寻尋导導寿壽将將尔爾尘塵尝嘗尧堯尴尷尸屍尽盡层層屃屓屉屜届屆属屬屡屢屦屨屿嶼岁歲岂豈岖嶇岗崗岘峴岚嵐岛島岩巖岭嶺岳嶽岽崬岿巋峃嶨峄嶧峡峽峣嶢峤嶠峥崢峦巒峰峯崂嶗崃崍崄嶮崭嶄嵘嶸嵚嶔嵝嶁巅巔巩鞏巯巰币幣帅帥师師帏幃帐帳帘簾帜幟带帶帧幀帮幫帱幬帻幘帼幗幂冪干幹并並广廣庄莊庆慶床牀庐廬庑廡库庫应應庙廟庞龐废廢庼廎廪廩开開异異弃棄弑弒张張弥彌弪弳弯彎弹彈强強归歸当當录錄彟彠彦彥彨彲彻徹征徵径徑徕徠忆憶忏懺忧憂忾愾怀懷态態怂慫怃憮怄慪怅悵怆愴怜憐总總怼懟怿懌恋戀恒恆恳懇恶惡恸慟恹懨恺愷恻惻恼惱恽惲悦悅悫愨悬懸悭慳悮悞悯憫惊驚惧懼惨慘惩懲惫憊惬愜惭慚惮憚惯慣愠慍愤憤愦憒愿願慑懾慭憖懑懣懒懶懔懍戆戇戋戔戏戲戗戧战戰戬戩戯戱户戶扑撲托託执執扩擴扪捫扫掃扬揚扰擾抚撫抛拋抟摶抠摳抡掄抢搶护護报報担擔拟擬拢攏拣揀拥擁拦攔拧擰拨撥择擇挂掛挚摯挛攣挜掗挝撾挞撻挟挾挠撓挡擋挢撟挣掙挤擠挥揮挦撏捝挩捞撈损損捡撿换換捣搗据據掳擄掴摑掷擲掸撣掺摻掼摜揽攬揾搵揿撳搀攙搁擱搂摟搄揯搅攪携攜摄攝摅攄摆擺摇搖摈擯摊攤撄攖撑撐撵攆撷擷撸擼撺攛擜㩵擞擻攒攢敌敵敚敓敛斂敩斆数數斋齋斓斕斗鬥斩斬断斷无無旧舊时時旷曠旸暘昙曇昵暱昼晝昽曨显顯晋晉晒曬晓曉晔曄晕暈晖暉暂暫暧曖术術朴樸机機杀殺杂雜权權杠槓条條来來杨楊杩榪杰傑极極构構枞樅枢樞枣棗枥櫪枧梘枨棖枪槍枫楓枭梟柜櫃柠檸柽檉栀梔栅柵标標栈棧栉櫛栊櫳栋棟栌櫨栎櫟栏欄树樹栖棲样樣栾欒桠椏桡橈桢楨档檔桤榿桥橋桦樺桧檜桨槳桩樁桪樳梦夢梼檮梾棶梿槤检檢棁梲棂欞椁槨椝槼椟櫝椠槧椢槶椤欏椫樿椭橢椮槮楼樓榄欖榅榲榇櫬榈櫚榉櫸榝樧槚檟槛檻槟檳槠櫧横橫樯檣樱櫻橥櫫橱櫥橹櫓橼櫞檩檁欢歡欤歟欧歐歼殲殁歿殇殤残殘殒殞殓殮殚殫殡殯殴毆毁毀毂轂毕畢毙斃毡氈毵毿氇氌气氣氢氫氩氬氲氳汇匯汉漢汤湯汹洶沄澐沟溝没沒沣灃沤漚沥瀝沦淪沧滄沨渢沩潙沪滬泞濘泪淚泶澩泷瀧泸瀘泺濼泻瀉泼潑泽澤泾涇洁潔洒灑洼窪浃浹浅淺浆漿浇澆浈湞浉溮浊濁测測浍澮济濟浏瀏浐滻浑渾浒滸浓濃浔潯浕濜涂塗涌湧涚涗涛濤涝澇涞淶涟漣涠潿涡渦涢溳涣渙涤滌润潤涧澗涨漲涩澀淀澱渊淵渌淥渍漬渎瀆渐漸渑澠渔漁渖瀋渗滲温溫游遊湾灣湿溼溁濚溃潰溅濺溆漵溇漊滗潷滚滾滞滯滟灩滠灄满滿滢瀅滤濾滥濫滦灤滨濱滩灘滪澦潆瀠潇瀟潋瀲潍濰潜潛潴瀦澛瀂澜瀾濑瀨濒瀕灏灝灭滅灯燈灵靈灶竈灾災灿燦炀煬炉爐炖燉炜煒炝熗点點炼煉炽熾烁爍烂爛烃烴烛燭烟煙烦煩烧燒烨燁烩燴烫燙烬燼热熱焕煥焖燜焘燾煴熅熏燻爱愛爷爺牍牘牦犛牵牽牺犧犊犢状狀犷獷犸獁犹猶狈狽狝獮狞獰独獨狭狹狮獅狯獪狰猙狱獄狲猻猃獫猎獵猕獼猡玀猪豬猫貓猬蝟献獻獭獺玑璣玙璵玚瑒玛瑪玮瑋环環现現玱瑲玺璽珐琺珑瓏珰璫珲琿琎璡琏璉琐瑣琼瓊瑶瑤瑷璦瑸璸璎瓔瓒瓚瓮甕瓯甌电電画畫畅暢畴疇疖癤疗療疟瘧疠癘疡瘍疬癧疭瘲疮瘡疯瘋疱皰疴痾痈癰痉痙痒癢痖瘂痨癆痪瘓痫癇痴癡瘅癉瘆瘮瘗瘞瘘瘻瘪癟瘫癱瘾癮瘿癭癞癩癣癬癫癲皂皁皑皚皱皺皲皸盏盞盐鹽监監盖蓋盗盜盘盤眍瞘眦眥眬矓睁睜睐睞睑瞼瞆瞶瞒瞞瞩矚矫矯矶磯矾礬矿礦砀碭码碼砖磚砗硨砚硯砜碸砺礪砻礱砾礫础礎硁硜硕碩硖硤硗磽硙磑硚礄确確硵磠硷礆碍礙碛磧碜磣碱鹼礼禮祃禡祎禕祢禰祯禎祷禱祸禍禀稟禄祿禅禪离離秃禿秆稈种種秘祕积積称稱秽穢秾穠稆穭税稅稣穌稳穩穑穡穞穭穷窮窃竊窍竅窎窵窑窯窜竄窝窩窥窺窦竇窭窶竖豎竞競笃篤笋筍笔筆笕筧笺箋笼籠笾籩筑築筚篳筛篩筜簹筝箏筹籌筼篔签籤筿篠简簡箓籙箦簀箧篋箨籜箩籮箪簞箫簫篑簣篓簍篮籃篯籛篱籬簖籪籁籟籴糴类類籼秈粜糶粝糲粤粵粪糞粮糧粽糉糁糝糇餱糍餈紧緊絷縶緼縕縆緪纟糹纠糾纡紆红紅纣紂纤纖纥紇约約级級纨紈纩纊纪紀纫紉纬緯纭紜纮紘纯純纰紕纱紗纲綱纳納纴紝纵縱纶綸纷紛纸紙纹紋纺紡纻紵纼紖纽紐纾紓线線绀紺绁紲绂紱练練组組绅紳细細织織终終绉縐绊絆绋紼绌絀绍紹绎繹经經绐紿绑綁绒絨结結绔絝绕繞绖絰绗絎绘繪给給绚絢绛絳络絡绝絕绞絞统統绠綆绡綃绢絹绣繡绤綌绥綏绦絛继繼绨綈绩績绪緒绫綾绬緓续續绮綺绯緋绰綽绱鞝绲緄绳繩维維绵綿绶綬绷繃绸綢绹綯绺綹绻綣综綜绽綻绾綰绿綠缀綴缁緇缂緙缃緗缄緘缅緬缆纜缇緹缈緲缉緝缊縕缋繢缌緦缍綞缎緞缏緶缐線缑緱缒縋缓緩缔締缕縷编編缗緡缘緣缙縉缚縛缛縟缜縝缝縫缞縗缟縞缠纏缡縭缢縊缣縑缤繽缥縹缦縵缧縲缨纓缩縮缪繆缫繅缬纈缭繚缮繕缯繒缰繮缱繾缲繰缳繯缴繳缵纘罂罌网網罗羅罚罰罢罷罴羆羁羈羟羥羡羨群羣翘翹翙翽翚翬耢耮耧耬耸聳耻恥聂聶聋聾职職聍聹联聯聩聵聪聰肃肅肠腸肤膚肮骯肴餚肾腎肿腫胀脹胁脅胆膽胜勝胧朧胨腖胪臚胫脛胶膠脉脈脍膾脏髒脐臍脑腦脓膿脔臠脚腳脱脫脶腡脸臉腊臘腌醃腘膕腭齶腻膩腼靦腽膃腾騰膑臏膻羶臜臢舆輿舣艤舰艦舱艙舻艫艰艱艳豔艺藝节節芈羋芗薌芜蕪芦蘆苁蓯苇葦苈藶苋莧苌萇苍蒼苎苧苏蘇苧薴苹蘋范範茎莖茏蘢茑蔦茔塋茕煢茧繭荆荊荐薦荙薘荚莢荛蕘荜蓽荝萴荞蕎荟薈荠薺荡蕩荣榮荤葷荥滎荦犖荧熒荨蕁荩藎荪蓀荫蔭荬蕒荭葒荮葤药藥莅蒞莱萊莲蓮莳蒔莴萵莶薟获獲莸蕕莹瑩莺鶯莼蓴萚蘀萝蘿萤螢营營萦縈萧蕭萨薩葱蔥蒀蒕蒇蕆蒉蕢蒋蔣蒌蔞蒏醟蓝藍蓟薊蓠蘺蓣蕷蓥鎣蓦驀蔂虆蔷薔蔹蘞蔺藺蔼藹蕰薀蕲蘄蕴蘊薮藪藓蘚藴蘊蘖櫱虏虜虑慮虚虛虫蟲虬虯虮蟣虱蝨虽雖虾蝦虿蠆蚀蝕蚁蟻蚂螞蚃蠁蚕蠶蚝蠔蚬蜆蛊蠱蛎蠣蛏蟶蛮蠻蛰蟄蛱蛺蛲蟯蛳螄蛴蠐蜕蛻蜗蝸蜡蠟蝇蠅蝈蟈蝉蟬蝎蠍蝼螻蝾蠑螀螿螨蟎蟏蠨衅釁衔銜补補衬襯衮袞袄襖袅嫋袆褘袜襪袭襲袯襏装裝裆襠裈褌裢褳裣襝裤褲裥襉褛褸褴襤襕襴见見观觀觃覎规規觅覓视視觇覘览覽觉覺觊覬觋覡觌覿觍覥觎覦觏覯觐覲觑覷觞觴触觸觯觶訚誾詟讋誉譽誊謄讠訁计計订訂讣訃认認讥譏讦訐讧訌讨討让讓讪訕讫訖讬託训訓议議讯訊记記讱訒讲講讳諱讴謳讵詎讶訝讷訥许許讹訛论論讻訩讼訟讽諷设設访訪诀訣证證诂詁诃訶评評诅詛识識诇詗诈詐诉訴诊診诋詆诌謅词詞诎詘诏詔诐詖译譯诒詒诓誆诔誄试試诖詿诗詩诘詰诙詼诚誠诛誅诜詵话話诞誕诟詬诠詮诡詭询詢诣詣诤諍该該详詳诧詫诨諢诩詡诪譸诫誡诬誣语語诮誚误誤诰誥诱誘诲誨诳誑说說诵誦诶誒请請诸諸诹諏诺諾读讀诼諑诽誹课課诿諉谀諛谁誰谂諗调調谄諂谅諒谆諄谇誶谈談谉讅谊誼谋謀谌諶谍諜谎謊谏諫谐諧谑謔谒謁谓謂谔諤谕諭谖諼谗讒谘諮谙諳谚諺谛諦谜謎谝諞谞諝谟謨谠讜谡謖谢謝谣謠谤謗谥諡谦謙谧謐谨謹谩謾谪謫谫譾谬謬谭譚谮譖谯譙谰讕谱譜谲譎谳讞谴譴谵譫谶讖豮豶贝貝贞貞负負贠貟贡貢财財责責贤賢败敗账賬货貨质質贩販贪貪贫貧贬貶购購贮貯贯貫贰貳贱賤贲賁贳貰贴貼贵貴贶貺贷貸贸貿费費贺賀贻貽贼賊贽贄贾賈贿賄赀貲赁賃赂賂赃贓资資赅賅赆贐赇賕赈賑赉賚赊賒赋賦赌賭赍齎赎贖赏賞赐賜赑贔赒賙赓賡赔賠赕賧赖賴赗賵赘贅赙賻赚賺赛賽赜賾赝贗赞贊赟贇赠贈赡贍赢贏赣贛赪赬赵趙赶趕趋趨趱趲趸躉跃躍跄蹌跖蹠跞躒践踐跶躂跷蹺跸蹕跹躚跻躋踌躊踪蹤踬躓踯躑蹑躡蹒蹣蹰躕蹿躥躏躪躜躦躯軀輼轀车車轧軋轨軌轩軒轪軑轫軔转轉轭軛轮輪软軟轰轟轱軲轲軻轳轤轴軸轵軹轶軼轷軤轸軫轹轢轺軺轻輕轼軾载載轾輊轿轎辀輈辁輇辂輅较較辄輒辅輔辆輛辇輦辈輩辉輝辊輥辋輞辌輬辍輟辎輜辏輳辐輻辑輯辒轀输輸辔轡辕轅辖轄辗輾辘轆辙轍辚轔辞辭辟闢辩辯辫辮边邊辽遼达達迁遷过過迈邁运運还還这這进進远遠违違连連迟遲迩邇迳逕迹跡适適选選逊遜递遞逦邐逻邏遗遺遥遙邓鄧邝鄺邬鄔邮郵邹鄒邺鄴邻鄰郁鬱郏郟郐鄶郑鄭郓鄆郦酈郧鄖郸鄲酂酇酝醞酦醱酱醬酽釅酾釃酿釀醖醞采採释釋里裏鉴鑑銮鑾錾鏨钅釒钆釓钇釔针針钉釘钊釗钋釙钌釕钍釷钎釺钏釧钐釤钑鈒钒釩钓釣钔鍆钕釹钖鍚钗釵钘鈃钙鈣钚鈈钛鈦钜鉅钝鈍钞鈔钟鍾钠鈉钡鋇钢鋼钣鈑钤鈐钥鑰钦欽钧鈞钨鎢钩鉤钪鈧钫鈁钬鈥钭鈄钮鈕钯鈀钰鈺钱錢钲鉦钳鉗钴鈷钵鉢钶鈳钷鉕钸鈽钹鈸钺鉞钻鑽钼鉬钽鉭钾鉀钿鈿铀鈾铁鐵铂鉑铃鈴铄鑠铅鉛铆鉚铇鉋铈鈰铉鉉铊鉈铋鉍铌鈮铍鈹铎鐸铏鉶铐銬铑銠铒鉺铓鋩铔錏铕銪铖鋮铗鋏铘鋣铙鐃铚銍铛鐺铜銅铝鋁铞銱铟銦铠鎧铡鍘铢銖铣銑铤鋌铥銩铦銛铧鏵铨銓铩鎩铪鉿铫銚铬鉻铭銘铮錚铯銫铰鉸铱銥铲鏟铳銃铴鐋铵銨银銀铷銣铸鑄铹鐒铺鋪铻鋙铼錸铽鋱链鏈铿鏗销銷锁鎖锂鋰锃鋥锄鋤锅鍋锆鋯锇鋨锈鏽锉銼锊鋝锋鋒锌鋅锍鋶锎鐦锏鐧锐銳锑銻锒鋃锓鋟锔鋦锕錒锖錆锗鍺锘鍩错錯锚錨锛錛锜錡锝鍀锞錁锟錕锠錩锡錫锢錮锣鑼锤錘锥錐锦錦锧鑕锨鍁锩錈锪鍃锫錇锬錟锭錠键鍵锯鋸锰錳锱錙锲鍥锳鍈锴鍇锵鏘锶鍶锷鍔锸鍤锹鍬锺鍾锻鍛锼鎪锽鍠锾鍰锿鎄镀鍍镁鎂镂鏤镃鎡镄鐨镅鎇镆鏌镇鎮镈鎛镉鎘镊鑷镋钂镌鐫镍鎳镎鎿镏鎦镐鎬镑鎊镒鎰镓鎵镔鑌镕鎔镖鏢镗鏜镘鏝镙鏍镚鏰镛鏞镜鏡镝鏑镞鏃镟鏇镠鏐镡鐔镢钁镣鐐镤鏷镥鑥镦鐓镧鑭镨鐠镩鑹镪鏹镫鐙镬鑊镭鐳镮鐶镯鐲镰鐮镱鐿镲鑔镳鑣镴鑞镵鑱镶鑲长長门門闩閂闪閃闫閆闬閈闭閉问問闯闖闰閏闱闈闲閒闳閎间間闵閔闶閌闷悶闸閘闹鬧闺閨闻聞闼闥闽閩闾閭闿闓阀閥阁閣阂閡阃閫阄鬮阅閱阆閬阇闍阈閾阉閹阊閶阋鬩阌閿阍閽阎閻阏閼阐闡阑闌阒闃阓闠阔闊阕闋阖闔阗闐阘闒阙闕阚闞阛闤队隊阳陽阴陰阵陣阶階际際陆陸陇隴陈陳陉陘陕陝陦隯陧隉陨隕险險随隨隐隱隶隸隽雋难難雇僱雏雛雠讎雳靂雾霧霁霽霉黴霡霢霭靄靓靚靔靝静靜靥靨鞑韃鞒鞽鞯韉鞲韝韦韋韧韌韨韍韩韓韪韙韫韞韬韜韵韻页頁顶頂顷頃顸頇项項顺順须須顼頊顽頑顾顧顿頓颀頎颁頒颂頌颃頏预預颅顱领領颇頗颈頸颉頡颊頰颋頲颌頜颍潁颎熲颏頦颐頤频頻颒頮颓頹颔頷颕頴颖穎颗顆题題颙顒颚顎颛顓颜顏额額颞顳颟顢颠顛颡顙颢顥颣纇颤顫颥顬颦顰颧顴风風飏颺飐颭飑颮飒颯飓颶飔颸飕颼飖颻飗飀飘飄飙飆飚飈飞飛飨饗餍饜饣飠饤飣饥飢饦飥饧餳饨飩饩餼饪飪饫飫饬飭饭飯饮飲饯餞饰飾饱飽饲飼饳飿饴飴饵餌饶饒饷餉饸餄饹餎饺餃饻餏饼餅饽餑饾餖饿餓馀餘馁餒馂餕馃餜馄餛馅餡馆館馇餷馈饋馉餶馊餿馋饞馌饁馍饃馎餺馏餾馐饈馑饉馒饅馓饊馔饌馕饢马馬驭馭驮馱驯馴驰馳驱驅驲馹驳駁驴驢驵駔驶駛驷駟驸駙驹駒驺騶驻駐驼駝驽駑驾駕驿驛骀駘骁驍骂罵骃駰骄驕骅驊骆駱骇駭骈駢骉驫骊驪骋騁验驗骍騂骎駸骏駿骐騏骑騎骒騍骓騅骔騌骕驌骖驂骗騙骘騭骙騤骚騷骛騖骜驁骝騮骞騫骟騸骠驃骡騾骢驄骣驏骤驟骥驥骦驦骧驤髅髏髋髖髌髕鬓鬢鬶鬹魇魘魉魎鱼魚鱽魛鱾魢鱿魷鲀魨鲁魯鲂魴鲃䰾鲄魺鲅鮁鲆鮃鲇鮎鲈鱸鲉鮋鲊鮓鲋鮒鲌鮊鲍鮑鲎鱟鲏鮍鲐鮐鲑鮭鲒鮚鲓鮳鲔鮪鲕鮞鲖鮦鲗鰂鲘鮜鲙鱠鲚鱭鲛鮫鲜鮮鲝鮺鲞鯗鲟鱘鲠鯁鲡鱺鲢鰱鲣鰹鲤鯉鲥鰣鲦鰷鲧鯀鲨鯊鲩鯇鲪鮶鲫鯽鲬鯒鲭鯖鲮鯪鲯鯕鲰鯫鲱鯡鲲鯤鲳鯧鲴鯝鲵鯢鲶鯰鲷鯛鲸鯨鲹鰺鲺鯴鲻鯔鲼鱝鲽鰈鲾鰏鲿鱨鳀鯷鳁鰮鳂鰃鳃鰓鳄鱷鳅鰍鳆鰒鳇鰉鳈鰁鳉鱂鳊鯿鳋鰠鳌鰲鳍鰭鳎鰨鳏鰥鳐鰩鳑鰟鳒鰜鳓鰳鳔鰾鳕鱈鳖鱉鳗鰻鳘鰵鳙鱅鳚䲁鳛鰼鳜鱖鳝鱔鳞鱗鳟鱒鳠鱯鳡鱤鳢鱧鳣鱣鳤䲘鸟鳥鸠鳩鸡雞鸢鳶鸣鳴鸤鳲鸥鷗鸦鴉鸧鶬鸨鴇鸩鴆鸪鴣鸫鶇鸬鸕鸭鴨鸮鴞鸯鴦鸰鴒鸱鴟鸲鴝鸳鴛鸴鷽鸵鴕鸶鷥鸷鷙鸸鴯鸹鴰鸺鵂鸻鴴鸼鵃鸽鴿鸾鸞鸿鴻鹀鵐鹁鵓鹂鸝鹃鵑鹄鵠鹅鵝鹆鵒鹇鷳鹈鵜鹉鵡鹊鵲鹋鶓鹌鵪鹍鵾鹎鵯鹏鵬鹐鵮鹑鶉鹒鶊鹓鵷鹔鷫鹕鶘鹖鶡鹗鶚鹘鶻鹙鶖鹚鷀鹛鶥鹜鶩鹝鷊鹞鷂鹟鶲鹠鶹鹡鶺鹢鷁鹣鶼鹤鶴鹥鷖鹦鸚鹧鷓鹨鷚鹩鷯鹪鷦鹫鷲鹬鷸鹭鷺鹮䴉鹯鸇鹰鷹鹱鸌鹲鸏鹳鸛鹴鸘鹾鹺麦麥麸麩麹麴麺麪麽麼黄黃黉黌黡黶黩黷黪黲黾黽鼋黿鼌鼂鼍鼉鼹鼴齐齊齑齏齿齒龀齔龁齕龂齗龃齟龄齡龅齙龆齠龇齜龈齦龉齬龊齪龋齲龌齷龙龍龚龔龛龕龟龜鿎䃮鿏䥑鿒鿓鿔鎶`;
+const T2S_MAP = (() => {
+  const m = {};
+  for (let i = 0; i < T2S_PAIRS.length; i += 2) m[T2S_PAIRS[i]] = T2S_PAIRS[i+1];
+  return m;
+})();
+function toSimplified(s) {
+  let out = '';
+  for (const ch of String(s||'')) out += T2S_MAP[ch] || ch;
+  return out;
+}
+
 /* ── Scrape-status tier helper ───────────────────────────────────────────
-   green:  精确匹配（title+artist+album 实际值都一致）且文件属性完整、无推荐写入
-   yellow: 精确匹配但文件存在缺失字段（有推荐写入）
-   red:    模糊匹配 — 任意一个字段（title/artist/album）不一致，或 match_basis=fuzzy
-   null:   无可用刮削数据
+   green:       精确匹配（原文一致，或繁简转换后一致）且文件属性完整
+   dark-yellow: 繁简模糊精确匹配 · 有缺失 — 三字段仅在繁简转换后一致（原文不同），且有字段缺失
+   blue:        精确匹配 · 有缺失 — 三字段原文本身一致，且有字段缺失
+   red:         模糊匹配 — 任一字段原文和繁简转换后都不一致，或 match_basis!=exact
+   null:        无可用刮削数据
 */
+const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
+const normCmpS = s => toSimplified(normCmp(s)); // normCmp + Traditional→Simplified fold
+
+// Compares one field. Returns 'raw' (byte-identical after normCmp), 'cjk'
+// (only matches after Traditional→Simplified folding), or null (mismatch).
+// Either side being empty is treated as neutral ('raw' — no evidence of conflict).
+function fieldMatchTier(fileVal, scrapedVal) {
+  if (!fileVal || !scrapedVal) return 'raw';
+  const fn = normCmp(String(fileVal)), sn = normCmp(String(scrapedVal));
+  if (fn === sn) return 'raw';
+  if (normCmpS(String(fileVal)) === normCmpS(String(scrapedVal))) return 'cjk';
+  return null;
+}
+
 function scrapeStatusTier(file, scraped) {
   if (!scraped || !scraped.title || scraped.source === 'none') return null;
-  // "精确匹配" = scraper 判断为 exact，且 title/artist/album 实际值都一致（或文件缺失该字段）
-  function consistent(fileVal, scrapedVal) {
-    if (!fileVal || !scrapedVal) return true; // 一侧为空 → 中性，不算不一致
-    return normCmp(String(fileVal)) === normCmp(String(scrapedVal));
-  }
-  const titleOk  = consistent(file.title,  scraped.title);
-  const artistOk = consistent(file.artist, scraped.artist);
-  const albumOk  = consistent(file.album,  scraped.album);
-  const isExact  = titleOk && artistOk && albumOk && scraped.match_basis === 'exact';
-  if (!isExact) return 'red';
+  const tR = fieldMatchTier(file.title,  scraped.title);
+  const aR = fieldMatchTier(file.artist, scraped.artist);
+  const bR = fieldMatchTier(file.album,  scraped.album);
+  const anyMismatch = tR===null || aR===null || bR===null;
+  const anyCJK       = tR==='cjk' || aR==='cjk' || bR==='cjk';
+  if (anyMismatch || scraped.match_basis !== 'exact') return 'red';
   const { selected } = autoSelectFields(file, scraped);
-  return Object.values(selected).some(Boolean) ? 'yellow' : 'green';
+  const hasMissing = Object.values(selected).some(Boolean);
+  if (!hasMissing) return 'green'; // complete — CJK-only diffs don't matter once nothing's missing
+  return anyCJK ? 'yellow' : 'blue'; // missing fields: split by whether match relied on CJK folding
 }
-const TIER_COLOR = { green:'var(--green)', yellow:'var(--amber)', red:'var(--red)' };
+
+const TIER_COLOR  = { green:'var(--green)', yellow:'#B45309', blue:'#2563EB', red:'var(--red)' };
+const TIER_ORDER  = { green:0, yellow:1, blue:2, red:3 }; // sort rank; missing/null sorts last
+const TIER_LABEL  = { green:'精确匹配', yellow:'繁简模糊精确匹配 · 有缺失', blue:'精确匹配 · 有缺失', red:'模糊匹配' };
 
 /* ── Instant-tooltip wrapper ─────────────────────────────────────────────
    `title` attribute has browser-imposed ~500 ms delay. This component
@@ -491,10 +530,14 @@ function InstantTooltip({tip,children,style={}}){
    year:   auto if blank + any value available
    track:  auto if blank + any value available
 */
-const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
 function autoSelectFields(file, scraped) {
   if (!scraped || !scraped.title) return { selected:{}, reasons:{} };
-  const exact = scraped.match_basis === 'exact';
+  // Use the same "exact" definition as scrapeStatusTier — but note fieldMatchTier
+  // is defined ABOVE this function (module init order), so it's available here.
+  const tR = fieldMatchTier(file.title,  scraped.title);
+  const aR = fieldMatchTier(file.artist, scraped.artist);
+  const bR = fieldMatchTier(file.album,  scraped.album);
+  const exact = scraped.match_basis === 'exact' && tR!==null && aR!==null && bR!==null;
   const sel = {}, rsn = {};
   const JUNK = [/热歌/,/慢摇/,/合辑/,/精选\d/,/^\d+首/,/网络/];
 
@@ -608,7 +651,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   async function doRevert(snapshotId){
     const r=await api.post(`/api/snapshots/${snapshotId}/revert`);
     if(r.ok){ reload(); setWriteResult(null); onUpdated?.(); onTagsWritten?.(); }
-    else alert('撤销失败: '+r.error);
+    else setWriteResult({ok:false,error:r.error||'撤销失败'});
   }
 
   const filename=fileInfo?fileInfo.path.split(/[\\/]/).pop():'';
@@ -637,7 +680,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         Icon('file-music',{fontSize:13,color:'var(--tx-faint)',flexShrink:0}),
         e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},filename),
         hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:TIER_COLOR[scrapeStatusTier(liveTags,scraped)||'red']+'22',color:TIER_COLOR[scrapeStatusTier(liveTags,scraped)||'red'],border:'0.5px solid '+TIER_COLOR[scrapeStatusTier(liveTags,scraped)||'red'],whiteSpace:'nowrap'}},
-          {green:'精确匹配 · 完整',yellow:'精确匹配 · 有缺失',red:'模糊匹配'}[scrapeStatusTier(liveTags,scraped)]||'已刮削')
+          TIER_LABEL[scrapeStatusTier(liveTags,scraped)]||'已刮削')
       ),
 
       // Action buttons row
@@ -1088,12 +1131,12 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
             Icon('music-off',{fontSize:32,display:'block',margin:'0 auto 8px'}),'未找到匹配的曲目')
           :e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
             e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)',position:'sticky',top:0,zIndex:2}},
-              ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['刮削','38px'],['时长','56px'],['大小','64px'],['操作','108px']].map(([h,w])=>
+              ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['刮削','48px'],['时长','56px'],['大小','64px'],['操作','108px']].map(([h,w])=>
                 e('th',{key:h,
-                  onClick:['标题','艺术家','专辑','格式','时长','大小'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]):undefined,
+                  onClick:['标题','艺术家','专辑','格式','时长','大小','刮削'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size',刮削:'scrape_tier'}[h]):undefined,
                   style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',
-                    width:w||undefined,cursor:h?'pointer':undefined,userSelect:'none',whiteSpace:'nowrap'}},
-                  h,['标题','艺术家','专辑','格式','时长','大小'].includes(h)&&e(SortIcon,{col:{标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size'}[h]})
+                    width:w||undefined,cursor:['标题','艺术家','专辑','格式','时长','大小','刮削'].includes(h)?'pointer':undefined,userSelect:'none',whiteSpace:'nowrap'}},
+                  h,['标题','艺术家','专辑','格式','时长','大小','刮削'].includes(h)&&e(SortIcon,{col:{标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size',刮削:'scrape_tier'}[h]})
                 )
               )
             )),
@@ -1130,11 +1173,11 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                     const tier=scrapeStatusTier(f,{title:f.scraped_title,artist:f.scraped_artist,album:f.scraped_album,album_year:f.scraped_album_year||0,track_number:f.scraped_track_number||0,genre:f.scraped_genre||null,match_basis:f.scrape_match_basis,source:f.mb_recording_id?'musicbrainz':'none'});
                     if(!tier)return null;
                     const tipLines=[
-                      `刮削数据 · MusicBrainz`,
-                      f.scrape_match_basis==='exact'?'精确匹配':'模糊匹配',
+                      `刮削 · ${f.mb_recording_id?'MusicBrainz':'AcoustID'} · ${TIER_LABEL[tier]||tier}`,
                       f.scraped_title&&`标题: ${f.scraped_title}`,
                       f.scraped_artist&&`艺术家: ${f.scraped_artist}`,
                       f.scraped_album&&`专辑: ${f.scraped_album}`,
+                      f.scraped_album_year>0&&`年份: ${f.scraped_album_year}`,
                     ].filter(Boolean).join('\n');
                     return e(InstantTooltip,{tip:tipLines},
                       e('button',{onClick:()=>setScrapeTarget(f.id),style:{background:'none',border:'none',cursor:'pointer',display:'inline-flex',padding:2}},
@@ -1227,13 +1270,16 @@ function ScannerView({scan}){
               lm.sub&&e('div',{style:{fontSize:10,color:'var(--tx-faint)'}},lm.sub)
             )
           ),
-          e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{width:'100%',justifyContent:'center'}},'智能执行'),
-          e('div',{style:{marginTop:6}},
-            e('button',{onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,padding:0}},
+          e('div',{style:{display:'flex',gap:5,alignItems:'center',marginTop:2}},
+            e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'智能执行'),
+            e('button',{
+              onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
+              title:'高级：强制重新执行（忽略缓存）',
+              style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},
               e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
-            ),
-            advanced[key]&&e('button',{onClick:()=>runLane(key,true),disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{marginTop:6,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'强制重新执行')
-          )
+            )
+          ),
+          advanced[key]&&e('button',{onClick:()=>runLane(key,true),disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'强制重新执行')
         );
       })
     ),
@@ -1245,16 +1291,12 @@ function ScannerView({scan}){
         e('div',{style:{fontSize:11,color:'var(--tx-faint)'}},'三条匹配通道一次性全部完成')),
         e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
           e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
+          e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'强制全量重扫（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级'),
           status.running&&e(Btn,{variant:'ghost',icon:status.paused?'player-play':'pause',onClick:()=>(status.paused?scan.resume():scan.pause())},status.paused?'继续':'暂停'),
           status.running&&e(Btn,{variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort')},'停止')
         )
       ),
-      e('div',{style:{marginTop:8}},
-        e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,padding:0}},
-          e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级'
-        ),
-        advanced.all&&e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
-      )
+      advanced.all&&e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
     ),
 
     // Progress
@@ -1362,12 +1404,14 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,
         e('button',{
           onClick:canToggle&&!wl?onToggle:undefined,
           title:wl?'已加入白名单':canToggle?(keep?'标记为删除（点击切换）':'标记为保留（点击切换）'):'至少保留一个',
-          style:{background:wl?'var(--bg-muted)':keep?'var(--green)':'var(--red)',
-            border:'none',borderRadius:'var(--r-md)',width:32,height:32,
+          style:{background:wl?'var(--bg-muted)':keep?'var(--green)':'var(--bg-base)',
+            border:`1px solid ${keep&&!wl?'var(--green)':'var(--bd-default)'}`,
+            borderRadius:'var(--r-md)',width:32,height:32,
             display:'flex',alignItems:'center',justifyContent:'center',
             cursor:canToggle&&!wl?'pointer':'default',flexShrink:0,marginLeft:2,
-            opacity:(!canToggle||wl)?.5:1}},
-          Icon(wl?'shield-check':keep?'check':'x',{fontSize:15,color:'#fff'})
+            opacity:(!canToggle||wl)?.4:1}},
+          Icon(wl?'shield-check':keep?'check':'toggle-left',
+            {fontSize:15,color:wl?'var(--tx-faint)':keep?'#fff':'var(--tx-secondary)'})
         )
       )
     )
@@ -1620,15 +1664,16 @@ const SETTINGS_SECTIONS=[
   {id:'sec-quality', label:'音质优先级', icon:'diamond'},
   {id:'sec-tags',    label:'重复组标签', icon:'git-merge'},
   {id:'sec-wl',      label:'白名单',     icon:'shield-check'},
-  {id:'sec-history', label:'写入历史',   icon:'history'},
+  {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
 const TAG_LEGEND=['exact_copy','same_recording','fp_diff','mb_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
 
-function WriteHistorySection({writeHistoryKey}){
+function WriteHistorySection({writeHistoryKey,player,onLocateFile}){
   const[rows,setRows]=useState(null);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
+  const[purgeConfirm,setPurgeConfirm]=useState(null); // {fileId,title}
   function load(){api.get('/api/snapshots').then(r=>{if(r.ok)setRows(r.data||[]);});}
   useEffect(()=>{load();},[]);
   useEffect(()=>{if(writeHistoryKey>0)load();},[writeHistoryKey]);
@@ -1638,35 +1683,38 @@ function WriteHistorySection({writeHistoryKey}){
     if(r.ok){setToast({msg:'已撤销至首次写入前的原始状态',type:'success'});load();}
     else setToast({msg:'撤销失败: '+(r.error||''),type:'error'});
   }
-  async function revertAll(){
-    if(!rows?.length)return;
-    if(!confirm(`撤销全部 ${rows.length} 条写入历史？将恢复所有文件的原始标签。`))return;
-    for(const r of rows)await api.post(`/api/snapshots/${r.file_id}/revert`);
-    setToast({msg:'已全部撤销',type:'success'});load();
+  async function doPurge(){
+    if(!purgeConfirm)return;
+    await api.del(`/api/snapshots/${purgeConfirm.fileId}`);
+    setToast({msg:'已彻底删除写入历史',type:'success'});
+    setPurgeConfirm(null);load();
   }
 
   const q=search.trim().toLowerCase();
   const filtered=(rows||[]).filter(r=>!q||
-    (r.file_title||'').toLowerCase().includes(q)||
-    (r.file_artist||'').toLowerCase().includes(q)||
-    (r.file_path||'').toLowerCase().includes(q));
+    (r.file_title||r.cur_title||'').toLowerCase().includes(q)||
+    (r.file_artist||r.cur_artist||'').toLowerCase().includes(q));
+
+  const COLS=['播放','标题','艺术家','修改字段','修改时间','剩余天数','操作'];
 
   return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
-    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}},
-      e('div',{style:{display:'flex',alignItems:'center',gap:7}},
-        Icon('history',{fontSize:15,color:'var(--amber)'}),
-        e(SH,{title:`写入历史${rows?`（${rows.length} 条）`:''}`,sub:'以文件为单位，保存首次写入前的原始状态，撤销可一步恢复'})
-      ),
-      rows?.length>0&&e(Btn,{small:true,variant:'ghost',icon:'history',onClick:revertAll},'全部撤销')
-    ),
+    purgeConfirm&&e(ConfirmModal,{
+      title:'彻底删除写入历史',
+      message:e('span',null,'确定要彻底删除「',e('b',null,purgeConfirm.title||purgeConfirm.fileId),'」的写入历史吗？删除后将无法再撤销，文件当前的标签保持不变。'),
+      onConfirm:doPurge,
+      onClose:()=>setPurgeConfirm(null),
+      danger:true,
+    }),
+    e(SH,{title:`最近写入${rows?` （${rows.length} 条）`:''} `,
+      sub:'以文件为单位，保留首次写入前的完整标签快照，可一步撤销；30天后自动清除'}),
     rows===null
       ? e('div',{style:{textAlign:'center',padding:20}},e('i',{className:'ti ti-loader spin',style:{fontSize:20}}))
       : rows.length===0
         ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
-            Icon('history',{fontSize:28,display:'block',margin:'0 auto 8px',color:'var(--amber)'}),
+            Icon('edit',{fontSize:28,display:'block',margin:'0 auto 8px',color:'var(--amber)'}),
             '写入历史为空',e('br'),
-            e('span',{style:{fontSize:11}},'在刮削列中写入字段后，这里会保存原始状态以供撤销')
+            e('span',{style:{fontSize:11}},'在刮削列写入字段后，原始标签将被快照保存于此')
           )
         : e('div',null,
             e('div',{style:{position:'relative',marginBottom:8}},
@@ -1678,25 +1726,37 @@ function WriteHistorySection({writeHistoryKey}){
             e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
               e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
                 e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
-                  ...['标题','艺术家','修改字段','写入次数','最近时间','操作'].map(h=>
-                    e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11}},h))
+                  ...COLS.map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11}},h))
                 )),
-                e('tbody',null, filtered.length===0
-                  ? e('tr',null,e('td',{colSpan:6,style:{padding:'14px',textAlign:'center',color:'var(--tx-faint)'}},'无匹配结果'))
+                e('tbody',null,filtered.length===0
+                  ? e('tr',null,e('td',{colSpan:COLS.length,style:{padding:'14px',textAlign:'center',color:'var(--tx-faint)'}},'无匹配结果'))
                   : filtered.map(r=>{
+                      const title=r.file_title||r.cur_title||'';
+                      const artist=r.file_artist||r.cur_artist||'';
                       const fields=JSON.parse(r.modified_fields||'[]');
                       const dt=new Date(r.last_written_at);
                       const dtStr=`${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
+                      const daysLeft=r.expires_at>0?Math.ceil((r.expires_at-Date.now())/(24*3600*1000)):30;
+                      const daysColor=daysLeft<=3?'var(--red)':daysLeft<=7?'var(--amber)':'var(--tx-faint)';
+                      const isCur=player?.current?.id===r.file_id;
                       return e('tr',{key:r.file_id,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
-                        e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}},
-                          r.file_title||r.cur_title||'—'),
-                        e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:140}},
-                          r.file_artist||r.cur_artist||'—'),
+                        e('td',{style:{padding:'6px 8px',width:36}},
+                          player&&r.file_id&&e('button',{onClick:()=>player.playTrack({id:r.file_id,title,artist}),
+                            style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
+                            Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+                        ),
+                        e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180}},title||'—'),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}},artist||'—'),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',fontSize:11}},fields.join('、')||'—'),
-                        e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',textAlign:'center',fontSize:11}},r.write_count||1),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
+                        e('td',{style:{padding:'6px 10px',color:daysColor,fontFamily:'var(--font-mono)',fontSize:10,textAlign:'center',whiteSpace:'nowrap'}},`${daysLeft}天`),
                         e('td',{style:{padding:'4px 8px'}},
-                          e(IconAction,{icon:'history',title:'撤销至原始状态',onClick:()=>revert(r.file_id),danger:true}))
+                          e('div',{style:{display:'flex',gap:3,alignItems:'center'}},
+                            onLocateFile&&e(IconAction,{icon:'books',title:'在音乐库中查看',onClick:()=>onLocateFile(r.file_id)}),
+                            e(IconAction,{icon:'arrow-back-up',title:'撤销至原始状态',onClick:()=>revert(r.file_id)}),
+                            e(IconAction,{icon:'trash',title:'彻底删除此条历史',danger:true,onClick:()=>setPurgeConfirm({fileId:r.file_id,title})})
+                          )
+                        )
                       );
                     })
                 )
@@ -1706,14 +1766,14 @@ function WriteHistorySection({writeHistoryKey}){
   );
 }
 
-function WhitelistSection({player,whitelistKey}){
+
+function WhitelistSection({player,whitelistKey,onLocateFile}){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
   function load(){setLoading(true);api.get('/api/whitelist').then(r=>{if(r.ok)setRows(r.data||[]);}).finally(()=>setLoading(false));}
   useEffect(()=>{load();},[]);
-  // Refresh when Library toggles whitelist (whitelistKey increments)
   useEffect(()=>{if(whitelistKey>0)load();},[whitelistKey]);
   async function remove(id){await api.del(`/api/whitelist/${id}`);setToast({msg:'已从白名单移除',type:'success'});load();}
 
@@ -1729,7 +1789,7 @@ function WhitelistSection({player,whitelistKey}){
           Icon('shield-check',{fontSize:28,display:'block',margin:'0 auto 8px'}),
           '白名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入白名单'))
       : e('div',null,
-          rows.length>0&&e('div',{style:{position:'relative',marginBottom:8}},
+          e('div',{style:{position:'relative',marginBottom:8}},
             Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
             e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索标题、艺术家、专辑...',
               style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
@@ -1738,7 +1798,7 @@ function WhitelistSection({player,whitelistKey}){
           e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
             e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
-                ...['','标题','艺术家','专辑','格式','操作'].map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap'}},h))
+                ...['','标题','艺术家','专辑','格式','操作'].map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11}},h))
               )),
               e('tbody',null,filtered.length===0
                 ? e('tr',null,e('td',{colSpan:6,style:{padding:'18px',textAlign:'center',color:'var(--tx-faint)',fontSize:12}},'无匹配结果'))
@@ -1753,10 +1813,11 @@ function WhitelistSection({player,whitelistKey}){
                       e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160}},f.artist||'—'),
                       e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160,fontSize:11}},f.album||'—'),
                       e('td',{style:{padding:'6px 10px'}},e(QBadge,{format:f.format,bitrate:f.bitrate,sample_rate:f.sample_rate})),
-                      e('td',{style:{padding:'4px 8px',whiteSpace:'nowrap'}},
-                        e(IconAction,{icon:'library',title:'在音乐库中查看',onClick:()=>api.post(`/api/files/${f.id}/locate`,{target:'library'})}),
-                        e(IconAction,{icon:'layout-sidebar',title:'在重复组中查看',onClick:()=>api.post(`/api/files/${f.id}/locate`,{target:'duplicates'})}),
-                        e(IconAction,{icon:'shield',title:'移除白名单',danger:true,active:true,activeColor:'var(--red)',onClick:()=>remove(f.id)})
+                      e('td',{style:{padding:'4px 8px'}},
+                        e('div',{style:{display:'flex',gap:3,alignItems:'center'}},
+                          onLocateFile&&e(IconAction,{icon:'books',title:'在音乐库中查看',onClick:()=>onLocateFile(f.id)}),
+                          e(IconAction,{icon:'shield-x',title:'移除白名单',danger:true,onClick:()=>remove(f.id)})
+                        )
                       )
                     );
                   })
@@ -1767,7 +1828,7 @@ function WhitelistSection({player,whitelistKey}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player,whitelistKey,writeHistoryKey}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,scanRunning,player,whitelistKey,writeHistoryKey,onLocateFile}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -1778,8 +1839,18 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   const[acoustidKeyDirty,setAcoustidKeyDirty]=useState(false);
   const[needsScrapeReapply,setNeedsScrapeReapply]=useState(false);
   const[fpcalc,setFpcalc]=useState(null);
+  const[fpcalcPathDirty,setFpcalcPathDirty]=useState(false);
+  const[fpcalcChecking,setFpcalcChecking]=useState(false);
   const saveTimer=useRef(null);
   useEffect(()=>{api.get('/api/system/fpcalc').then(r=>{if(r.ok)setFpcalc(r.data);});},[]);
+  async function recheckFpcalc(){
+    setFpcalcChecking(true);
+    try{
+      const p=(s?.fpcalc_path||'').trim();
+      const r=await api.get('/api/system/fpcalc?path='+encodeURIComponent(p));
+      if(r.ok){setFpcalc(r.data);setFpcalcPathDirty(false);}
+    } finally { setFpcalcChecking(false); }
+  }
   const isFirst=useRef(true);
   const lastApplied=useRef(null); // {threshold, duration_tolerance, quality_tiers} snapshot as of the last manual reapply
 
@@ -1940,26 +2011,57 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
           )
         ),
         e('div',null,
-          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:6}},Icon('key',{marginRight:5,fontSize:13}),'AcoustID API Key'),
-          e('div',{style:{display:'flex',gap:6}},
-            e('input',{value:s.acoustid_key||'',
-              onChange:ev=>{setS(p=>({...p,acoustid_key:ev.target.value}));setAcoustidKeyDirty(true);setAcoustidValidResult(null);},
-              placeholder:'在 acoustid.biz 注册获取免费 API Key',
-              style:{flex:1,fontSize:11,padding:'7px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
-            acoustidKeyDirty&&(s.acoustid_key||'').trim()&&e(Btn,{small:true,variant:'ghost',icon:acoustidValidating?'loader':'circle-check',disabled:acoustidValidating,onClick:validateAcoustid},acoustidValidating?'验证中...':'验证')
+          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:6}},
+            Icon('key',{marginRight:5,fontSize:13}),'AcoustID 声纹匹配',
+            e('span',{style:{marginLeft:8,fontSize:10,fontWeight:400,color:'var(--tx-faint)'}},'需同时满足下方两个条件')
           ),
-          acoustidValidResult&&e('div',{style:{marginTop:5,fontSize:11,color:acoustidValidResult.ok?'var(--green)':'var(--red)',display:'flex',alignItems:'center',gap:5}},
-            Icon(acoustidValidResult.ok?'circle-check':'alert-circle',{fontSize:12}),
-            acoustidValidResult.ok?'API Key 有效✓':'验证失败: '+(acoustidValidResult.error||'')
+          // API Key + fpcalc status, side by side on one row
+          e('div',{style:{display:'flex',gap:14,flexWrap:'wrap'}},
+            // Condition 1: API Key
+            e('div',{style:{flex:'1 1 220px',minWidth:200}},
+              e('div',{style:{fontSize:11,color:'var(--tx-secondary)',marginBottom:4,fontWeight:500}},'① AcoustID API Key'),
+              e('div',{style:{display:'flex',gap:6}},
+                e('input',{value:s.acoustid_key||'',
+                  onChange:ev=>{setS(p=>({...p,acoustid_key:ev.target.value}));setAcoustidKeyDirty(true);setAcoustidValidResult(null);},
+                  placeholder:'acoustid.biz 注册获取',
+                  style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
+                acoustidKeyDirty&&(s.acoustid_key||'').trim()&&e(Btn,{small:true,variant:'ghost',icon:acoustidValidating?'loader':'circle-check',disabled:acoustidValidating,onClick:validateAcoustid},acoustidValidating?'验证中':'验证')
+              ),
+              acoustidValidResult&&e('div',{style:{marginTop:4,fontSize:11,color:acoustidValidResult.ok?'var(--green)':'var(--red)',display:'flex',alignItems:'center',gap:4}},
+                Icon(acoustidValidResult.ok?'circle-check':'alert-circle',{fontSize:11}),
+                acoustidValidResult.ok?'API Key 有效 ✓':'验证失败: '+(acoustidValidResult.error||'')
+              )
+            ),
+            // Condition 2: fpcalc — status + custom path input
+            e('div',{style:{flex:'1 1 260px',minWidth:240}},
+              e('div',{style:{fontSize:11,color:'var(--tx-secondary)',marginBottom:4,fontWeight:500}},'② fpcalc 可执行文件'),
+              e('div',{style:{display:'flex',gap:6}},
+                e('input',{value:s.fpcalc_path||'',
+                  onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
+                  placeholder:'留空则自动检测（项目根目录 / PATH）',
+                  style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
+                e(Btn,{small:true,variant:'ghost',icon:fpcalcChecking?'loader':'refresh',disabled:fpcalcChecking,onClick:recheckFpcalc},fpcalcChecking?'检测中':'重新检测')
+              ),
+              fpcalc
+                ? e('div',{style:{marginTop:4,fontSize:11,padding:'5px 10px',borderRadius:'var(--r-md)',
+                    background:fpcalc.available?'var(--green-bg)':'var(--bg-muted)',
+                    border:`0.5px solid ${fpcalc.available?'var(--green-bd)':'var(--bd-default)'}`,
+                    color:fpcalc.available?'var(--green)':'var(--tx-secondary)',display:'flex',gap:5,alignItems:'flex-start'}},
+                    Icon(fpcalc.available?'circle-check':'alert-circle',{fontSize:12,flexShrink:0,marginTop:1}),
+                    e('span',null,fpcalc.available
+                      ? `已找到：${fpcalc.path}`
+                      : (fpcalc.note||'未检测到 fpcalc'))
+                  )
+                : e('div',{style:{marginTop:4,fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5}},Icon('loader',{fontSize:11}),'检测中...')
+            )
           ),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'选填。配置后刮削时会用声纹指纹向 AcoustID 查询，比纯文本搜索更准确'),
-          fpcalc&&e('div',{style:{marginTop:6,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',
-            background:fpcalc.available?'var(--green-bg)':'var(--bg-muted)',
-            border:`0.5px solid ${fpcalc.available?'var(--green-bd)':'var(--bd-default)'}`,
-            color:fpcalc.available?'var(--green)':'var(--tx-faint)',display:'flex',gap:5,alignItems:'flex-start'}},
-            Icon(fpcalc.available?'circle-check':'info-circle',{fontSize:12,flexShrink:0,marginTop:1}),
-            fpcalc.available?`fpcalc 已就绪：AcoustID 声纹指纹将在下次声纹提取时自动生成`:
-              '未检测到 fpcalc。请将 fpcalc 可执行文件放入项目根目录，或安装 Chromaprint 工具包，再重新提取声纹即可启用 AcoustID 声纹匹配。详见 acoustid.org/chromaprint'
+          // Fastest-setup guidance
+          e('div',{style:{marginTop:10,padding:'8px 12px',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-subtle)',borderRadius:'var(--r-md)',fontSize:11,color:'var(--tx-faint)',lineHeight:1.7}},
+            e('b',{style:{color:'var(--tx-secondary)'}},'最快设置方法：'),
+            e('br'),
+            '1) 从 acoustid.org/chromaprint 下载 fpcalc（对应你的操作系统，小于 1MB）；',e('br'),
+            '2) 将解压出的 fpcalc（Windows 为 fpcalc.exe）放到本项目根目录（与 package.json 同级），或填入上方路径框后点"重新检测"；',e('br'),
+            '3) 两个条件都变绿后，重新运行一次「声纹匹配」，AcoustID 即可生效。'
           )
         )
       ),
@@ -1990,8 +2092,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ))
       ),
 
-      e(WhitelistSection,{player,whitelistKey}),
-      e(WriteHistorySection,{writeHistoryKey}),
+      e(WhitelistSection,{player,whitelistKey,onLocateFile}),
+      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile}),
     )
   );
 }
@@ -2138,6 +2240,10 @@ function App(){
 
   // Ref for the locate-in-library scroll function set by LibraryView
   const locateInLibraryRef=useRef(null);
+  const navigateToFile = (fileId) => {
+    setView('library');
+    setTimeout(()=>locateInLibraryRef.current?.(fileId), 150);
+  };
   const mainScrollRef=useRef(null); // ref to the <main> scroll container, shared with LibraryView
   // Called when user clicks the info panel in PlayerBar
   const handleLocate=useCallback(track=>{
@@ -2179,7 +2285,7 @@ function App(){
         e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey,onLocateFile:navigateToFile}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
