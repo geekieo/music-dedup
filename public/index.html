@@ -32,6 +32,8 @@ input,select,textarea{font-family:inherit;font-size:13px;color:var(--tx-primary)
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes locatePulse{0%,100%{background-color:var(--amber-bg)}50%{background-color:var(--amber-bd)}}
+.locate-flash{animation:locatePulse 1.6s ease 2}
 .spin{animation:spin .9s linear infinite;display:inline-block}
 .blink{animation:blink 1s ease-in-out infinite}
 .fade{animation:fade .16s ease}

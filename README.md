@@ -137,6 +137,8 @@ location / {
 | GET | /api/stats | 库统计 |
 | GET | /api/settings | 获取设置 |
 | PUT | /api/settings | 保存设置 |
+| GET | /api/library | 音乐库分页查询（支持 `search/sort/order/format/libFilter/scrapeTier`） |
+| GET | /api/library/locate/:id | 返回某文件在（不含筛选的）全量音乐库中，按给定排序的位置索引，供前端跳页定位 |
 | POST | /api/browse-folder | 弹出系统原生选择文件夹对话框，返回选中的绝对路径 |
 | POST | /api/scan/start | 启动扫描（`steps` 数组决定运行哪些阶段，详见下方"扫描通道"） |
 | POST | /api/scan/pause | 暂停当前扫描（在阶段边界处挂起，保留进度） |
@@ -170,11 +172,16 @@ location / {
 musicdedup/
 ├── server.js        # Express 入口 + 所有 API 路由
 ├── lib/
-│   ├── db.js        # SQLite (WASM) schema + 查询
-│   ├── fingerprint.js  # 纯 JS 声纹指纹
-│   ├── scanner.js   # 文件扫描 + 元数据提取
-│   ├── matcher.js   # 多阶段重复检测
-│   └── rules.js     # 保留规则引擎
+│   ├── db.js               # SQLite (WASM) schema + 查询
+│   ├── fingerprint.js      # 纯 JS 声纹指纹（Goertzel）
+│   ├── chromaprint-bridge.js # 可选 fpcalc 调用封装（供 AcoustID 查询用）
+│   ├── scanner.js          # 文件扫描 + 元数据/声纹提取，含暂停/停止钩子
+│   ├── scraper.js          # AcoustID / MusicBrainz 刮削
+│   ├── tier.js             # 刮削分类（绿/黄/蓝/红）判定
+│   ├── matcher.js          # 多阶段重复检测
+│   ├── rules.js             # 保留规则引擎
+│   ├── tagger.js            # 标签读写调度 + 写入历史
+│   └── flac-writer.js / m4a-writer.js / ogg-writer.js  # 原生纯 JS 标签写入器（FLAC/M4A/OGG，无需 exiftool）
 ├── public/
 │   ├── index.html   # 入口 HTML
 │   └── app.js       # React SPA
@@ -197,6 +204,30 @@ musicdedup/
 ---
 
 ## 更新日志
+
+### v1.8.0
+
+**播放来源跳转定位**
+- 点击播放条曲目信息，现在会精确跳转回真实的播放来源并滚动定位到对应位置：音乐库（按当前排序，即使不在已加载页也会自动跳页）、重复组（对应分组）、设置页「白名单」「最近写入」（对应行）。此前重复组来源只切换标签页、不定位；来自设置页播放的曲目定位到了错误位置。
+- 设置页「白名单/最近写入」的「在音乐库中查看」同步升级为同一套健壮定位逻辑：目标文件若不在当前音乐库筛选/分页范围内，会自动重置筛选并跳转到其所在页。
+- 定位到的行/分组会有短暂高亮脉冲，便于在长列表中找到。
+
+**图标与配色**
+- 新增「在音乐库中查看」专用图标：在「音乐库」音符图标基础上叠加定位图钉标记，与音乐库标签的图标保持视觉关联（此前使用无关的书架图标）。
+- 刮削分类黄色（繁简模糊/精确匹配·有缺失）从 `#B45309` 调整为 `#CA8A04`，与红色（模糊匹配）在色相上明显区分，同时保持与绿/蓝的可辨识度。
+
+**音乐库刮削筛选**
+- 搜索栏新增「刮削分类」下拉筛选：全部 / 精确匹配 / 繁简模糊·精确匹配有缺失 / 精确匹配有缺失 / 模糊匹配 / 未刮削。
+
+**AcoustID「0 命中」问题修复**
+- 请求间隔从 250ms（约 4 次/秒，超过 AcoustID 建议的 3 次/秒限速）调整为 350ms，避免整批请求被限流。
+- 不再把所有失败原因（限流、无效 Key、网络错误、无匹配）统一吞成一句「0 命中」：AcoustID Key 无效（错误代码 3，最常见原因是误填了个人 user 密钥而非 application/client 密钥）或连续请求失败时会提前中止并给出明确提示；正常完成时如有异常也会在完成消息中列出原因及次数。
+- 设置页 AcoustID Key 验证失败的提示补充说明需要 acoustid.org 「应用/client」密钥，而非登录后看到的个人密钥；修正输入框占位文字中的错误域名（`acoustid.biz` → `acoustid.org`）。
+- AcoustID Key 验证成功后的「建议重新刮削」提示改为与其它「设置已修改需要重新扫描」提示统一样式，并加上一键执行按钮。
+
+**设置页一致性**
+- 「音乐目录已修改」「声纹相似度/时长容差/音质优先级已修改」「AcoustID Key 已验证」三类横幅统一样式与位置（均在设置页顶部）；三者的操作按钮点击后都会跳转到「扫描」页，因为扫描日志只在那里显示（此前部分按钮触发扫描却不跳转，容易让人以为没反应）。
+- AcoustID Key 验证结果展示样式与 fpcalc 检测状态统一为同款卡片样式。
 
 ### v1.7.4
 
