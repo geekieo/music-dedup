@@ -18,6 +18,7 @@ import { runMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
+import { computeScrapeTier } from './lib/tier.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -102,14 +103,19 @@ app.post('/api/browse-folder', async(_,res)=>{
 app.get('/api/library', (req,res)=>{
   const { search='', sort='title', order='asc', page=1, limit=100, format='', libFilter='all', scrapeTier='' } = req.query;
   try {
+    // 繁简忽略 (settings.ignore_script_variant, default true) — see lib/tier.js.
+    // Read fresh per-request (not cached) so toggling the setting takes
+    // effect on the very next fetch, no rescan needed: tier is a pure
+    // display computation over already-scraped data, not stored data.
+    const ignoreScript = getAllSettings(db).ignore_script_variant !== false;
     // Tier depends on Traditional/Simplified folding — not expressible in
     // SQL. Needed either when sorting BY tier, or when filtering to a
     // specific 刮削分类 — both fetch the full filtered set, compute tier in
     // JS, sort/filter, then paginate (see queryLibraryByTier).
     if (sort === 'scrape_tier' || scrapeTier) {
-      return res.json({ ok:true, data: queryLibraryByTier(db,{search,sort,order,page:+page,limit:+limit,format,libFilter,scrapeTier}) });
+      return res.json({ ok:true, data: queryLibraryByTier(db,{search,sort,order,page:+page,limit:+limit,format,libFilter,scrapeTier,ignoreScript}) });
     }
-    res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format,libFilter}) });
+    res.json({ ok:true, data: queryLibrary(db,{search,sort,order,page:+page,limit:+limit,format,libFilter,ignoreScript}) });
   }
   catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
@@ -216,7 +222,17 @@ app.post('/api/files/:id/write-tags', async(req,res)=>{
 // Scrape data CRUD
 app.get('/api/files/:id/scraped', (req,res)=>{
   const sm = getScrapedMeta(db,+req.params.id);
-  res.json({ok:true, data:sm||null});
+  if (!sm) return res.json({ok:true, data:null});
+  // F9: attach scrape_tier here (using the DB-cached file row, same as the
+  // library list/filter — NOT live-read tags, so the badge always agrees
+  // with the row icon/筛选 for the same file) instead of letting the
+  // ScrapeDialog recompute it client-side against live tags with its own
+  // (previously incomplete) CJK-fold table — that mismatch was exactly the
+  // "筛选说是这个分类，标注却是另一个" bug.
+  const f = getFileById(db, +req.params.id);
+  const ignoreScript = getAllSettings(db).ignore_script_variant !== false;
+  const tier = f ? computeScrapeTier(f, sm, ignoreScript) : null;
+  res.json({ok:true, data:{ ...sm, scrape_tier: tier }});
 });
 app.delete('/api/files/:id/scraped', (req,res)=>{
   try { db.run('DELETE FROM scraped_meta WHERE file_id=?',[+req.params.id]); res.json({ok:true}); }
@@ -330,7 +346,17 @@ app.post('/api/scan/start', async(req,res)=>{
   res.json({ok:true,message:'扫描已启动',steps});
   scanState={running:true,abortFlag:false,paused:false,phase:'starting',pct:0,message:'准备中...',startTime:Date.now()};
   broadcast({type:'start',...scanState});
-  const prog=evt=>broadcast({type:'progress',...evt});
+  // F9 bugfix: this used to be `evt=>broadcast({type:'progress',...evt})` —
+  // each phase's onProgress() call only reports {phase,pct,message}, so
+  // broadcasting `evt` alone REPLACED running/paused/abortFlag with
+  // `undefined` on every single progress tick (frontend does setStatus(d),
+  // a full replace, not a merge). status.running was only briefly true right
+  // after 'start', then vanished for the rest of the scan — which is why
+  // the 暂停/继续/停止 buttons (gated on status.running) disappeared almost
+  // immediately. Also left GET /api/scan/status permanently stuck reporting
+  // phase:'starting' since nothing ever updated scanState itself, only sent
+  // one-off broadcasts. Now we mutate scanState in place and broadcast that.
+  const prog=evt=>{ Object.assign(scanState,evt); broadcast({type:'progress',...scanState}); };
   const abort=()=>scanState.abortFlag;
   const pause=waitIfPaused;
   try{
