@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.8.1';
+const APP_VERSION='1.8.2';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -172,11 +172,19 @@ function useGlobalPlayer(){
   const[volume,setVolume]=useState(1);
   const audioRef=useRef(null);
   const queueRef=useRef([]);                  // last list playTrack was called with
+  // See the stall-watchdog block below (near armStallWatchdog) for what
+  // these are for — declared here so the track-switch effect can clear a
+  // stale watchdog left over from the PREVIOUS track.
+  const stallTimer=useRef(null);
+  const errorRetries=useRef(0);
+  const clearStallTimer=useCallback(()=>{ if(stallTimer.current){clearTimeout(stallTimer.current);stallTimer.current=null;} },[]);
 
   useEffect(()=>{
     if(!current)return;
     const el=audioRef.current;
     if(!el)return;
+    clearStallTimer(); // a pending watchdog from the previous track shouldn't fire against this one
+    errorRetries.current=0;
     el.src=`/api/files/${current.id}/stream`;
     setProgress(0);
     el.play().catch(()=>{});
@@ -197,7 +205,7 @@ function useGlobalPlayer(){
   },[]);
   const toggle=useCallback(()=>{const el=audioRef.current;if(!el)return;el.paused?el.play().catch(()=>{}):el.pause();},[]);
   const seek=useCallback(t=>{const el=audioRef.current;if(el)el.currentTime=t;},[]);
-  const close=useCallback(()=>{const el=audioRef.current;setCurrent(null);setPlaying(false);if(el){el.pause();el.removeAttribute('src');el.load();}},[]);
+  const close=useCallback(()=>{const el=audioRef.current;clearStallTimer();errorRetries.current=0;setCurrent(null);setPlaying(false);if(el){el.pause();el.removeAttribute('src');el.load();}},[clearStallTimer]);
   const step=useCallback(dir=>{
     const q=queueRef.current;
     if(!q.length)return;
@@ -210,10 +218,51 @@ function useGlobalPlayer(){
   const playNext=useCallback(()=>step(1),[step]);
   const playPrev=useCallback(()=>step(-1),[step]);
 
+  // F9: playback could silently wedge — buffering forever, seeking does
+  // nothing — until the user manually switched to another track and back
+  // (which reloads the underlying <audio> element's network connection).
+  // The browser fires 'waiting'/'stalled' when data stops arriving but
+  // doesn't always recover on its own if the underlying connection was
+  // actually dropped rather than just slow. This watchdog does automatically
+  // what "switch away and back" did manually: if playback doesn't resume
+  // within a few seconds of stalling, reload the same source at the same
+  // position.
+  const recoverStalledPlayback=useCallback(()=>{
+    const el=audioRef.current;
+    if(!el||el.paused||el.ended)return;
+    const t=el.currentTime;
+    const src=el.currentSrc||el.src;
+    if(!src)return;
+    el.load(); // drops and re-establishes the underlying network request
+    const onReady=()=>{ el.currentTime=t; el.play().catch(()=>{}); el.removeEventListener('loadedmetadata',onReady); };
+    el.addEventListener('loadedmetadata',onReady);
+  },[]);
+  const armStallWatchdog=useCallback(()=>{
+    clearStallTimer();
+    stallTimer.current=setTimeout(recoverStalledPlayback,4000);
+  },[clearStallTimer,recoverStalledPlayback]);
+
   const bind=useMemo(()=>({
-    onPlay:()=>setPlaying(true),onPause:()=>setPlaying(false),onEnded:()=>setPlaying(false),
-    onTimeUpdate:ev=>{setProgress(ev.target.currentTime);setDuration(ev.target.duration||0);},
-  }),[]);
+    onPlay:()=>{setPlaying(true);clearStallTimer();errorRetries.current=0;},
+    onPause:()=>{setPlaying(false);clearStallTimer();},
+    onEnded:()=>{setPlaying(false);clearStallTimer();},
+    onTimeUpdate:ev=>{setProgress(ev.target.currentTime);setDuration(ev.target.duration||0);clearStallTimer();},
+    // 'waiting'/'stalled' fire when the browser is buffering — normal for a
+    // moment, but if it doesn't clear within a few seconds the underlying
+    // connection is probably dead, not just slow. 'error' fires for a
+    // genuine MediaError (e.g. the network request itself failed); retrying
+    // is worth it since most causes here are transient (a stalled/reset
+    // connection), not a broken file — capped so a truly broken file doesn't
+    // retry forever.
+    onWaiting:armStallWatchdog,
+    onStalled:armStallWatchdog,
+    onError:()=>{
+      clearStallTimer();
+      if(errorRetries.current>=3)return;
+      errorRetries.current++;
+      recoverStalledPlayback();
+    },
+  }),[armStallWatchdog,clearStallTimer,recoverStalledPlayback]);
 
   // Stable-identity slice — safe to hand to heavy list views without causing
   // a re-render every time progress/duration tick.
@@ -495,7 +544,7 @@ function ConfirmModal({title,message,onConfirm,onClose,danger}){
 const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
 
 const TIER_COLOR  = { green:'var(--green)', blue:'#2563EB', red:'var(--red)' };
-const TIER_LABEL  = { green:'精确匹配', blue:'精确匹配 · 有缺失', red:'模糊匹配' };
+const TIER_LABEL  = { green:'精确匹配', blue:'精确匹配可写入', red:'模糊匹配' };
 
 /* ── Instant-tooltip wrapper ─────────────────────────────────────────────
    `title` attribute has browser-imposed ~500 ms delay. This component
@@ -564,8 +613,22 @@ function autoSelectFields(file, scraped) {
   if (!scraped.album)                                  { sel.album=false; rsn.album='刮削无数据'; }
   else if (!file.album)                                { sel.album=true;  rsn.album='文件属性为空，建议写入'; }
   else if (normCmp(file.album)===normCmp(scraped.album)) { sel.album=false; rsn.album='与文件属性一致'; }
-  else if (albumJunk && exact)                         { sel.album=false; rec.album=true; rsn.album='当前专辑名疑似非正规，精确匹配，建议覆写（请手动确认）'; }
-  else if (exact)                                      { sel.album=false; rec.album=true; rsn.album='精确匹配，建议覆写（请手动确认）'; }
+  // F9 bugfix: scraped.scrape_tier==='green' means the server already
+  // determined (respecting 繁简忽略) that title/artist/album all match with
+  // nothing worth writing — if we get here it's specifically because this
+  // album pair differs ONLY by Traditional/Simplified spelling, which
+  // 繁简忽略 treats as equivalent. Saying "精确匹配，建议覆写" for that was
+  // self-contradictory (why would an exact match need overwriting?); this
+  // is just a spelling-system difference, not new information to write.
+  else if (scraped.scrape_tier==='green')              { sel.album=false; rsn.album='仅繁简写法不同，与文件属性一致'; }
+  else if (albumJunk && exact)                         { sel.album=false; rec.album=true; rsn.album='当前专辑名疑似非正规，建议手动确认后覆写'; }
+  // F9 bugfix: this used to say "精确匹配，建议覆写（请手动确认）" for ANY
+  // textual difference under an exact match_basis — including plain
+  // spelling/formatting differences that aren't errors, which read as
+  // self-contradictory ("it's an exact match, but overwrite it"). Just
+  // state the fact (the text differs) without asserting it should change;
+  // same neutral phrasing as 标题/艺术家 above, and no auto-recommend badge.
+  else if (exact)                                      { sel.album=false; rsn.album='与文件属性不同，请手动确认'; }
   else                                                 { sel.album=false; rsn.album='模糊匹配，请手动确认'; }
 
   // Year — factual data, not a script/spelling variant; still safe to
@@ -815,8 +878,17 @@ function PropsModal({fileId,onClose}){
     fetch(`/api/files/${fileId}/cover`).then(r=>{if(r.ok)setCoverUrl(`/api/files/${fileId}/cover`);}).catch(()=>{});
   },[fileId]);
   if(!data)return e(Modal,{title:'文件属性',onClose},e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})));
-  const fpMethodLabel={spectral:'声纹（频谱指纹）',metadata:'元数据近似指纹（无法解码音频）'}[data.fingerprint_method]||'未提取';
-  const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['修改时间',fmtDate(data.file_mtime)],['声纹方法',fpMethodLabel]];
+  // F9: this app computes TWO independent fingerprints per file — its own
+  // built-in spectral fingerprint (used for the app's own duplicate
+  // matching, no external tool needed) and, separately/optionally, a
+  // Chromaprint fingerprint via the external fpcalc binary (used only to
+  // query AcoustID). These are unrelated algorithms serving different
+  // purposes, so they get two clearly-labeled rows instead of one
+  // ambiguous "声纹方法" — which used to only describe the first one and
+  // gave no visibility into whether an AcoustID-usable fingerprint existed.
+  const fpMethodLabel={spectral:'已提取（频谱指纹）',metadata:'未解码，退化为元数据匹配'}[data.fingerprint_method]||'未提取';
+  const chromaprintLabel=data.chromaprint?'已提取（Chromaprint/fpcalc）':'未提取（需 fpcalc 可执行文件）';
+  const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['流派',data.genre||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['修改时间',fmtDate(data.file_mtime)],['本地声纹',fpMethodLabel],['AcoustID 声纹',chromaprintLabel]];
   return e(Modal,{title:'文件属性',onClose,width:560},
     // Cover art row
     coverUrl&&e('div',{style:{display:'flex',justifyContent:'center',marginBottom:12}},
@@ -1045,7 +1117,14 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   },[flashId]);
   function scrollToRow(fid){
     const el=rowRefs.current[fid];
-    if(!el)return false;
+    // Defense in depth: the ref-cleanup fix above should mean a stale/
+    // detached entry can no longer linger here, but if one ever does,
+    // treat it the same as "not found" instead of silently no-op'ing a
+    // scrollIntoView on a node that's no longer in the document (which
+    // looks IDENTICAL to success from here — no error, just nothing visibly
+    // happens — and was the actual root cause of "定位在换过排序/筛选后就
+    // 再也不管用了").
+    if(!el||!el.isConnected){ delete rowRefs.current[fid]; return false; }
     el.scrollIntoView({behavior:'smooth',block:'center'});
     setFlashId(fid);
     return true;
@@ -1183,19 +1262,22 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
         ),
         e('select',{value:fmt,onChange:ev=>{setFmt(ev.target.value);},
           style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
-            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
+            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:104}},
           e('option',{value:''},'全部格式'),
           ...['FLAC','MP3','M4A','OGG','WAV','AIFF'].map(f=>e('option',{key:f,value:f},f))
         ),
         // F9: 刮削分类筛选 — same tier vocabulary as the 刮削 column icon/tooltip.
+        // Same width/padding/neutral color as the 格式 dropdown right next to
+        // it (previously it auto-sized wider from its longer option text and
+        // changed color per selection, which read as a different control
+        // style rather than a matching pair).
         e('select',{value:scrapeFilter,onChange:ev=>setScrapeFilter(ev.target.value),
           style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
-            color:scrapeFilter?TIER_COLOR[scrapeFilter]||'var(--tx-secondary)':'var(--tx-secondary)',
-            border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
+            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:104}},
           e('option',{value:''},'全部刮削'),
-          e('option',{value:'green'},'🟢 '+TIER_LABEL.green),
-          e('option',{value:'blue'},'🔵 '+TIER_LABEL.blue),
-          e('option',{value:'red'},'🔴 '+TIER_LABEL.red),
+          e('option',{value:'green'},TIER_LABEL.green),
+          e('option',{value:'blue'},TIER_LABEL.blue),
+          e('option',{value:'red'},TIER_LABEL.red),
           e('option',{value:'none'},'未刮削')
         ),
         e('span',{style:{fontSize:11,color:'var(--tx-faint)',whiteSpace:'nowrap'}},`显示 ${rows.length} / ${total.toLocaleString()} 首`)
@@ -1227,7 +1309,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
               const playableQueue=rows.filter(r=>r.fingerprint).map(r=>({id:r.id,title:r.title,artist:r.artist,src:'library',rowIdx:idx}));
               return e('tr',{
                 key:f.id,
-                ref:el=>{if(el)rowRefs.current[f.id]=el;},
+                ref:el=>{if(el)rowRefs.current[f.id]=el;else delete rowRefs.current[f.id];},
                 'data-fileid':f.id,
                 className:f.id===flashId?'locate-flash':undefined,
                 style:{borderBottom:'0.5px solid var(--bd-subtle)',
@@ -1530,7 +1612,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   },[flashGroupId]);
   function scrollToGroup(gid){
     const el=groupRefs.current[gid];
-    if(!el)return false;
+    if(!el||!el.isConnected){ delete groupRefs.current[gid]; return false; }
     el.scrollIntoView({behavior:'smooth',block:'center'});
     setFlashGroupId(gid);
     return true;
@@ -1731,7 +1813,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
           const tags=(g.match_tags||'').split(',').filter(Boolean).slice(0,2);
           const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t.keep)?.title:null)||`组 #${g.id}`;
           const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t.keep)?.artist:null)||'';
-          return e('div',{key:g.id,ref:el=>{if(el)groupRefs.current[g.id]=el;},className:g.id===flashGroupId?'locate-flash':undefined,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
+          return e('div',{key:g.id,ref:el=>{if(el)groupRefs.current[g.id]=el;else delete groupRefs.current[g.id];},className:g.id===flashGroupId?'locate-flash':undefined,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
             e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:3}},
               e('span',{style:{fontSize:12,fontWeight:600,color:isSel?'#92400E':'var(--tx-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,maxWidth:160}},title),
               !!g.resolved&&e('i',{className:'ti ti-circle-check',style:{fontSize:13,color:'var(--green)',flexShrink:0,marginLeft:4}})
@@ -1832,7 +1914,8 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
       let attempts=15;
       const tryScroll=()=>{
         const el=rowRefs.current[fid];
-        if(el){ el.scrollIntoView({behavior:'smooth',block:'center'}); setFlashId(fid); return; }
+        if(el&&el.isConnected){ el.scrollIntoView({behavior:'smooth',block:'center'}); setFlashId(fid); return; }
+        if(el&&!el.isConnected)delete rowRefs.current[fid]; // stale entry from before a reload — see LibraryView's scrollToRow for the full story
         if(--attempts>0)setTimeout(tryScroll,120);
       };
       setTimeout(tryScroll,150);
@@ -1900,7 +1983,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
                       const daysLeft=r.expires_at>0?Math.ceil((r.expires_at-Date.now())/(24*3600*1000)):30;
                       const daysColor=daysLeft<=3?'var(--red)':daysLeft<=7?'var(--amber)':'var(--tx-faint)';
                       const isCur=player?.current?.id===r.file_id;
-                      return e('tr',{key:r.file_id,ref:el=>{if(el)rowRefs.current[r.file_id]=el;},className:r.file_id===flashId?'locate-flash':undefined,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
+                      return e('tr',{key:r.file_id,ref:el=>{if(el)rowRefs.current[r.file_id]=el;else delete rowRefs.current[r.file_id];},className:r.file_id===flashId?'locate-flash':undefined,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
                         e('td',{style:{padding:'6px 8px',width:36}},
                           player&&r.file_id&&e('button',{onClick:()=>player.playTrack({id:r.file_id,title,artist,src:'settings-history'}),
                             style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
@@ -1950,7 +2033,8 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
       let attempts=15;
       const tryScroll=()=>{
         const el=rowRefs.current[fid];
-        if(el){ el.scrollIntoView({behavior:'smooth',block:'center'}); setFlashId(fid); return; }
+        if(el&&el.isConnected){ el.scrollIntoView({behavior:'smooth',block:'center'}); setFlashId(fid); return; }
+        if(el&&!el.isConnected)delete rowRefs.current[fid]; // stale entry from before a reload — see LibraryView's scrollToRow for the full story
         if(--attempts>0)setTimeout(tryScroll,120);
       };
       setTimeout(tryScroll,150);
@@ -1984,7 +2068,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
                 ? e('tr',null,e('td',{colSpan:6,style:{padding:'18px',textAlign:'center',color:'var(--tx-faint)',fontSize:12}},'无匹配结果'))
                 : filtered.map(f=>{
                     const isCur=player?.current?.id===f.id;
-                    return e('tr',{key:f.id,ref:el=>{if(el)rowRefs.current[f.id]=el;},className:f.id===flashId?'locate-flash':undefined,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
+                    return e('tr',{key:f.id,ref:el=>{if(el)rowRefs.current[f.id]=el;else delete rowRefs.current[f.id];},className:f.id===flashId?'locate-flash':undefined,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
                       e('td',{style:{padding:'6px 8px',width:36}},
                         f.fingerprint&&player&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'settings-whitelist'}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
                           Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))

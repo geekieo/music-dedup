@@ -397,22 +397,34 @@ app.post('/api/validate-acoustid', async(req,res)=>{
   const { key } = req.body;
   if (!key || !key.trim()) return res.json({ ok:false, error:'请输入 API Key' });
   try {
-    // Send a lookup with a minimal valid-format request; AcoustID returns error code 3 for invalid key
+    // Send a lookup with a minimal (deliberately invalid) fingerprint —
+    // if the KEY itself is fine, AcoustID complains about the fingerprint
+    // instead, which confirms the key works without needing a real one.
     const params = new URLSearchParams({ client: key.trim(), duration: '240', fingerprint: 'AQAAA', meta: 'recordings' });
     const r = await fetch(`https://api.acoustid.org/v2/lookup?${params}`, {
-      headers: { 'User-Agent': 'MusicDedup/1.7' }
+      headers: { 'User-Agent': 'MusicDedup/1.8' }
     });
     const d = await r.json();
-    // Error code 3 = invalid API key; code 5 = invalid fingerprint (key itself is valid)
-    if (d.status === 'ok' || (d.status === 'error' && d.error?.code !== 3)) {
+    // F9 bugfix: this used to treat error code===3 as "invalid key" — but a
+    // real invalid AcoustID key actually comes back as code 4 with message
+    // "invalid API key" (confirmed against a real invalid key; code 3
+    // doesn't mean that at all). Checking the wrong code number meant a
+    // GENUINELY invalid key sailed through this check as "已验证" every
+    // time, while the real batch lookups kept failing with api-error-4 —
+    // exactly the "验证通过但完全不能用" symptom. Match on the message text
+    // instead of a magic number, since that's what AcoustID actually
+    // documents and it's robust to code numbers being confused/changed.
+    const msg = (d.error?.message || '').toLowerCase();
+    const isKeyInvalid = d.status === 'error' && (d.error?.code === 4 || msg.includes('invalid api key') || msg.includes('invalid client'));
+    if (d.status === 'ok' || (d.status === 'error' && !isKeyInvalid)) {
       res.json({ ok: true });
     } else {
       const base = d.error?.message || '无效的 API Key';
-      // Code 3 is very often caused by pasting the personal/user key (shown
-      // right after login) instead of an application/client key, which
-      // requires registering an application separately — the two look
-      // identical but only one works for lookups.
-      res.json({ ok: false, error: `${base}（请确认使用的是 acoustid.org 注册应用后获得的 "client" 密钥，而非登录后看到的个人 "user" 密钥）` });
+      // Very often caused by pasting the personal/user key (acoustid.org/api-key,
+      // meant for fingerprint submission) instead of an application/client key
+      // (acoustid.org/my-applications, needed for lookups) — the two look
+      // identical but only the second one works here.
+      res.json({ ok: false, error: `${base}（请确认使用的是 acoustid.org/my-applications 注册应用后获得的 "client" 密钥，而不是 acoustid.org/api-key 页面看到的个人 "user" 密钥）` });
     }
   } catch(e) {
     res.json({ ok: false, error: '网络错误: ' + e.message });
