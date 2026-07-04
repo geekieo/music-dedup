@@ -1,6 +1,6 @@
 {
   "name": "musicdedup",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "本地重复音乐管理工具 — 纯JS声纹识别 + 智能保留策略",
   "type": "module",
   "main": "server.js",
@@ -11,8 +11,10 @@
   "dependencies": {
     "audio-decode": "^3.10.1",
     "cors": "^2.8.5",
+    "eventsource": "^4.1.0",
     "express": "^4.18.3",
     "fast-glob": "^3.3.2",
+    "jsdom": "^29.1.1",
     "music-metadata": "^10.5.0",
     "node-id3": "^0.2.9",
     "node-sqlite3-wasm": "0.8.57",
