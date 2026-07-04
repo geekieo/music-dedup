@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.8.2';
+const APP_VERSION='1.9.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -30,6 +30,7 @@ const MATCH_TAG_LABELS={
   exact_copy:'声纹一致', same_recording:'声纹相似', fp_diff:'声纹不同',
   format_diff:'格式不同', filename_same:'文件名相同', metadata_same:'标题/艺术家一致',
   single_vs_album:'单曲vs专辑', duration_near:'时长基本一致', mb_confirmed:'MusicBrainz确认',
+  cp_confirmed:'Chromaprint确认',
 };
 const MATCH_TAG_DESCRIPTIONS={
   exact_copy:'两个文件的声纹完全一致。和文件字节是否相同无关——文件名、标签、体积都可以不一样。',
@@ -41,6 +42,7 @@ const MATCH_TAG_DESCRIPTIONS={
   single_vs_album:'一个版本来自单曲，另一个来自专辑/合辑。',
   duration_near:'时长几乎完全一致（≤1.5 秒）。',
   mb_confirmed:'两个文件被刮削到同一条 MusicBrainz 录音，第三方数据库交叉确认。',
+  cp_confirmed:'实验性功能：通过 Chromaprint（fpcalc）指纹比对确认重复，与本程序内置声纹相互独立、并行运行，可用于对比两者的匹配效果。',
 };
 const TAG_COLORS={
   exact_copy:['#065F46','#D1FAE5','#A7F3D0'], same_recording:['#1E40AF','#DBEAFE','#BFDBFE'],
@@ -48,6 +50,7 @@ const TAG_COLORS={
   filename_same:['#1D4ED8','#DBEAFE','#BFDBFE'], metadata_same:['#0F766E','#CCFBF1','#99F6E4'],
   single_vs_album:['#9A3412','#FEE2E2','#FECACA'], duration_near:['#6B7280','#F3F4F6','#E5E7EB'],
   mb_confirmed:['#7C3AED','#EDE9FE','#DDD6FE'],
+  cp_confirmed:['#B45309','#FEF3C7','#FDE68A'],
 };
 
 /* ── Icon system ──────────────────────────────────────────────────────
@@ -1889,7 +1892,7 @@ const SETTINGS_SECTIONS=[
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
-const TAG_LEGEND=['exact_copy','same_recording','fp_diff','mb_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
+const TAG_LEGEND=['exact_copy','same_recording','fp_diff','mb_confirmed','cp_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
   const[rows,setRows]=useState(null);
@@ -2269,6 +2272,10 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-scrape'},
         e(SH,{title:'刮削匹配',hint:'刮削运行时会先计算声纹（供 AcoustID 使用），再向 MusicBrainz 查询录音信息。AcoustID 提供声纹精确匹配，MusicBrainz 提供元数据模糊搜索作为后备。'}),
+        e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:10,padding:'6px 10px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-md)'}},
+          Icon('info-circle',{fontSize:12,color:'var(--amber)',marginRight:5}),
+          '实验性：下方 fpcalc 一旦配置成功，「声纹匹配」阶段现在也会额外用它做一次本地重复比对（与本程序内置声纹并行、互不影响），重复组会标注 "Chromaprint确认"。不影响 AcoustID 原有用途。'
+        ),
 
         e('div',{style:{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
