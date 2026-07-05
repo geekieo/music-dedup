@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.9.0';
+const APP_VERSION='1.9.1';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -1462,7 +1462,9 @@ function ScannerView({scan}){
           e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'强制全量重扫（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
         )
       ),
-      advanced.all&&e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
+      advanced.all&&e('div',{style:{display:'flex',justifyContent:'flex-end'}},
+        e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
+      )
     ),
 
     // Progress — F9: 暂停/继续/停止 moved here (right next to phase/percent,
