@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.9.1';
+const APP_VERSION='1.10.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -19,38 +19,39 @@ const fmtDur=s=>{if(!s)return'—';const m=Math.floor(s/60),sec=Math.floor(s%60)
 const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN',{dateStyle:'short',timeStyle:'short'});};
 
 /* ── Match-tag taxonomy ──────────────────────────────────────────────────
-   Tri-state fingerprint-confidence label (exact_copy / same_recording /
-   fp_diff) is always exactly one of the three per group — it reflects HOW
-   the match was confirmed, not an arbitrary similarity cutoff. Spectral
-   similarity is unreliable across different encodes/masters (phase/alignment
-   drift can crash the score even for an identical recording), so "声纹不同"
-   does not mean "probably not a duplicate" — metadata is just as valid a
-   basis. See lib/rules.js for the matching server-side source of truth. */
+   spectral_exact / cp_exact / same_recording / fp_diff describe HOW the
+   audio-fingerprint side of the match was confirmed — spectral (built-in)
+   and Chromaprint (needs fpcalc) are independent signals, so a group can
+   carry either, both, or neither's "exact" tag. fp_diff means NEITHER
+   available method found similarity, not "probably not a duplicate" —
+   metadata is just as valid a basis. See lib/rules.js for the matching
+   server-side source of truth. */
 const MATCH_TAG_LABELS={
-  exact_copy:'声纹一致', same_recording:'声纹相似', fp_diff:'声纹不同',
+  spectral_exact:'频谱声纹一致', cp_exact:'Chromaprint声纹一致', same_recording:'声纹相似', fp_diff:'声纹不同',
   format_diff:'格式不同', filename_same:'文件名相同', metadata_same:'标题/艺术家一致',
-  single_vs_album:'单曲vs专辑', duration_near:'时长基本一致', mb_confirmed:'MusicBrainz确认',
-  cp_confirmed:'Chromaprint确认',
+  single_vs_album:'单曲vs专辑', duration_near:'时长基本一致', mb_confirmed:'MusicBrainz刮削一致',
+  acoustid_confirmed:'AcoustID刮削一致',
 };
 const MATCH_TAG_DESCRIPTIONS={
-  exact_copy:'两个文件的声纹完全一致。和文件字节是否相同无关——文件名、标签、体积都可以不一样。',
+  spectral_exact:'本程序内置声纹（频谱指纹）完全一致。和文件字节是否相同无关——文件名、标签、体积都可以不一样。',
+  cp_exact:'Chromaprint 声纹高度一致（需配置 fpcalc）。与内置声纹相互独立，可能会分别找到对方漏掉的重复。',
   same_recording:'声纹相似度达到设定阈值，但不完全一致，通常是同一录音的不同编码或母带。',
-  fp_diff:'声纹比对未达到阈值，凭标题、艺术家、时长等元数据判定为重复。',
+  fp_diff:'内置声纹和 Chromaprint（如果有）都没有比对上，凭标题、艺术家、时长等信息判定为重复。',
   format_diff:'同一首歌存在不同的文件格式（容器/编码）。',
   filename_same:'文件名（不含扩展名）完全相同。',
   metadata_same:'标题和艺术家标签完全一致。',
   single_vs_album:'一个版本来自单曲，另一个来自专辑/合辑。',
   duration_near:'时长几乎完全一致（≤1.5 秒）。',
-  mb_confirmed:'两个文件被刮削到同一条 MusicBrainz 录音，第三方数据库交叉确认。',
-  cp_confirmed:'实验性功能：通过 Chromaprint（fpcalc）指纹比对确认重复，与本程序内置声纹相互独立、并行运行，可用于对比两者的匹配效果。',
+  mb_confirmed:'两个文件被 MusicBrainz 文本搜索匹配到同一条录音，第三方数据库交叉确认。',
+  acoustid_confirmed:'两个文件被 AcoustID 声纹识别到同一条录音——由音频指纹验证，比纯文本搜索的确认更可信。',
 };
 const TAG_COLORS={
-  exact_copy:['#065F46','#D1FAE5','#A7F3D0'], same_recording:['#1E40AF','#DBEAFE','#BFDBFE'],
+  spectral_exact:['#065F46','#D1FAE5','#A7F3D0'], cp_exact:['#B45309','#FEF3C7','#FDE68A'], same_recording:['#1E40AF','#DBEAFE','#BFDBFE'],
   fp_diff:['#92400E','#FFFBEB','#FDE68A'], format_diff:['#5B21B6','#EDE9FE','#DDD6FE'],
   filename_same:['#1D4ED8','#DBEAFE','#BFDBFE'], metadata_same:['#0F766E','#CCFBF1','#99F6E4'],
   single_vs_album:['#9A3412','#FEE2E2','#FECACA'], duration_near:['#6B7280','#F3F4F6','#E5E7EB'],
   mb_confirmed:['#7C3AED','#EDE9FE','#DDD6FE'],
-  cp_confirmed:['#B45309','#FEF3C7','#FDE68A'],
+  acoustid_confirmed:['#0891B2','#CFFAFE','#A5F3FC'],
 };
 
 /* ── Icon system ──────────────────────────────────────────────────────
@@ -890,8 +891,8 @@ function PropsModal({fileId,onClose}){
   // ambiguous "声纹方法" — which used to only describe the first one and
   // gave no visibility into whether an AcoustID-usable fingerprint existed.
   const fpMethodLabel={spectral:'已提取（频谱指纹）',metadata:'未解码，退化为元数据匹配'}[data.fingerprint_method]||'未提取';
-  const chromaprintLabel=data.chromaprint?'已提取（Chromaprint/fpcalc）':'未提取（需 fpcalc 可执行文件）';
-  const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['流派',data.genre||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['修改时间',fmtDate(data.file_mtime)],['本地声纹',fpMethodLabel],['AcoustID 声纹',chromaprintLabel]];
+  const chromaprintLabel=data.chromaprint?'已提取':'未提取（前往设置 → 声纹匹配 配置）';
+  const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['流派',data.genre||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['修改时间',fmtDate(data.file_mtime)],['频谱声纹',fpMethodLabel],['Chromaprint 声纹',chromaprintLabel]];
   return e(Modal,{title:'文件属性',onClose,width:560},
     // Cover art row
     coverUrl&&e('div',{style:{display:'flex',justifyContent:'center',marginBottom:12}},
@@ -1388,7 +1389,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 const LANE_META={
   basic:  {label:'基础匹配',  sub:'',  desc:'枚举音频文件，读取文件属性（标题/艺术家/专辑/时长等）并据此比对重复。',icon:'tag',          steps:['enum','meta','match']},
   fp:     {label:'声纹匹配',  sub:'',  desc:'计算频谱指纹，作为声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['enum','meta','fp','match']},
-  scrape: {label:'刮削匹配',  sub:'',  desc:'先计算声纹（供 AcoustID 使用），再从 MusicBrainz（及可选的 AcoustID）查询录音信息；两个文件命中同一条录音即视为交叉确认。需要 AcoustID Key 才能启用声纹刮削。',icon:'cloud-download',steps:['enum','meta','fp','scrape','match']},
+  scrape: {label:'刮削匹配',  sub:'',  desc:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹识别；两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['enum','meta','fp','scrape','match']},
 };
 function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
@@ -1447,7 +1448,12 @@ function ScannerView({scan}){
               e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
             )
           ),
-          advanced[key]&&e('button',{onClick:()=>runLane(key,true),disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'强制重新执行')
+          advanced[key]&&e('button',{onClick:()=>runLane(key,true),disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'强制重新执行'),
+          // F9: retries files that were already scraped but came back with
+          // nothing usable (or, for AcoustID specifically, files MB already
+          // touched but AcoustID hasn't confirmed) — without re-downloading
+          // everything that already matched fine, unlike "强制重新执行".
+          advanced[key]&&key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});},disabled:status.running,title:'重新尝试之前刮削未命中的文件（含之前无 AcoustID Key 或未装 fpcalc 时跳过的文件），已成功匹配的文件不受影响',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
         );
       })
     ),
@@ -1457,13 +1463,17 @@ function ScannerView({scan}){
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
         e('div',null,e('div',{style:{fontSize:13,fontWeight:600,marginBottom:2,display:'flex',alignItems:'center'}},'智能执行全部',e(Hint,{text:'依次执行枚举 → 文件属性 → 声纹 → 刮削 → 匹配，按文件修改时间与是否存在自动跳过未变更/已删除的文件。'})),
         e('div',{style:{fontSize:11,color:'var(--tx-faint)'}},'三条匹配通道一次性全部完成')),
-        e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
-          e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
-          e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'强制全量重扫（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
+        // F9: inline-flex column here so the "强制全量重扫" button below can
+        // stretch to match the natural width of this button pair exactly
+        // (align-items:stretch, the flex column default) instead of the two
+        // rows being sized independently and drifting apart.
+        e('div',{style:{display:'inline-flex',flexDirection:'column',alignItems:'stretch'}},
+          e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
+            e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
+            e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'强制全量重扫（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
+          ),
+          advanced.all&&e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',justifyContent:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
         )
-      ),
-      advanced.all&&e('div',{style:{display:'flex',justifyContent:'flex-end'}},
-        e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
       )
     ),
 
@@ -1685,6 +1695,18 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     if(scanDoneKey>0&&scanDoneKey!==prevScanDoneKey.current){
       prevScanDoneKey.current=scanDoneKey;
       loadList();
+      // F9 bugfix: a rematch (e.g. after changing 音质优先级 in Settings and
+      // clicking "立即重新匹配") clears and REBUILDS every dup_groups row
+      // from scratch — group ids get reassigned, they're not stable across
+      // a rematch. The detail panel only ever refetched on selId changing,
+      // so if one was open when the rematch ran, it kept showing whatever
+      // it last fetched under the OLD id — stale recommendation data that
+      // looked like "the new quality order didn't change anything" when
+      // really it just never re-fetched at all. Close it here instead of
+      // trying to refetch the same id, since that id may now point at an
+      // unrelated group or nothing.
+      setSelId(null);
+      setDetail(null);
     }
   },[scanDoneKey]);
   useEffect(()=>{
@@ -1894,7 +1916,7 @@ const SETTINGS_SECTIONS=[
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
-const TAG_LEGEND=['exact_copy','same_recording','fp_diff','mb_confirmed','cp_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
+const TAG_LEGEND=['spectral_exact','cp_exact','same_recording','fp_diff','mb_confirmed','acoustid_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
   const[rows,setRows]=useState(null);
@@ -2269,15 +2291,31 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)'}},'声纹相似度阈值'),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
+        ),
+
+        e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
+          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2}},'Chromaprint 声纹（可选）'),
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:8}},'内置声纹开箱即用，不需要配置。Chromaprint 是第二种声纹，配置后会在内置声纹之外额外做一次独立比对，两者互不影响、结果会分别标注，通常能找到内置声纹漏掉的一些重复。同一份 Chromaprint 数据也会被「刮削匹配」里的 AcoustID 用到。'),
+          e('div',{style:{display:'flex',gap:6,maxWidth:460}},
+            e('input',{value:s.fpcalc_path||'',
+              onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
+              placeholder:fpcalc?.available?`已自动检测：${fpcalc.path}`:'留空则自动检测（项目根目录 / PATH）',
+              style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
+            e(SettingStatus,{
+              state:!fpcalc?'idle':fpcalc.available?'ok':'warn',
+              busy:fpcalcChecking,
+              message:!fpcalc?'检测中...':fpcalc.available?`已找到：${fpcalc.path}`:(fpcalc.note||'未检测到，点击重新检测'),
+              onClick:recheckFpcalc,
+            })
+          ),
+          e('div',{style:{marginTop:8,fontSize:11,color:'var(--tx-faint)'}},
+            '下载地址：acoustid.org/chromaprint（对应你的系统，文件很小）。下载后把 fpcalc 放到本项目根目录，或在上面填入完整路径，两者任选一种。'
+          )
         )
       ),
 
       e(Card,{id:'sec-scrape'},
-        e(SH,{title:'刮削匹配',hint:'刮削运行时会先计算声纹（供 AcoustID 使用），再向 MusicBrainz 查询录音信息。AcoustID 提供声纹精确匹配，MusicBrainz 提供元数据模糊搜索作为后备。'}),
-        e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:10,padding:'6px 10px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-md)'}},
-          Icon('info-circle',{fontSize:12,color:'var(--amber)',marginRight:5}),
-          '实验性：下方 fpcalc 一旦配置成功，「声纹匹配」阶段现在也会额外用它做一次本地重复比对（与本程序内置声纹并行、互不影响），重复组会标注 "Chromaprint确认"。不影响 AcoustID 原有用途。'
-        ),
+        e(SH,{title:'刮削匹配',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
 
         e('div',{style:{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
@@ -2296,13 +2334,9 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ),
         e('div',null,
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:6}},
-            Icon('key',{marginRight:5,fontSize:13}),'AcoustID 声纹匹配',
+            Icon('key',{marginRight:5,fontSize:13}),'AcoustID',
             e('span',{style:{marginLeft:8,fontSize:10,fontWeight:400,color:'var(--tx-faint)'}},'需同时满足下方两个条件')
           ),
-          // API Key + fpcalc status — identical single-row layout: label
-          // above, then [input][status dot]. The status dot is the only
-          // place validation/detection result lives (hover/tap for detail,
-          // click to re-run) — no separate result line taking up space.
           e('div',{style:{display:'flex',gap:14,flexWrap:'wrap'}},
             // Condition 1: API Key
             e('div',{style:{flex:'1 1 220px',minWidth:200}},
@@ -2320,30 +2354,20 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
                 })
               )
             ),
-            // Condition 2: fpcalc — status + custom path input
+            // Condition 2: Chromaprint — configured in 声纹匹配, status-only
+            // reference here (single source of truth for the fpcalc path;
+            // see sec-fp) rather than a second input for the same setting.
             e('div',{style:{flex:'1 1 260px',minWidth:240}},
-              e('div',{style:{fontSize:11,color:'var(--tx-secondary)',marginBottom:4,fontWeight:500}},'② fpcalc 可执行文件'),
-              e('div',{style:{display:'flex',gap:6}},
-                e('input',{value:s.fpcalc_path||'',
-                  onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
-                  placeholder:fpcalc?.available?`已自动检测：${fpcalc.path}`:'留空则自动检测（项目根目录 / PATH）',
-                  style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
-                e(SettingStatus,{
-                  state:!fpcalc?'idle':fpcalc.available?'ok':'warn',
-                  busy:fpcalcChecking,
-                  message:!fpcalc?'检测中...':fpcalc.available?`已找到：${fpcalc.path}`:(fpcalc.note||'未检测到 fpcalc，点击重新检测'),
-                  onClick:recheckFpcalc,
-                })
+              e('div',{style:{fontSize:11,color:'var(--tx-secondary)',marginBottom:4,fontWeight:500}},'② Chromaprint 声纹'),
+              e('button',{onClick:()=>jump('sec-fp'),style:{display:'flex',alignItems:'center',gap:6,width:'100%',padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',cursor:'pointer',fontSize:11,color:fpcalc?.available?'var(--green)':'var(--tx-faint)',textAlign:'left'}},
+                Icon(fpcalc?.available?'circle-check':'alert-circle',{fontSize:12,flexShrink:0}),
+                e('span',{style:{flex:1}},fpcalc?.available?`已配置：${fpcalc.path}`:'未配置'),
+                e('span',{style:{color:'var(--tx-faint)',textDecoration:'underline'}},'去「声纹匹配」配置')
               )
             )
           ),
-          // Fastest-setup guidance
-          e('div',{style:{marginTop:10,padding:'8px 12px',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-subtle)',borderRadius:'var(--r-md)',fontSize:11,color:'var(--tx-faint)',lineHeight:1.7}},
-            e('b',{style:{color:'var(--tx-secondary)'}},'最快设置方法：'),
-            e('br'),
-            '1) 从 acoustid.org/chromaprint 下载 fpcalc（对应你的操作系统，小于 1MB）；',e('br'),
-            '2) 将解压出的 fpcalc（Windows 为 fpcalc.exe）放到本项目根目录（与 package.json 同级），或填入上方路径框后点"重新检测"；',e('br'),
-            '3) 两个条件都变绿后，重新运行一次「声纹匹配」，AcoustID 即可生效。'
+          e('div',{style:{marginTop:10,padding:'8px 12px',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-subtle)',borderRadius:'var(--r-md)',fontSize:11,color:'var(--tx-faint)'}},
+            '两个条件都满足后，重新运行一次「刮削匹配」，AcoustID 即可生效。'
           )
         )
       ),
@@ -2418,9 +2442,9 @@ function useScanStream(onDone){
     const ts=new Date().toLocaleTimeString('zh-CN');
     setLogs(p=>[...p,{msg:`━━━ ${label} [${ts}] ━━━`,ty:'sep',ts:Date.now()}]);
   }
-  function startStep(steps,force=false,label){
-    addSeparator(`${label||'扫描'} · ${force?'强制全量':'智能模式'}`);
-    api.post('/api/scan/start',{steps,force}).then(r=>{if(!r.ok)addSeparator(`⚠ 启动失败：${r.error||''}`);});
+  function startStep(steps,force=false,label,extra={}){
+    addSeparator(`${label||'扫描'} · ${force?'强制全量':extra.retryMissed?'未命中重新执行':'智能模式'}`);
+    api.post('/api/scan/start',{steps,force,...extra}).then(r=>{if(!r.ok)addSeparator(`⚠ 启动失败：${r.error||''}`);});
   }
   function tryStart(steps,force,label){
     if(force){setConfirm({steps,force,label});return;}
