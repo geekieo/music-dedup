@@ -342,6 +342,7 @@ app.post('/api/scan/start', async(req,res)=>{
   const smartScan=s.smart_scan!==false;
   const steps=req.body?.steps||['enum','meta','fp','match'];
   const force=req.body?.force===true;
+  const retryMissed=req.body?.retryMissed===true;
   if(steps.includes('enum')&&!dirs.length)return res.status(400).json({ok:false,error:'未配置扫描目录'});
   res.json({ok:true,message:'扫描已启动',steps});
   scanState={running:true,abortFlag:false,paused:false,phase:'starting',pct:0,message:'准备中...',startTime:Date.now()};
@@ -367,7 +368,7 @@ app.post('/api/scan/start', async(req,res)=>{
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
       if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹指纹（fpcalc）进行刮削匹配...'});
-      await runScrape(db,{smartScan:force?false:smartScan,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
+      await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
