@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.10.0';
+const APP_VERSION='1.10.1';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -1387,9 +1387,9 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
    switches — see useScanStream().
    ══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
-  basic:  {label:'基础匹配',  sub:'',  desc:'枚举音频文件，读取文件属性（标题/艺术家/专辑/时长等）并据此比对重复。',icon:'tag',          steps:['enum','meta','match']},
-  fp:     {label:'声纹匹配',  sub:'',  desc:'计算频谱指纹，作为声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['enum','meta','fp','match']},
-  scrape: {label:'刮削匹配',  sub:'',  desc:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹识别；两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['enum','meta','fp','scrape','match']},
+  basic:  {label:'基础匹配',  sub:'',  desc:'枚举音频文件，读取文件属性（标题/艺术家/专辑/时长等）并据此比对重复。',icon:'tag',          steps:['enum','meta','basicMatch']},
+  fp:     {label:'声纹匹配',  sub:'',  desc:'计算频谱指纹，作为声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['enum','meta','fp','fpMatch']},
+  scrape: {label:'刮削匹配',  sub:'',  desc:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹识别；两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['enum','meta','fp','scrape','scrapeMatch']},
 };
 function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
@@ -1616,6 +1616,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   const[tagFilter,setTagFilter]=useState(new Set());
   const[search,setSearch]=useState('');
   const[selId,setSelId]=useState(null);
+  const[displayCount,setDisplayCount]=useState(50);
+  const scrollSentinelRef=useRef(null);
   // Locate-in-duplicates: briefly highlights the target group after scrolling to it.
   const groupRefs=useRef({});
   const[flashGroupId,setFlashGroupId]=useState(null);
@@ -1690,6 +1692,21 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     }).finally(()=>setListLoading(false));
   }
   useEffect(()=>{loadList();},[filter,sort]);
+  // Reset display count when filter, search, or tag filter changes
+  useEffect(()=>{setDisplayCount(50);},[filter,sort,search,tagFilter]);
+  // Infinite scroll for the group list (left panel) — purely client-side
+  // windowing over already-fetched groups.
+  useEffect(()=>{
+    const sentinel=scrollSentinelRef.current;
+    if(!sentinel)return;
+    const obs=new IntersectionObserver(entries=>{
+      if(entries[0].isIntersecting){
+        setDisplayCount(prev=>Math.min(prev+50,groups.length));
+      }
+    },{rootMargin:'300px',threshold:0});
+    obs.observe(sentinel);
+    return ()=>obs.disconnect();
+  },[groups.length]);
   // Reload list whenever a scan completes (scanDoneKey increments from App)
   useEffect(()=>{
     if(scanDoneKey>0&&scanDoneKey!==prevScanDoneKey.current){
@@ -1835,7 +1852,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       e('div',{style:{overflowY:'auto',height:'100%',paddingRight:2}},
         listLoading?e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
         visibleGroups.length===0?e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:'20px 0',textAlign:'center',lineHeight:1.8}},(tagFilter.size||search.trim())?'当前筛选条件无结果':filter==='pending'?'无待处理组\n请先执行扫描':'暂无数据'):
-        visibleGroups.map(g=>{
+        e('div',null,
+          visibleGroups.slice(0,displayCount).map(g=>{
           const isSel=g.id===selId;
           const tags=(g.match_tags||'').split(',').filter(Boolean).slice(0,2);
           const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t.keep)?.title:null)||`组 #${g.id}`;
@@ -1851,7 +1869,9 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
               tags.map(t=>e(MatchTag,{key:t,tag:t}))
             )
           );
-        })
+        }),
+        e('div',{ref:scrollSentinelRef,style:{height:1}})
+      )
       ),
 
       e('div',{style:{overflowY:'auto',height:'100%',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-xs)',padding:'16px 18px'}},
@@ -2491,7 +2511,7 @@ function App(){
       if(cur.includes(dir))return p;
       const next=[...cur,dir];
       api.put('/api/settings',{scan_dirs:next});
-      scan.startStep(['enum','meta','fp','match'],false,'扫描目录更新');
+      scan.startStep(['enum','meta','basicMatch'],false,'扫描目录更新');
       return{...(p||{}),scan_dirs:next};
     });
     setView('scanner');
@@ -2528,7 +2548,7 @@ function App(){
     setView('scanner');
   },[scan]);
   const onScrapeReapply=useCallback(()=>{
-    scan.startStep(['scrape','match'],false,'AcoustID Key 更新后重新刮削');
+    scan.startStep(['scrape','scrapeMatch'],false,'AcoustID Key 更新后重新刮削');
     setView('scanner');
   },[scan]);
 

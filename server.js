@@ -14,7 +14,7 @@ import {
   getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
-import { runMatcher } from './lib/matcher.js';
+import { runMatcher, runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
@@ -370,6 +370,14 @@ app.post('/api/scan/start', async(req,res)=>{
       if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹指纹（fpcalc）进行刮削匹配...'});
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
+    // Decoupled scrape-only matching: runs Phase 2c (shared mb_recording_id) only,
+    // preserving existing groups from previous full-matcher or scrape-matcher runs.
+    if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    // Decoupled basic matching: Phase 2+2b only (title+artist+duration), no fingerprint.
+    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    // Decoupled fingerprint matching: Phases 1+3+4+5 only, spectral fingerprint required.
+    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    // Full matcher: all 5 phases (backward-compatible, used by "全部执行")
     if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
