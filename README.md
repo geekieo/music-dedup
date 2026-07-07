@@ -16,7 +16,7 @@ npm start
 ## 使用流程
 
 1. **设置** — 点击"添加文件夹"，选择音乐库目录
-2. **扫描** — 三条匹配通道可独立执行：基础匹配（元数据）/ 声纹匹配（频谱+Chromaprint）/ 刮削匹配（MusicBrainz+AcoustID）
+2. **扫描** — 三条匹配通道可独立执行：基础匹配（文件属性）/ 声纹匹配（频谱+Chromaprint）/ 刮削匹配（MusicBrainz+AcoustID）
 3. **重复组** — 按匹配方法筛选，逐组确认保留方案
 4. **写入** — 文件移入系统回收站，可撤销
 
@@ -24,10 +24,10 @@ npm start
 
 | 功能 | 说明 |
 |------|------|
-| 纯 JS 声纹识别 | Goertzel 频谱指纹，无需外部工具 |
-| 多阶段检测 | 精确指纹匹配 → 标题分组 → 元数据确认 → 前缀 LSH → 时长桶 → Chromaprint |
+| 纯 JS 声纹识别 | Goertzel 频谱声纹，无需外部工具 |
+| 多阶段检测 | 精确声纹匹配 → 标题分组 → 属性确认 → 前缀 LSH → 时长桶 → Chromaprint |
 | 三种匹配通道 | 基础匹配 / 声纹匹配 / 刮削匹配，各自独立运行、结果合并 |
-| 智能保留 | 音质优先 → 首发专辑 → 单曲/专辑判断 → 元数据完整性 |
+| 智能保留 | 音质优先 → 首发专辑 → 单曲/专辑判断 → 属性完整性 |
 | 手动覆盖 | 点击任意曲目图标，覆盖自动建议 |
 | 安全删除 | 移入系统回收站，可撤销 |
 | 实时进度 | SSE 推送，多客户端可见 |
@@ -39,11 +39,11 @@ npm start
 
 | 阶段 | 方法 | 说明 |
 |------|------|------|
-| 1 | 精确指纹匹配 | 指纹字符串完全相同 → 必定重复 |
-| 2 | 标题分组 | 从元数据或文件名提取歌名，归组 |
-| 2b | 元数据确认 | 标题+艺术家+时长一致（不需要声纹） |
+| 1 | 精确声纹匹配 | 声纹字符串完全相同 → 必定重复 |
+| 2 | 标题分组 | 从文件属性或文件名提取歌名，归组 |
+| 2b | 属性确认 | 标题+艺术家+时长一致（不需要声纹） |
 | 2c | 刮削确认 | 两个文件独立匹配到同一 MusicBrainz/AcoustID 录音 ID |
-| 3 | 前缀 LSH | 指纹前 N 个整数相同 → 候选 |
+| 3 | 前缀 LSH | 声纹前 N 个整数相同 → 候选 |
 | 4 | 时长桶 | 相同时长（±4s）归组比对 |
 | 5 | Chromaprint | fpcalc 本地声纹比对（需配置） |
 
@@ -52,23 +52,23 @@ npm start
 1. **音质最优** — Hi-Res FLAC > FLAC > WAV > M4A > MP3 320k > …
 2. **首发专辑** — 年份最早的正式专辑
 3. **单曲 vs 专辑** — 本地专辑 ≥ 2 首保留专辑版
-4. **元数据完整性** — 标签最完整的文件
+4. **属性完整性** — 标签最完整的文件
 
 ## 声纹算法
 
-基于 **Goertzel 频谱指纹**（Sub-band Spectral Fingerprinting）：
+基于 **Goertzel 频谱声纹**（Sub-band Spectral Fingerprinting）：
 
 1. 音频解码为 PCM（MP3、FLAC、M4A、OGG、WAV 等）
 2. 重采样至 11025 Hz 单声道
 3. Goertzel 算法计算 33 个对数均匀分布频率（300 Hz–2 kHz）的能量
 4. 比较相邻帧的频谱斜率变化方向 → 32 位整数
-5. ~120 个整数构成指纹（约 1 秒音频）
+5. ~120 个整数构成声纹（约 1 秒音频）
 
 相似度：Hamming 距离逐位比较。
 
 ### Chromaprint（可选）
 
-下载 [fpcalc](https://acoustid.org/chromaprint) 放到项目根目录，可启用独立的 Chromaprint 声纹比对，与内置频谱指纹互补。同一份 Chromaprint 数据也用于 AcoustID 刮削。
+下载 [fpcalc](https://acoustid.org/chromaprint) 放到项目根目录，可启用独立的 Chromaprint 声纹比对，与频谱声纹互补。同一份 Chromaprint 数据也用于 AcoustID 刮削。
 
 ## 部署
 
@@ -139,9 +139,9 @@ musicdedup/
 ├── server.js               # Express 入口 + API 路由
 ├── lib/
 │   ├── db.js               # SQLite (WASM) 数据层
-│   ├── fingerprint.js      # 纯 JS Goertzel 频谱指纹
+│   ├── fingerprint.js      # 纯 JS Goertzel 频谱声纹
 │   ├── chromaprint-bridge.js # fpcalc 桥接
-│   ├── scanner.js          # 文件扫描 + 元数据/声纹提取
+│   ├── scanner.js          # 文件扫描 + 文件属性/声纹提取
 │   ├── scraper.js          # MusicBrainz / AcoustID 刮削
 │   ├── matcher.js          # 多阶段重复检测引擎
 │   ├── rules.js            # 智能保留规则 + 匹配标签
@@ -162,7 +162,7 @@ musicdedup/
 | 100 万首 | ~50 分钟 |
 | 1000 万首 | ~8 小时 |
 
-首次扫描后指纹缓存在 SQLite，增量扫描只处理新文件。
+首次扫描后声纹缓存在 SQLite，增量扫描只处理新文件。
 
 ## License
 
