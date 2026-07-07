@@ -19,39 +19,59 @@ const fmtDur=s=>{if(!s)return'—';const m=Math.floor(s/60),sec=Math.floor(s%60)
 const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN',{dateStyle:'short',timeStyle:'short'});};
 
 /* ── Match-tag taxonomy ──────────────────────────────────────────────────
-   spectral_exact / cp_exact / same_recording / fp_diff describe HOW the
-   audio-fingerprint side of the match was confirmed — spectral (built-in)
-   and Chromaprint (needs fpcalc) are independent signals, so a group can
-   carry either, both, or neither's "exact" tag. fp_diff means NEITHER
-   available method found similarity, not "probably not a duplicate" —
-   metadata is just as valid a basis. See lib/rules.js for the matching
-   server-side source of truth. */
+   Tags are split into two categories:
+
+   MATCHING-METHOD tags (shown in the filter bar):
+     How was this duplicate group DISCOVERED? Each tag maps to a specific
+     matching phase that actively unions pairs.
+     spectral_exact    – Phase 1: spectral fingerprint byte-identical
+     same_recording    – Phase 3/4: spectral similarity ≥ user threshold
+     cp_exact          – Phase 5: Chromaprint ≥ 98%
+     cp_similar        – Phase 5: Chromaprint ≥ 90% (hardcoded CP_THRESH)
+     meta_confirmed    – Phase 2/2b: title+artist+duration agreement
+     mb_confirmed      – Phase 2c: same MusicBrainz recording id
+     acoustid_confirmed– Phase 2c: same AcoustID recording id
+
+   CHARACTERISTIC tags (group detail only, NOT in filter):
+     Describe WHAT the group looks like, not how it was found. Used to
+     inform retention decisions (e.g. "格式不同 → keep FLAC, drop MP3").
+     fp_diff, format_diff, filename_same, metadata_same, single_vs_album,
+     duration_near.
+
+   Source of truth: lib/rules.js detectMatchTags(). */
+const MATCH_METHOD_TAGS=new Set([
+  'spectral_exact','same_recording','cp_exact','cp_similar',
+  'meta_confirmed','mb_confirmed','acoustid_confirmed',
+]);
 const MATCH_TAG_LABELS={
-  spectral_exact:'频谱声纹一致', cp_exact:'Chromaprint声纹一致', same_recording:'声纹相似', fp_diff:'声纹不同',
-  format_diff:'格式不同', filename_same:'文件名相同', metadata_same:'标题/艺术家一致',
-  single_vs_album:'单曲vs专辑', duration_near:'时长基本一致', mb_confirmed:'MusicBrainz刮削一致',
-  acoustid_confirmed:'AcoustID刮削一致',
+  spectral_exact:'频谱声纹一致', same_recording:'频谱声纹相似', cp_exact:'Chromaprint声纹一致', cp_similar:'Chromaprint声纹相似',
+  meta_confirmed:'元数据匹配', mb_confirmed:'MusicBrainz刮削一致', acoustid_confirmed:'AcoustID刮削一致',
+  fp_diff:'声纹不同', format_diff:'格式不同', filename_same:'文件名相同', metadata_same:'标题/艺术家一致',
+  single_vs_album:'单曲vs专辑', duration_near:'时长基本一致',
 };
 const MATCH_TAG_DESCRIPTIONS={
-  spectral_exact:'本程序内置声纹（频谱指纹）完全一致。和文件字节是否相同无关——文件名、标签、体积都可以不一样。',
-  cp_exact:'Chromaprint 声纹高度一致（需配置 fpcalc）。与内置声纹相互独立，可能会分别找到对方漏掉的重复。',
-  same_recording:'声纹相似度达到设定阈值，但不完全一致，通常是同一录音的不同编码或母带。',
-  fp_diff:'内置声纹和 Chromaprint（如果有）都没有比对上，凭标题、艺术家、时长等信息判定为重复。',
+  spectral_exact:'频谱指纹完全一致。和文件字节是否相同无关——文件名、标签、体积都可以不一样。',
+  same_recording:'频谱指纹相似度达到设定阈值，但不完全一致，通常是同一录音的不同编码或母带。',
+  cp_exact:'Chromaprint 声纹高度一致（≥98%）。与内置声纹相互独立，可能会分别找到对方漏掉的重复。',
+  cp_similar:'Chromaprint 声纹相似度达到阈值（≥90%），但未达到完全一致（98%）。',
+  meta_confirmed:'标题、艺术家、时长一致——元数据匹配判定为重复，不需要声纹参与。',
+  mb_confirmed:'两个文件被 MusicBrainz 文本搜索匹配到同一条录音，第三方数据库交叉确认。',
+  acoustid_confirmed:'两个文件被 AcoustID 声纹识别到同一条录音——由音频指纹验证，比纯文本搜索的确认更可信。',
+  fp_diff:'内置声纹和 Chromaprint 都没有比对上，凭标题、艺术家、时长等信息判定为重复。',
   format_diff:'同一首歌存在不同的文件格式（容器/编码）。',
   filename_same:'文件名（不含扩展名）完全相同。',
   metadata_same:'标题和艺术家标签完全一致。',
   single_vs_album:'一个版本来自单曲，另一个来自专辑/合辑。',
   duration_near:'时长几乎完全一致（≤1.5 秒）。',
-  mb_confirmed:'两个文件被 MusicBrainz 文本搜索匹配到同一条录音，第三方数据库交叉确认。',
-  acoustid_confirmed:'两个文件被 AcoustID 声纹识别到同一条录音——由音频指纹验证，比纯文本搜索的确认更可信。',
 };
 const TAG_COLORS={
-  spectral_exact:['#065F46','#D1FAE5','#A7F3D0'], cp_exact:['#B45309','#FEF3C7','#FDE68A'], same_recording:['#1E40AF','#DBEAFE','#BFDBFE'],
-  fp_diff:['#92400E','#FFFBEB','#FDE68A'], format_diff:['#5B21B6','#EDE9FE','#DDD6FE'],
+  spectral_exact:['#065F46','#D1FAE5','#A7F3D0'], same_recording:['#1E40AF','#DBEAFE','#BFDBFE'],
+  cp_exact:['#B45309','#FEF3C7','#FDE68A'], cp_similar:['#92400E','#FFF7ED','#FED7AA'],
+  meta_confirmed:['#0F766E','#CCFBF1','#99F6E4'], mb_confirmed:['#7C3AED','#EDE9FE','#DDD6FE'],
+  acoustid_confirmed:['#0891B2','#CFFAFE','#A5F3FC'],
+  fp_diff:['#6B7280','#F3F4F6','#E5E7EB'], format_diff:['#5B21B6','#EDE9FE','#DDD6FE'],
   filename_same:['#1D4ED8','#DBEAFE','#BFDBFE'], metadata_same:['#0F766E','#CCFBF1','#99F6E4'],
   single_vs_album:['#9A3412','#FEE2E2','#FECACA'], duration_near:['#6B7280','#F3F4F6','#E5E7EB'],
-  mb_confirmed:['#7C3AED','#EDE9FE','#DDD6FE'],
-  acoustid_confirmed:['#0891B2','#CFFAFE','#A5F3FC'],
 };
 
 /* ── Icon system ──────────────────────────────────────────────────────
@@ -1738,6 +1758,11 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     return [...s];
   },[groups]);
 
+  // Only matching-method tags are shown in the filter bar.
+  // Characteristic tags (format_diff, single_vs_album, etc.) still appear
+  // in the group detail view but are not filterable.
+  const filterTags=useMemo(()=>allTags.filter(t=>MATCH_METHOD_TAGS.has(t)),[allTags]);
+
   const visibleGroups=useMemo(()=>{
     let list=groups;
     if(tagFilter.size){
@@ -1810,10 +1835,12 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
-    // F6: filter label and tag buttons share one flex row — no line break
-    allTags.length>0&&e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'按匹配类型筛选（可多选）：'),
-      allTags.map(tag=>{
+    // Filter bar: only matching-method tags (how the group was discovered).
+    // Characteristic tags (format_diff, single_vs_album, etc.) appear in
+    // the group detail view but are not filterable.
+    filterTags.length>0&&e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'按匹配方法筛选（可多选）：'),
+      filterTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
         return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),title:MATCH_TAG_DESCRIPTIONS[tag]||'',style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
@@ -1936,7 +1963,7 @@ const SETTINGS_SECTIONS=[
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
-const TAG_LEGEND=['spectral_exact','cp_exact','same_recording','fp_diff','mb_confirmed','acoustid_confirmed','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
+const TAG_LEGEND=['spectral_exact','same_recording','cp_exact','cp_similar','meta_confirmed','mb_confirmed','acoustid_confirmed','fp_diff','format_diff','filename_same','metadata_same','single_vs_album','duration_near'];
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
   const[rows,setRows]=useState(null);
@@ -2256,7 +2283,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       // onMatchAffectingChange/onScrapeReapply wrappers).
       needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'声纹相似度 / 时长容差 / 音质优先级 已修改，尚未重新应用到现有重复组'),
+        e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'频谱指纹阈值 / 时长容差 / 音质优先级 已修改，尚未重新应用到现有重复组'),
         e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配')
       ),
 
@@ -2306,9 +2333,9 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(Card,{id:'sec-fp'},
-        e(SH,{title:'声纹匹配',hint:'声纹比对会受不同编码/母带的相位差异影响，分数可能忽高忽低，因此它只是辅助信号：标题、艺术家、时长已经一致的歌曲，即使声纹比对分数很低也仍会被判定为重复，只是会标注"声纹不同"而非"声纹一致/相似"。'}),
+        e(SH,{title:'声纹匹配',hint:'频谱指纹（内置声纹）相似度阈值。不同编码/母带间的相位差异会让分数偏低，所以声纹只是辅助信号——标题、艺术家、时长已经一致的歌曲，即使声纹比对分数很低也仍会被判定为重复，只是会标注"声纹不同"而非"声纹一致/相似"。Chromaprint 使用独立的硬编码阈值，不受此滑块影响。'}),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)'}},'声纹相似度阈值'),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)'}},'频谱指纹相似度阈值'),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
         ),
