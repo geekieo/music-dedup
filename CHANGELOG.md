@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] — 2026-07-08
+
+### Changed
+
+- **标签体系完善**：筛选栏拆为双行——匹配方法（如何发现）和其他组内特征（组内关系）；新增对称特征标签
+- **术语统一**：用户可见文本全部使用"声纹"不再混用"指纹"。Goertzel→频谱声纹，Chromaprint→CP声纹（标签）/Chromaprint声纹（描述），元数据→文件属性/属性
+- **标签瘦身**：CP声纹一致/相似、时长接近、年份不同、属性完整度不同
+- **设置滑块更名**：频谱指纹相似度阈值 → 频谱声纹相似度阈值
+
+### Added
+
+- **对称特征标签**：format_same、metadata_diff、duration_diff、album_year_diff、meta_score_diff
+- **保留平局标签**：`retention_tie`，当智能规则无法自动决定时标记，需手动选择
+- **文件属性新增创建时间**：数据库自动迁移 `file_ctime` 列
+
+### Removed
+
+- 删除不可靠的 `single_vs_album` 标签（基于专辑名正则，无实际 release_type 数据支撑）
+
+### Fixed
+
+- `metadata_same` 判断增加 album 字段，与刮削器的精确匹配定义对齐
+- `fp_diff` 正确解耦：仅当频谱声纹和 Chromaprint 都未命中时才标记
+
 ## [1.11.0] — 2026-07-07
 
 ### Changed

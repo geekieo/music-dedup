@@ -367,7 +367,7 @@ app.post('/api/scan/start', async(req,res)=>{
     // Scrape MUST run before match so mb_recording_id data is available for union logic
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
-      if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹指纹（fpcalc）进行刮削匹配...'});
+      if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹（fpcalc）进行刮削匹配...'});
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     // Decoupled scrape-only matching: runs Phase 2c (shared mb_recording_id) only,
