@@ -206,8 +206,21 @@ app.get('/api/files/:id/live-tags', async(req,res)=>{
 app.post('/api/files/:id/scrape-single', async(req,res)=>{
   const s = getAllSettings(db);
   try{
-    const result = await scrapeSingleFile(db,+req.params.id,s.acoustid_key||'');
-    res.json({ok:true,data:result});
+    const dual = await scrapeSingleFile(db,+req.params.id,s.acoustid_key||'');
+    if (!dual) return res.json({ok:true, data:null});
+    const f = getFileById(db, +req.params.id);
+    const ignoreScript = s.ignore_script_variant !== false;
+    // Attach per-source scrape_tier
+    const mb  = dual.mb  ? { ...dual.mb,  scrape_tier: f ? computeScrapeTier(f, dual.mb, ignoreScript) : null } : null;
+    const aid = dual.acoustid ? { ...dual.acoustid, scrape_tier: f ? computeScrapeTier(f, dual.acoustid, ignoreScript) : null } : null;
+    const overallTier = (() => {
+      const tiers = [mb?.scrape_tier, aid?.scrape_tier].filter(Boolean);
+      if (!tiers.length) return null;
+      if (tiers.includes('blue')) return 'blue';
+      if (tiers.includes('green')) return 'green';
+      return 'red';
+    })();
+    res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
   }catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 
@@ -221,18 +234,23 @@ app.post('/api/files/:id/write-tags', async(req,res)=>{
 
 // Scrape data CRUD
 app.get('/api/files/:id/scraped', (req,res)=>{
-  const sm = getScrapedMeta(db,+req.params.id);
-  if (!sm) return res.json({ok:true, data:null});
-  // F9: attach scrape_tier here (using the DB-cached file row, same as the
-  // library list/filter — NOT live-read tags, so the badge always agrees
-  // with the row icon/筛选 for the same file) instead of letting the
-  // ScrapeDialog recompute it client-side against live tags with its own
-  // (previously incomplete) CJK-fold table — that mismatch was exactly the
-  // "筛选说是这个分类，标注却是另一个" bug.
+  const dual = getScrapedMeta(db,+req.params.id);
+  if (!dual.mb && !dual.acoustid) return res.json({ok:true, data:null});
   const f = getFileById(db, +req.params.id);
   const ignoreScript = getAllSettings(db).ignore_script_variant !== false;
-  const tier = f ? computeScrapeTier(f, sm, ignoreScript) : null;
-  res.json({ok:true, data:{ ...sm, scrape_tier: tier }});
+  // Compute tier for each source independently, plus overall best tier
+  const mb  = dual.mb  ? { ...dual.mb,  scrape_tier: f ? computeScrapeTier(f, dual.mb, ignoreScript) : null } : null;
+  const aid = dual.acoustid ? { ...dual.acoustid, scrape_tier: f ? computeScrapeTier(f, dual.acoustid, ignoreScript) : null } : null;
+  // Overall tier: either source exact (green/blue) → overall exact, blue takes
+  // priority (有可写入字段), then green, then red only if both are fuzzy/null.
+  const overallTier = (() => {
+    const tiers = [mb?.scrape_tier, aid?.scrape_tier].filter(Boolean);
+    if (!tiers.length) return null;
+    if (tiers.includes('blue')) return 'blue';
+    if (tiers.includes('green')) return 'green';
+    return 'red';
+  })();
+  res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
 });
 app.delete('/api/files/:id/scraped', (req,res)=>{
   try { db.run('DELETE FROM scraped_meta WHERE file_id=?',[+req.params.id]); res.json({ok:true}); }
@@ -347,16 +365,8 @@ app.post('/api/scan/start', async(req,res)=>{
   res.json({ok:true,message:'扫描已启动',steps});
   scanState={running:true,abortFlag:false,paused:false,phase:'starting',pct:0,message:'准备中...',startTime:Date.now()};
   broadcast({type:'start',...scanState});
-  // F9 bugfix: this used to be `evt=>broadcast({type:'progress',...evt})` —
-  // each phase's onProgress() call only reports {phase,pct,message}, so
-  // broadcasting `evt` alone REPLACED running/paused/abortFlag with
-  // `undefined` on every single progress tick (frontend does setStatus(d),
-  // a full replace, not a merge). status.running was only briefly true right
-  // after 'start', then vanished for the rest of the scan — which is why
-  // the 暂停/继续/停止 buttons (gated on status.running) disappeared almost
-  // immediately. Also left GET /api/scan/status permanently stuck reporting
-  // phase:'starting' since nothing ever updated scanState itself, only sent
-  // one-off broadcasts. Now we mutate scanState in place and broadcast that.
+  // Mutate scanState in place and broadcast it — broadcasting evt alone would
+  // clobber running/paused/abortFlag since the frontend does a full replace.
   const prog=evt=>{ Object.assign(scanState,evt); broadcast({type:'progress',...scanState}); };
   const abort=()=>scanState.abortFlag;
   const pause=waitIfPaused;
@@ -414,15 +424,8 @@ app.post('/api/validate-acoustid', async(req,res)=>{
       headers: { 'User-Agent': 'MusicDedup/1.8' }
     });
     const d = await r.json();
-    // F9 bugfix: this used to treat error code===3 as "invalid key" — but a
-    // real invalid AcoustID key actually comes back as code 4 with message
-    // "invalid API key" (confirmed against a real invalid key; code 3
-    // doesn't mean that at all). Checking the wrong code number meant a
-    // GENUINELY invalid key sailed through this check as "已验证" every
-    // time, while the real batch lookups kept failing with api-error-4 —
-    // exactly the "验证通过但完全不能用" symptom. Match on the message text
-    // instead of a magic number, since that's what AcoustID actually
-    // documents and it's robust to code numbers being confused/changed.
+    // Code 4 (not 3) = invalid API key. Also match on message text since
+    // AcoustID may change the code; message text is the documented API contract.
     const msg = (d.error?.message || '').toLowerCase();
     const isKeyInvalid = d.status === 'error' && (d.error?.code === 4 || msg.includes('invalid api key') || msg.includes('invalid client'));
     if (d.status === 'ok' || (d.status === 'error' && !isKeyInvalid)) {

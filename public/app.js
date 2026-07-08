@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.10.1';
+const APP_VERSION='1.12.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -263,15 +263,8 @@ function useGlobalPlayer(){
   const playNext=useCallback(()=>step(1),[step]);
   const playPrev=useCallback(()=>step(-1),[step]);
 
-  // F9: playback could silently wedge — buffering forever, seeking does
-  // nothing — until the user manually switched to another track and back
-  // (which reloads the underlying <audio> element's network connection).
-  // The browser fires 'waiting'/'stalled' when data stops arriving but
-  // doesn't always recover on its own if the underlying connection was
-  // actually dropped rather than just slow. This watchdog does automatically
-  // what "switch away and back" did manually: if playback doesn't resume
-  // within a few seconds of stalling, reload the same source at the same
-  // position.
+  // Stalled playback watchdog: if the browser doesn't recover from a
+  // 'waiting'/'stalled' event, reload the source at the same position.
   const recoverStalledPlayback=useCallback(()=>{
     const el=audioRef.current;
     if(!el||el.paused||el.ended)return;
@@ -506,11 +499,8 @@ function MatchTag({tag,hideTooltip}){
   return e('span',{title:hideTooltip?undefined:(MATCH_TAG_DESCRIPTIONS[tag]||''),style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',cursor:hideTooltip?'default':'help'}},MATCH_TAG_LABELS[tag]||tag);
 }
 function Tag({children,color='var(--tx-faint)',bg='var(--bg-muted)',border='var(--bd-default)'}){return e('span',{style:{fontSize:10,padding:'1px 7px',borderRadius:3,background:bg,color,border:`0.5px solid ${border}`,whiteSpace:'nowrap'}},children);}
-// F9: unified compact status indicator for "设置项 + 验证/检测" rows (AcoustID
-// Key / fpcalc 可执行文件). Occam's razor per user feedback: no permanent
-// second line of explanatory text — the result lives in a single circular
-// badge next to the input, hover (native title=) or tap to read it, click
-// to re-run. idle = never checked yet; ok/warn/error = last check's result.
+// Compact status badge for settings-item validation rows (AcoustID Key /
+// fpcalc path). Shows result in a circle badge; click to re-check.
 function SettingStatus({state='idle',message,onClick,busy}){
   const C={
     idle: {ic:'circle-dashed',col:'var(--tx-faint)',bg:'var(--bg-muted)',bd:'var(--bd-default)'},
@@ -571,21 +561,9 @@ function ConfirmModal({title,message,onConfirm,onClose,danger}){
 }
 
 
-// F9: this used to carry its own client-side tier computation — a compact
-// ~2700-character Traditional→Simplified lookup table plus fieldMatchTier/
-// scrapeStatusTier duplicating (incompletely) what lib/tier.js computes
-// server-side with the real opencc-js dictionary. Two implementations of
-// the same "does this field match after CJK folding" question, one
-// missing real-world characters (e.g. 藉/鐘), is exactly how 音乐库-刮削分类
-// 筛选 (server-computed) and a track's own 刮削 badge (client-computed)
-// could disagree for the same file. There is now exactly one
-// implementation (lib/tier.js); the server attaches `scrape_tier` to every
-// library row (queryLibrary/queryLibraryByTier) and to
-// GET /api/files/:id/scraped, and the client just reads it below.
-//
-// normCmp is kept — autoSelectFields still needs a plain "is this
-// byte-for-byte the same text" check, which is a different question from
-// CJK-fold tier classification.
+// Client reads scrape_tier from the server (lib/tier.js) — no longer
+// carries its own incomplete CJK folding table. normCmp is kept for
+// autoSelectFields' byte-level equality check (different question from tier).
 const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
 
 const TIER_COLOR  = { green:'var(--green)', blue:'#2563EB', red:'var(--red)' };
@@ -610,96 +588,112 @@ function InstantTooltip({tip,children,style={}}){
   );
 }
 
-/* ── auto-select logic for ScrapeDialog ─────────────────────────────────
-   Returns { selected:{field:bool}, recommend:{field:bool}, reasons:{field:string} }
-   `selected`  — the checkbox's initial checked state (safe to pre-check).
-   `recommend` — shows the amber "推荐" badge as a hint, WITHOUT pre-checking
-                 the box. Used whenever overwriting an EXISTING value, even
-                 on a confirmed match — a "精确匹配" can still just be a
-                 script variant (繁/简) or spelling difference that looks
-                 identical to a real correction, so blindly overwriting the
-                 user's own text is never pre-selected; it's surfaced as a
-                 suggestion and left for a manual, deliberate confirm.
-   title/artist/album: never pre-selected when overwriting an existing
-   value — only when the file's own tag is blank (nothing to lose).
-   year/track: same "blank is safe" rule, but pre-selected when the
-   recording is a confirmed exact match, since a wrong release year/track
-   number is unambiguous factual data, not a script/spelling variant.
+/* ── auto-select logic for ScrapeDialog (dual-source) ────────────────────
+   Conservative per-field logic mirrors the old single-source MB rules.
+   - Title/Artist: NEVER auto-select (high-visibility, always manual confirm)
+   - Album: auto-select ONLY when file's album is blank
+   - Year: auto-select when blank, OR when an exact-match source has a
+     different (likely more correct) value
+   - Track/Genre: auto-select ONLY when blank
+   Source-level match_basis is NEVER shown per-field — it's a recording-level
+   attribute, not a per-field verification.
 */
 function autoSelectFields(file, scraped) {
-  if (!scraped || !scraped.title) return { selected:{}, recommend:{}, reasons:{} };
-  // "exact" here means green/blue tier — a confirmed match with no
-  // CJK-fold-only or outright field mismatches (see lib/tier.js). Reading
-  // scraped.scrape_tier (computed server-side and attached to every scraped
-  // payload) instead of recomputing locally is what keeps this in sync with
-  // the 刮削分类 badge/filter — see the note above autoSelectFields.
-  const exact = scraped.scrape_tier === 'green' || scraped.scrape_tier === 'blue';
-  const sel = {}, rec = {}, rsn = {};
+  if (!scraped || (!scraped.mb?.title && !scraped.acoustid?.title)) return { selected:{}, recommend:{}, reasons:{}, conflicts:{} };
+  const sel = {}, rec = {}, rsn = {}, cfl = {};
   const JUNK = [/热歌/,/慢摇/,/合辑/,/精选\d/,/^\d+首/,/网络/];
+  const mb = scraped.mb, aid = scraped.acoustid;
+  const mbExact = mb?.scrape_tier === 'green' || mb?.scrape_tier === 'blue';
+  const aidExact = aid?.scrape_tier === 'green' || aid?.scrape_tier === 'blue';
 
-  // Title — never auto-checked; blank-file case still worth flagging, but
-  // even that is left to a manual confirm since a title is high-visibility.
+  function hasData(src, key) { const v=src?.[key]; return v!=null && v!==0 && v!==''; }
+
+  // Pick best source for a field when both have data. Returns null on conflict.
+  function pickSrc(key) {
+    const hm=hasData(mb,key), ha=hasData(aid,key);
+    if (!hm&&!ha) return null;
+    if (!hm) return 'acoustid';
+    if (!ha) return 'musicbrainz';
+    if (normCmp(String(mb[key]))===normCmp(String(aid[key]))) return aidExact?'acoustid':mbExact?'musicbrainz':'acoustid';
+    return null; // disagree
+  }
+
+  // ── Title — NEVER auto-check ──────────────────────────────────────────
   sel.title = false;
-  if (!scraped.title)              rsn.title = '刮削无数据';
-  else if (!file.title)            rsn.title = '文件属性为空，但标题不建议自动写入，请手动确认';
-  else if (normCmp(file.title)===normCmp(scraped.title)) rsn.title = '与文件属性一致';
-  else                             rsn.title = '与文件属性不同，请手动确认';
+  if (!hasData(mb,'title')&&!hasData(aid,'title')) rsn.title='刮削无数据';
+  else if (!file.title) rsn.title='文件属性为空，但标题不建议自动写入，请手动确认';
+  else rsn.title='与文件属性不同，请手动确认';
 
-  // Artist — same as title.
+  // ── Artist — NEVER auto-check ─────────────────────────────────────────
   sel.artist = false;
-  if (!scraped.artist)             rsn.artist = '刮削无数据';
-  else if (!file.artist)           rsn.artist = '文件属性为空，但艺术家不建议自动写入，请手动确认';
-  else if (normCmp(file.artist)===normCmp(scraped.artist)) rsn.artist = '与文件属性一致';
-  else                             rsn.artist = '与文件属性不同，请手动确认';
+  if (!hasData(mb,'artist')&&!hasData(aid,'artist')) rsn.artist='刮削无数据';
+  else if (!file.artist) rsn.artist='文件属性为空，但艺术家不建议自动写入，请手动确认';
+  else rsn.artist='与文件属性不同，请手动确认';
 
-  // Album — auto-check only when blank; an existing value is never
-  // overwritten automatically, even on an exact match (see rationale above).
+  // ── Album — auto-check ONLY when blank ────────────────────────────────
   const albumJunk = JUNK.some(p=>p.test(file.album||''));
-  if (!scraped.album)                                  { sel.album=false; rsn.album='刮削无数据'; }
-  else if (!file.album)                                { sel.album=true;  rsn.album='文件属性为空，建议写入'; }
-  else if (normCmp(file.album)===normCmp(scraped.album)) { sel.album=false; rsn.album='与文件属性一致'; }
-  // F9 bugfix: scraped.scrape_tier==='green' means the server already
-  // determined (respecting 繁简忽略) that title/artist/album all match with
-  // nothing worth writing — if we get here it's specifically because this
-  // album pair differs ONLY by Traditional/Simplified spelling, which
-  // 繁简忽略 treats as equivalent. Saying "精确匹配，建议覆写" for that was
-  // self-contradictory (why would an exact match need overwriting?); this
-  // is just a spelling-system difference, not new information to write.
-  else if (scraped.scrape_tier==='green')              { sel.album=false; rsn.album='仅繁简写法不同，与文件属性一致'; }
-  else if (albumJunk && exact)                         { sel.album=false; rec.album=true; rsn.album='当前专辑名疑似非正规，建议手动确认后覆写'; }
-  // F9 bugfix: this used to say "精确匹配，建议覆写（请手动确认）" for ANY
-  // textual difference under an exact match_basis — including plain
-  // spelling/formatting differences that aren't errors, which read as
-  // self-contradictory ("it's an exact match, but overwrite it"). Just
-  // state the fact (the text differs) without asserting it should change;
-  // same neutral phrasing as 标题/艺术家 above, and no auto-recommend badge.
-  else if (exact)                                      { sel.album=false; rsn.album='与文件属性不同，请手动确认'; }
-  else                                                 { sel.album=false; rsn.album='模糊匹配，请手动确认'; }
+  if (!hasData(mb,'album')&&!hasData(aid,'album')) { sel.album=false; rsn.album='刮削无数据'; }
+  else if (!file.album) {
+    const s=pickSrc('album'); sel.album=s||false; if(s)rec.album=true;
+    rsn.album=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
+    if(!s) cfl.album=true;
+  } else if (scraped.scrape_tier==='green') {
+    sel.album=false; rsn.album='仅繁简写法不同，与文件属性一致';
+  } else if (albumJunk&&(mbExact||aidExact)) {
+    sel.album=false; rec.album=true; rsn.album='当前专辑名疑似非正规，建议手动确认后覆写';
+  } else {
+    sel.album=false;
+    if (hasData(mb,'album')&&hasData(aid,'album')&&normCmp(String(mb.album))!==normCmp(String(aid.album))) {
+      cfl.album=true; rsn.album='⚠ 两个来源数据不一致，且文件已有专辑信息，请手动确认';
+    } else rsn.album='与文件属性不同，请手动确认';
+  }
 
-  // Year — factual data, not a script/spelling variant; still safe to
-  // pre-check on a confirmed exact match.
-  if (!scraped.album_year)                              { sel.album_year=false; rsn.album_year='刮削无数据'; }
-  else if (!file.album_year)                            { sel.album_year=true;  rsn.album_year='文件属性为空，建议写入'; }
-  else if (file.album_year===scraped.album_year)        { sel.album_year=false; rsn.album_year='与文件属性一致'; }
-  else if (exact)                                       { sel.album_year=true;  rec.album_year=true; rsn.album_year=`精确匹配，建议覆写（当前: ${file.album_year}）`; }
-  else                                                  { sel.album_year=false; rsn.album_year=`模糊匹配（当前: ${file.album_year} vs 刮削: ${scraped.album_year}）`; }
+  // ── Year — auto-check when blank, OR when exact source has diff value ─
+  if (!hasData(mb,'album_year')&&!hasData(aid,'album_year')) { sel.album_year=false; rsn.album_year='刮削无数据'; }
+  else if (!file.album_year) {
+    const s=pickSrc('album_year'); sel.album_year=s||false; if(s)rec.album_year=true;
+    rsn.album_year=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
+    if(!s) cfl.album_year=true;
+  } else {
+    const s=pickSrc('album_year');
+    if (s&&(s==='acoustid'?aidExact:mbExact)) {
+      const sv=s==='acoustid'?aid.album_year:mb.album_year;
+      if (sv!==file.album_year) { sel.album_year=s; rec.album_year=true; rsn.album_year=`精确匹配，建议覆写（当前: ${file.album_year}）`; }
+      else { sel.album_year=false; rsn.album_year='与文件属性一致'; }
+    } else if (!s) {
+      sel.album_year=false; cfl.album_year=true; rsn.album_year='⚠ 两个来源数据不一致，请手动选择';
+    } else {
+      sel.album_year=false; rsn.album_year=`模糊匹配（当前: ${file.album_year}），请手动确认`;
+    }
+  }
 
-  // Track
-  if (!scraped.track_number)                            { sel.track_number=false; rsn.track_number='刮削无数据'; }
-  else if (!file.track_number)                          { sel.track_number=true;  rsn.track_number='文件属性为空，建议写入'; }
-  else if (file.track_number===scraped.track_number)    { sel.track_number=false; rsn.track_number='与文件属性一致'; }
-  else                                                  { sel.track_number=false; rsn.track_number=`曲目号不同（${file.track_number} vs ${scraped.track_number}），请手动确认`; }
+  // ── Track — auto-check ONLY when blank ────────────────────────────────
+  if (!hasData(mb,'track_number')&&!hasData(aid,'track_number')) { sel.track_number=false; rsn.track_number='刮削无数据'; }
+  else if (!file.track_number) {
+    const s=pickSrc('track_number'); sel.track_number=s||false; if(s)rec.track_number=true;
+    rsn.track_number=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
+    if(!s) cfl.track_number=true;
+  } else {
+    sel.track_number=false;
+    if (hasData(mb,'track_number')&&hasData(aid,'track_number')&&mb.track_number!==aid.track_number) {
+      cfl.track_number=true; rsn.track_number=`⚠ 两个来源曲目号不一致（${mb.track_number} vs ${aid.track_number}），请手动确认`;
+    } else rsn.track_number='与文件属性一致';
+  }
 
-  // Genre
-  if (!scraped.genre)                                    { sel.genre=false; rsn.genre='刮削无数据'; }
-  else if (!file.genre)                                  { sel.genre=true;  rsn.genre='文件属性为空，建议写入'; }
-  else if (normCmp(file.genre)===normCmp(scraped.genre)) { sel.genre=false; rsn.genre='与文件属性一致'; }
-  else                                                   { sel.genre=false; rsn.genre='流派不同，请手动确认'; }
+  // ── Genre — auto-check ONLY when blank ────────────────────────────────
+  if (!hasData(mb,'genre')&&!hasData(aid,'genre')) { sel.genre=false; rsn.genre='刮削无数据'; }
+  else if (!file.genre) {
+    const s=pickSrc('genre'); sel.genre=s||false; if(s)rec.genre=true;
+    rsn.genre=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
+    if(!s) cfl.genre=true;
+  } else {
+    sel.genre=false;
+    if (hasData(mb,'genre')&&hasData(aid,'genre')&&normCmp(String(mb.genre))!==normCmp(String(aid.genre))) {
+      cfl.genre=true; rsn.genre='⚠ 两个来源数据不一致，且文件已有流派信息，请手动确认';
+    } else rsn.genre='与文件属性一致';
+  }
 
-  // Fields pre-checked (sel) are, by construction, also worth flagging as
-  // recommended — keep `recommend` a superset so the badge shows for them too.
-  for (const k of Object.keys(sel)) if (sel[k]) rec[k]=true;
-  return { selected:sel, recommend:rec, reasons:rsn };
+  return { selected:sel, recommend:rec, reasons:rsn, conflicts:cfl };
 }
 
 const WRITE_FIELDS = [
@@ -721,14 +715,15 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const[sel,setSel]=useState({});
   const[recommend,setRecommend]=useState({});
   const[reasons,setReasons]=useState({});
+  const[conflicts,setConflicts]=useState({});
   const[fileInfo,setFileInfo]=useState(null); // for filename + format
 
   function reload(){
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setFileInfo(r.data);});
     api.get(`/api/files/${fileId}/live-tags`).then(r=>{if(r.ok)setLiveTags(r.data);});
     api.get(`/api/files/${fileId}/scraped`).then(r=>{
-      const sm=(r.ok&&r.data?.title)?r.data:null;
-      setScraped(sm);
+      const data = r.ok ? r.data : null;
+      setScraped(data);
     });
   }
   useEffect(()=>{
@@ -738,10 +733,10 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   // Auto-compute field selection when live tags or scraped data change
   useEffect(()=>{
     if(liveTags&&scraped){
-      const{selected,recommend:rec,reasons:r}=autoSelectFields(liveTags,scraped);
-      setSel(selected); setRecommend(rec); setReasons(r);
+      const{selected,recommend:rec,reasons:r,conflicts:c}=autoSelectFields(liveTags,scraped);
+      setSel(selected); setRecommend(rec); setReasons(r); setConflicts(c||{});
     }
-  },[liveTags?.title,scraped?.file_id]);
+  },[liveTags?.title,scraped?.mb?.file_id,scraped?.acoustid?.file_id]);
 
   async function doScrape(){
     setScraping(true);setWriteResult(null);
@@ -758,8 +753,9 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
     setConfirmWrite(false); setWriting(true); setWriteResult(null);
     const fields={};
     for(const{key}of WRITE_FIELDS){
-      if(sel[key]&&scraped[key]!==undefined&&scraped[key]!==null)
-        fields[key]=scraped[key];
+      const src = sel[key];
+      if (src && scraped[src]?.[key] != null && scraped[src][key] !== 0 && scraped[src][key] !== '')
+        fields[key] = scraped[src][key];
     }
     const r=await api.post(`/api/files/${fileId}/write-tags`,{fields});
     setWriting(false); setWriteResult(r);
@@ -773,21 +769,28 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
 
   const filename=fileInfo?fileInfo.path.split(/[\\/]/).pop():'';
   const loading=liveTags===null||scraped===undefined;
-  const hasScraped=!!scraped&&!!scraped.title;
+  const hasScraped=!!(scraped?.mb?.title||scraped?.acoustid?.title);
   const selCount=Object.values(sel).filter(Boolean).length;
   const canWrite=hasScraped&&selCount>0;
+  const tier=scraped?.scrape_tier;
+  // Source-level match labels based on per-source scrape_tier (considers
+  // title+artist+album matching, not just the recording-level match_basis).
+  const mbTier = scraped?.mb?.scrape_tier;
+  const aidTier = scraped?.acoustid?.scrape_tier;
+  const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'red' ? '（模糊）' : '';
+  const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'red' ? '（模糊）' : '';
 
-  // Diff color for a field
-  function diffStyle(key){
+  // Diff color for a field vs a specific source
+  function diffStyle(key, src){
     const fv=String(liveTags?.[key]||'').trim();
-    const sv=String(scraped?.[key]||'').trim();
+    const sv=String(scraped?.[src]?.[key]||'').trim();
     if(!sv)              return {background:'transparent'};
-    if(!fv)              return {background:'#EFF6FF'}; // missing in file → blue
-    if(normCmp(fv)===normCmp(sv)) return {background:'#F0FDF4'}; // match → green
-    return {background:'#FFFBEB'}; // different → amber
+    if(!fv)              return {background:'#EFF6FF'};
+    if(normCmp(fv)===normCmp(sv)) return {background:'#F0FDF4'};
+    return {background:'#FFFBEB'};
   }
 
-  return e(Modal,{title:`刮削操作`,onClose,width:660},
+  return e(Modal,{title:`刮削操作`,onClose,width:760},
     loading&&e('div',{style:{textAlign:'center',padding:40}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})),
 
     !loading&&e('div',null,
@@ -796,8 +799,10 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       e('div',{style:{marginBottom:12,padding:'8px 12px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
         Icon('file-music',{fontSize:13,color:'var(--tx-faint)',flexShrink:0}),
         e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},filename),
-        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:TIER_COLOR[scraped.scrape_tier||'red']+'22',color:TIER_COLOR[scraped.scrape_tier||'red'],border:'0.5px solid '+TIER_COLOR[scraped.scrape_tier||'red'],whiteSpace:'nowrap'}},
-          TIER_LABEL[scraped.scrape_tier]||'已刮削')
+        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:TIER_COLOR[tier||'red']+'22',color:TIER_COLOR[tier||'red'],border:'0.5px solid '+TIER_COLOR[tier||'red'],whiteSpace:'nowrap'}},
+          TIER_LABEL[tier]||'已刮削'),
+        scraped?.mb?.title&&e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'MB'),
+        scraped?.acoustid?.title&&e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'AcoustID')
       ),
 
       // Action buttons row
@@ -808,25 +813,47 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
           onClick:doCancelScrape},'取消刮削'),
       ),
 
-      // ── Comparison table ──────────────────────────────────────────────
-      hasScraped&&e('div',{style:{marginBottom:14}},
-        e('div',{style:{display:'grid',gridTemplateColumns:'72px 1fr 1fr',fontSize:11,borderRadius:'var(--r-md)',overflow:'hidden',border:'0.5px solid var(--bd-default)'}},
-          // Header
-          ...['字段','文件属性（实际）','刮削数据'].map((h,i)=>e('div',{key:h,style:{padding:'7px 10px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:i<2?'0.5px solid var(--bd-subtle)':'none'}},h)),
-          // Rows
-          ...WRITE_FIELDS.map(({key,label})=>{
-            // Numeric fields like album_year and track_number: 0 means "empty"
-            const fv = (liveTags?.[key] || 0) > 0 ? String(liveTags[key]) : (liveTags?.[key] && liveTags[key] !== 0 ? String(liveTags[key]) : '');
-            const sv = (scraped?.[key] || 0) > 0 ? String(scraped[key]) : (scraped?.[key] && scraped[key] !== 0 ? String(scraped[key]) : '');
-            const ds=diffStyle(key);
-            return [
-              e('div',{key:key+'l',style:{padding:'7px 10px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-faint)',background:'var(--bg-subtle)'}},label),
-              e('div',{key:key+'f',style:{padding:'7px 10px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:10,...ds}},fv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')),
-              e('div',{key:key+'s',style:{padding:'7px 10px',borderBottom:'0.5px solid var(--bd-subtle)',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:10,...ds}},sv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')),
-            ];
-          }).flat()
-        )
-      ),
+      // ── Comparison table (dynamic columns: Field | File | MB? | AcoustID?) ──
+      hasScraped&&(()=>{
+        const showMb = !!(scraped?.mb?.title);
+        const showAid = !!(scraped?.acoustid?.title);
+        const colTemplate = `62px 1fr${showMb ? ' 1fr' : ''}${showAid ? ' 1fr' : ''}`;
+        const nCols = 2 + (showMb?1:0) + (showAid?1:0);
+        // Build header labels
+        const headers = ['字段','文件属性'];
+        if (showMb) headers.push(`MB 刮削${mbBasisLabel}`);
+        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}`);
+        return e('div',{style:{marginBottom:14}},
+          e('div',{style:{display:'grid',gridTemplateColumns:colTemplate,fontSize:10,borderRadius:'var(--r-md)',overflow:'hidden',border:'0.5px solid var(--bd-default)'}},
+            // Header
+            ...headers.map((h,i)=>e('div',{key:h,style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:i<nCols-1?'0.5px solid var(--bd-subtle)':'none'}},h)),
+            // Rows — conditionally include MB/AcoustID cells
+            ...WRITE_FIELDS.map(({key,label})=>{
+              const fv = (liveTags?.[key] || 0) > 0 ? String(liveTags[key]) : (liveTags?.[key] && liveTags[key] !== 0 ? String(liveTags[key]) : '');
+              const conflict = conflicts[key];
+              const cellBg = conflict ? {background:'#FFFBEB'} : {};
+              const cells = [
+                e('div',{key:key+'l',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-faint)',background:'var(--bg-subtle)'}},label),
+                e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:(showMb||showAid)?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9,...cellBg}},fv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')),
+              ];
+              if (showMb) {
+                const mbVal = (scraped?.mb?.[key] || 0) > 0 ? String(scraped.mb[key]) : (scraped?.mb?.[key] && scraped.mb[key] !== 0 ? String(scraped.mb[key]) : '');
+                cells.push(e('div',{key:key+'m',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9,...diffStyle(key,'mb'),...cellBg}},
+                  mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
+                ));
+              }
+              if (showAid) {
+                const aidVal = (scraped?.acoustid?.[key] || 0) > 0 ? String(scraped.acoustid[key]) : (scraped?.acoustid?.[key] && scraped.acoustid[key] !== 0 ? String(scraped.acoustid[key]) : '');
+                cells.push(e('div',{key:key+'a',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9,...diffStyle(key,'acoustid'),...cellBg}},
+                  aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
+                  conflict&&e('span',{title:'MB 与 AcoustID 数据不一致，请手动选择',style:{cursor:'help',marginLeft:2}},Icon('alert-circle',{fontSize:10,color:'#D97706'}))
+                ));
+              }
+              return cells;
+            }).flat()
+          )
+        );
+      })(),
 
       // ── Write to file section ─────────────────────────────────────────
       hasScraped&&e('div',{style:{borderTop:'0.5px solid var(--bd-default)',paddingTop:14}},
@@ -834,27 +861,35 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
           Icon('pencil',{fontSize:13,color:'var(--tx-secondary)'}),'写入文件'
         ),
 
-        // Field checkboxes with reasons
+        // Field radio-buttons: choose source per field
         WRITE_FIELDS.map(({key,label})=>{
-          const rawSv=scraped?.[key];
-          const rawFv=liveTags?.[key];
-          // For numeric fields (album_year, track_number), 0 means "no data"
-          const sv = rawSv != null && rawSv !== 0 && rawSv !== '' ? rawSv : null;
-          const fv = rawFv != null && rawFv !== 0 && rawFv !== '' ? rawFv : null;
-          const disabled=!sv;
-          const rec=recommend[key];
-          return e('label',{key,style:{display:'flex',alignItems:'flex-start',gap:8,padding:'5px 0',cursor:disabled?'default':'pointer',opacity:disabled?.4:1}},
-            e('input',{type:'checkbox',checked:!!sel[key],disabled,
-              onChange:ev=>setSel(p=>({...p,[key]:ev.target.checked})),
-              style:{marginTop:2,flexShrink:0,accentColor:'var(--amber)'}}),
+          const hasMb = scraped?.mb?.[key] != null && scraped.mb[key] !== 0 && scraped.mb[key] !== '';
+          const hasAid = scraped?.acoustid?.[key] != null && scraped.acoustid[key] !== 0 && scraped.acoustid[key] !== '';
+          const disabled = !hasMb && !hasAid;
+          const rec = recommend[key];
+          const curSrc = sel[key];
+          return e('div',{key,style:{display:'flex',alignItems:'flex-start',gap:8,padding:'5px 0',opacity:disabled?.4:1}},
             e('div',{style:{flex:1,minWidth:0}},
-              e('div',{style:{fontSize:12,fontWeight:rec?600:400,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},
+              e('div',{style:{fontSize:12,fontWeight:rec?600:400,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,marginBottom:2}},
                 label,
-                rec&&e('span',{style:{fontSize:10,color:'var(--amber)',fontWeight:400}},'推荐'),
-                !!sv&&!!fv&&normCmp(String(fv))!==normCmp(String(sv))&&e('span',{style:{fontSize:10,color:'var(--tx-faint)'}},
-                  ` ${fv} → ${sv}`)
+                rec&&e('span',{style:{fontSize:10,color:'var(--amber)',fontWeight:400}},'推荐')
               ),
-              e('div',{style:{fontSize:10,color:'var(--tx-faint)'}},reasons[key]||'')
+              e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginBottom:3}},reasons[key]||''),
+              // Source selector
+              !disabled&&e('div',{style:{display:'flex',gap:12,fontSize:10}},
+                hasMb&&e('label',{style:{display:'flex',alignItems:'center',gap:3,cursor:'pointer',color:curSrc==='musicbrainz'?'var(--amber)':'var(--tx-muted)'}},
+                  e('input',{type:'radio',name:'src_'+key,checked:curSrc==='musicbrainz',
+                    onChange:()=>setSel(p=>({...p,[key]:'musicbrainz'})),
+                    style:{accentColor:'var(--amber)'}}),
+                  'MB'
+                ),
+                hasAid&&e('label',{style:{display:'flex',alignItems:'center',gap:3,cursor:'pointer',color:curSrc==='acoustid'?'var(--amber)':'var(--tx-muted)'}},
+                  e('input',{type:'radio',name:'src_'+key,checked:curSrc==='acoustid',
+                    onChange:()=>setSel(p=>({...p,[key]:'acoustid'})),
+                    style:{accentColor:'var(--amber)'}}),
+                  'AcoustID'
+                )
+              )
             )
           );
         }),
@@ -887,14 +922,15 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       // Write confirm dialog (inline)
       confirmWrite&&e('div',{style:{position:'fixed',inset:0,zIndex:1100,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'},
         onClick:ev=>ev.target===ev.currentTarget&&setConfirmWrite(false)},
-        e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:400,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.2)'}},
+        e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:440,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.2)'}},
           e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认写入文件'),
           e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:12}},
             '将直接修改以下字段到音频文件：'),
-          WRITE_FIELDS.filter(({key})=>sel[key]&&scraped[key]!=null&&scraped[key]!==0&&scraped[key]!=='').map(({key,label})=>
+          WRITE_FIELDS.filter(({key})=>sel[key]&&scraped[sel[key]]?.[key]!=null&&scraped[sel[key]][key]!==0&&scraped[sel[key]][key]!=='').map(({key,label})=>
             e('div',{key,style:{fontSize:11,padding:'4px 8px',background:'var(--bg-subtle)',borderRadius:'var(--r-sm)',marginBottom:4,display:'flex',gap:8}},
               e('span',{style:{color:'var(--tx-faint)',width:42,flexShrink:0}},label+':'),
-              e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--amber)'}},String(scraped[key]))
+              e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--amber)'}},String(scraped[sel[key]][key])),
+              e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},sel[key]==='acoustid'?'AcoustID':'MB')
             )
           ),
           e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:10,marginBottom:16,display:'flex',alignItems:'center',gap:5}},
@@ -918,21 +954,17 @@ function PropsModal({fileId,onClose}){
   const[coverBig,setCoverBig]=useState(false);
   useEffect(()=>{
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setData(r.data);});
-    api.get(`/api/files/${fileId}/scraped`).then(r=>{if(r.ok&&r.data?.title)setScraped(r.data);});
+    api.get(`/api/files/${fileId}/scraped`).then(r=>{if(r.ok&&r.data)setScraped(r.data);});
     // Try loading cover art
     fetch(`/api/files/${fileId}/cover`).then(r=>{if(r.ok)setCoverUrl(`/api/files/${fileId}/cover`);}).catch(()=>{});
   },[fileId]);
   if(!data)return e(Modal,{title:'文件属性',onClose},e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})));
-  // F9: this app computes TWO independent fingerprints per file — its own
-  // built-in spectral fingerprint (used for the app's own duplicate
-  // matching, no external tool needed) and, separately/optionally, a
-  // Chromaprint fingerprint via the external fpcalc binary (used only to
-  // query AcoustID). These are unrelated algorithms serving different
-  // purposes, so they get two clearly-labeled rows instead of one
-  // ambiguous "声纹方法" — which used to only describe the first one and
-  // gave no visibility into whether an AcoustID-usable fingerprint existed.
+  // Two independent fingerprints: spectral (built-in, for duplicate matching)
+  // and Chromaprint via fpcalc (for AcoustID queries). Shown as separate rows.
   const fpMethodLabel={spectral:'已提取',metadata:'未解码，退化为属性匹配'}[data.fingerprint_method]||'未提取';
   const chromaprintLabel=data.chromaprint?'已提取':'未提取（前往设置 → CP 声纹 配置）';
+  const mbTier = scraped?.mb?.scrape_tier;
+  const aidTier = scraped?.acoustid?.scrape_tier;
   const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['流派',data.genre||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['创建时间',fmtDate(data.file_ctime)],['修改时间',fmtDate(data.file_mtime)],['频谱声纹',fpMethodLabel],['CP 声纹',chromaprintLabel]];
   return e(Modal,{title:'文件属性',onClose,width:560},
     // Cover art row
@@ -952,11 +984,28 @@ function PropsModal({fileId,onClose}){
       e('div',{style:{fontSize:11,color:'var(--tx-faint)',width:72,flexShrink:0,paddingTop:1}},k),
       e('div',{style:{fontSize:12,color:'var(--tx-primary)',fontFamily:mono?'var(--font-mono)':undefined,wordBreak:'break-all',flex:1}},String(v))
     )),
-    scraped&&e('div',{style:{marginTop:12,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-md)'}},
-      e('div',{style:{fontSize:11,fontWeight:600,color:'#92400E',marginBottom:6,display:'flex',alignItems:'center',gap:5}},Icon('shield-check',{fontSize:13}),'刮削数据 · 来源 '+(scraped.source==='musicbrainz'?'MusicBrainz':scraped.source==='acoustid'?'AcoustID':scraped.source),
-        scraped.confidence<0.85&&e('span',{style:{color:'#A16207',fontWeight:400}},`（匹配度较低 ${(scraped.confidence*100).toFixed(0)}%，请核对后再应用）`)
+    // Dual-source scrape data sections
+    (scraped?.mb?.title||scraped?.acoustid?.title)&&e('div',{style:{marginTop:12}},
+      scraped.mb?.title&&e('div',{style:{marginBottom:8,padding:'10px 14px',background:'#F5F3FF',border:'0.5px solid #DDD6FE',borderRadius:'var(--r-md)'}},
+        e('div',{style:{fontSize:11,fontWeight:600,color:'#5B21B6',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
+          Icon('shield-check',{fontSize:13}),'刮削数据 · MusicBrainz',
+              mbTier==='red'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
+              mbTier==='green'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配)'),
+              mbTier==='blue'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
+          scraped.mb.confidence>0&&scraped.mb.confidence<0.85&&e('span',{style:{color:'#7C3AED',fontWeight:400,fontSize:9}},` 匹配度 ${(scraped.mb.confidence*100).toFixed(0)}%`)
+        ),
+        [['标题',scraped.mb.title],['艺术家',scraped.mb.artist],['专辑',scraped.mb.album],['年份',scraped.mb.album_year||'']].map(([k,v])=>v?e('div',{key:k,style:{fontSize:11,color:'#5B21B6',display:'flex',gap:8}},e('span',{style:{color:'#7C3AED',width:36}},k+':'),v):null)
       ),
-      [['标题',scraped.title],['艺术家',scraped.artist],['专辑',scraped.album],['年份',scraped.album_year||'']].map(([k,v])=>v?e('div',{key:k,style:{fontSize:11,color:'#92400E',display:'flex',gap:8}},e('span',{style:{color:'#A16207',width:36}},k+':'),v):null)
+      scraped.acoustid?.title&&e('div',{style:{padding:'10px 14px',background:'#ECFEFF',border:'0.5px solid #A5F3FC',borderRadius:'var(--r-md)'}},
+        e('div',{style:{fontSize:11,fontWeight:600,color:'#0E7490',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
+          Icon('wave-sine',{fontSize:13}),'刮削数据 · AcoustID',
+          aidTier==='red'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
+          aidTier==='green'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(精确匹配)'),
+          aidTier==='blue'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
+          scraped.acoustid.confidence>0&&scraped.acoustid.confidence<0.85&&e('span',{style:{color:'#0891B2',fontWeight:400,fontSize:9}},` 匹配度 ${(scraped.acoustid.confidence*100).toFixed(0)}%`)
+        ),
+        [['标题',scraped.acoustid.title],['艺术家',scraped.acoustid.artist],['专辑',scraped.acoustid.album],['年份',scraped.acoustid.album_year||'']].map(([k,v])=>v?e('div',{key:k,style:{fontSize:11,color:'#0E7490',display:'flex',gap:8}},e('span',{style:{color:'#0891B2',width:36}},k+':'),v):null)
+      )
     ),
     e('div',{style:{marginTop:14,display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-start',alignItems:'center'}},
       e(Btn,{icon:'folder-open',small:true,variant:'ghost',onClick:()=>api.post(`/api/files/${fileId}/reveal`)},'在文件管理器中显示'),
@@ -1045,16 +1094,8 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   const savedScrollTop=useRef(0);
   const scrollSentinelRef=useRef(null); // bottom sentinel for infinite scroll
   const searchTimer=useRef(null);
-  // F9 bugfix: locate() resets search/fmt/libFilter/scrapeFilter to defaults
-  // via setState so the target file is guaranteed visible. But those are
-  // exactly the deps of the auto-loadFresh effect below — so that effect
-  // would ALSO fire and kick off its own (small, page-1-only) fetch in
-  // parallel with locate's own "fetch straight through to the target page"
-  // request. Depending on which network response lands last, that race
-  // could silently clobber the correctly-positioned rows with a plain
-  // page-1 result — which looked exactly like "定位没有跳转到具体位置"
-  // (jumped to the library tab but never scrolled to the row). This flag
-  // lets locate() suppress that one auto-fire since it's doing its own fetch.
+  // locate() resets filters so the target is visible, triggering a re-fetch.
+  // Suppress the auto-loadFresh effect that would race with locate's own fetch.
   const suppressAutoLoad=useRef(false);
   // Per-row locator: the library renders rows with data-fileid attr so
   // the player's "locate" click can scrollIntoView the right row.
@@ -1181,12 +1222,8 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 
   // Expose locate function upward — used by the player bar's "定位到歌曲"
   // click and by 设置 → 白名单/最近写入 → "在音乐库中查看".
-  // F9 bugfix: this used to ONLY scrollIntoView an already-rendered row, so
-  // if the target file wasn't on the currently loaded page (different sort
-  // position, or hidden by an active search/format/刮削 filter), nothing
-  // visibly happened. It now falls back to asking the server where the file
-  // sits under the whole (unfiltered) library, resets filters, and fetches
-  // straight through to the containing page before scrolling.
+  // Locate a file in library: if not on current page, ask server for its
+  // position in the unfiltered library, reset filters, and fetch to its page.
   useEffect(()=>{
     if(!onLocate)return;
     onLocate.setLocateInLibrary?.(async fid=>{
@@ -1311,7 +1348,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
           e('option',{value:''},'全部格式'),
           ...['FLAC','MP3','M4A','OGG','WAV','AIFF'].map(f=>e('option',{key:f,value:f},f))
         ),
-        // F9: 刮削分类筛选 — same tier vocabulary as the 刮削 column icon/tooltip.
+        // 刮削分类筛选 — same tier vocabulary as the 刮削 column icon/tooltip.
         // Same width/padding/neutral color as the 格式 dropdown right next to
         // it (previously it auto-sized wider from its longer option text and
         // changed color per selection, which read as a different control
@@ -1382,12 +1419,21 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                   (()=>{
                     const tier=f.scrape_tier;
                     if(!tier)return null;
+                    const sources=[];
+                    if(f.aid_title||f.mb_title){
+                      if(f.aid_title){ sources.push('AcoustID'); }
+                      if(f.mb_title){ sources.push('MusicBrainz'); }
+                    }
                     const tipLines=[
-                      `刮削 · ${f.mb_recording_id?'MusicBrainz':'AcoustID'} · ${TIER_LABEL[tier]||tier}`,
-                      f.scraped_title&&`标题: ${f.scraped_title}`,
-                      f.scraped_artist&&`艺术家: ${f.scraped_artist}`,
-                      f.scraped_album&&`专辑: ${f.scraped_album}`,
-                      f.scraped_album_year>0&&`年份: ${f.scraped_album_year}`,
+                      `刮削 · ${sources.join(' + ')||'未知'} · ${TIER_LABEL[tier]||tier}`,
+                      f.aid_title&&`[AcoustID] 标题: ${f.aid_title}`,
+                      f.aid_artist&&`[AcoustID] 艺术家: ${f.aid_artist}`,
+                      f.aid_album&&`[AcoustID] 专辑: ${f.aid_album}`,
+                      f.aid_album_year>0&&`[AcoustID] 年份: ${f.aid_album_year}`,
+                      f.mb_title&&`[MusicBrainz] 标题: ${f.mb_title}`,
+                      f.mb_artist&&`[MusicBrainz] 艺术家: ${f.mb_artist}`,
+                      f.mb_album&&`[MusicBrainz] 专辑: ${f.mb_album}`,
+                      f.mb_album_year>0&&`[MusicBrainz] 年份: ${f.mb_album_year}`,
                     ].filter(Boolean).join('\n');
                     return e(InstantTooltip,{tip:tipLines},
                       e('button',{onClick:()=>setScrapeTarget(f.id),style:{background:'none',border:'none',cursor:'pointer',display:'inline-flex',padding:2}},
@@ -1429,8 +1475,8 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
    ══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
   basic:  {label:'基础匹配',  sub:'',  desc:'枚举音频文件，读取文件属性（标题/艺术家/专辑/时长等）并据此比对重复。',icon:'tag',          steps:['enum','meta','basicMatch']},
-  fp:     {label:'声纹匹配',  sub:'',  desc:'计算频谱声纹，用于声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['enum','meta','fp','fpMatch']},
-  scrape: {label:'刮削匹配',  sub:'',  desc:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹识别；两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['enum','meta','fp','scrape','scrapeMatch']},
+  fp:     {label:'声纹匹配',  sub:'',  desc:'计算频谱声纹，用于声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
+  scrape: {label:'刮削匹配',  sub:'',  desc:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹识别；两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
 };
 function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
@@ -1490,10 +1536,8 @@ function ScannerView({scan}){
             )
           ),
           advanced[key]&&e('button',{onClick:()=>runLane(key,true),disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'强制重新执行'),
-          // F9: retries files that were already scraped but came back with
-          // nothing usable (or, for AcoustID specifically, files MB already
-          // touched but AcoustID hasn't confirmed) — without re-downloading
-          // everything that already matched fine, unlike "强制重新执行".
+          // Retry only files that came back empty or were missed — without
+          // re-downloading everything that already matched fine.
           advanced[key]&&key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});},disabled:status.running,title:'重新尝试之前刮削未命中的文件（含之前无 AcoustID Key 或未装 fpcalc 时跳过的文件），已成功匹配的文件不受影响',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
         );
       })
@@ -1504,10 +1548,7 @@ function ScannerView({scan}){
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
         e('div',null,e('div',{style:{fontSize:13,fontWeight:600,marginBottom:2,display:'flex',alignItems:'center'}},'智能执行全部',e(Hint,{text:'依次执行枚举 → 文件属性 → 声纹 → 刮削 → 匹配，按文件修改时间与是否存在自动跳过未变更/已删除的文件。'})),
         e('div',{style:{fontSize:11,color:'var(--tx-faint)'}},'三条匹配通道一次性全部完成')),
-        // F9: inline-flex column here so the "强制全量重扫" button below can
-        // stretch to match the natural width of this button pair exactly
-        // (align-items:stretch, the flex column default) instead of the two
-        // rows being sized independently and drifting apart.
+        // Stretch the "强制全量重扫" button to match the button-pair width above.
         e('div',{style:{display:'inline-flex',flexDirection:'column',alignItems:'stretch'}},
           e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
             e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
@@ -1518,10 +1559,8 @@ function ScannerView({scan}){
       )
     ),
 
-    // Progress — F9: 暂停/继续/停止 moved here (right next to phase/percent,
-    // where the running log lives) since tucked into the "智能执行全部" card
-    // button row made them easy to miss regardless of which lane started
-    // the scan (pause/resume/abort are global, not per-lane).
+    // Progress — 暂停/继续/停止 alongside phase/percent/log output
+    // (pause/resume/abort are global, not per-lane).
     status.phase!=='idle'&&e('div',{style:{background:'var(--bg-base)',border:`0.5px solid ${status.paused?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}},
         e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
@@ -1679,11 +1718,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     if(scrollToGroup(gid)||attempts<=0)return;
     setTimeout(()=>scrollToGroupRetry(gid,attempts-1),120);
   }
-  // F9 bugfix: clicking a track in the player used to just switch to the
-  // 重复组 tab without ever selecting/scrolling to the actual group — you'd
-  // land on whatever group happened to be selected before (or none). Now it
-  // resets filter/search/tag-filter (duplicates aren't paginated, so 'all'
-  // guarantees the group is in the fetched set) and scrolls to it once loaded.
+  // Clicking a track in the player: switch to duplicates tab, reset filters
+  // to show all groups, then scroll to the containing group.
   useEffect(()=>{
     if(!onLocate)return;
     onLocate.setLocateInDuplicates?.(gid=>{
@@ -1753,16 +1789,9 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     if(scanDoneKey>0&&scanDoneKey!==prevScanDoneKey.current){
       prevScanDoneKey.current=scanDoneKey;
       loadList();
-      // F9 bugfix: a rematch (e.g. after changing 音质优先级 in Settings and
-      // clicking "立即重新匹配") clears and REBUILDS every dup_groups row
-      // from scratch — group ids get reassigned, they're not stable across
-      // a rematch. The detail panel only ever refetched on selId changing,
-      // so if one was open when the rematch ran, it kept showing whatever
-      // it last fetched under the OLD id — stale recommendation data that
-      // looked like "the new quality order didn't change anything" when
-      // really it just never re-fetched at all. Close it here instead of
-      // trying to refetch the same id, since that id may now point at an
-      // unrelated group or nothing.
+      // A rematch rebuilds all dup_groups rows from scratch — group IDs are
+      // not stable across rematches. Close any open detail panel to avoid
+      // showing stale data under an old (or now-reassigned) group ID.
       setSelId(null);
       setDetail(null);
     }
@@ -2232,12 +2261,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
     });
   },[]);
 
-  // F8: this only ever SAVES now — it no longer kicks off a re-match on its
-  // own. A background re-match triggered by typing in Settings could still
-  // be in flight when the person switched to 扫描 and clicked a lane there,
-  // producing a spurious "已有扫描进行中". Applying a match-affecting change
-  // is now always a deliberate, explicit click (see the reapply banner
-  // below), never an automatic side effect of saving.
+  // Settings save: no longer auto-fires a re-match. Changes are only
+  // applied via the explicit reapply banner button below.
   useEffect(()=>{
     if(!s)return;
     if(isFirst.current){isFirst.current=false;return;}
@@ -2305,11 +2330,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
     // Right — all sections concatenated, scrollable as part of <main>
     e('div',{style:{display:'flex',flexDirection:'column',gap:14}},
 
-      // F9: every "设置已修改，需要重新扫描" prompt uses the same layout
-      // (icon + message + action button) and — since the action always
-      // kicks off a scan — the button also jumps to 扫描 page, where the
-      // actual progress/log output lives (see App's onEnumOnly/
-      // onMatchAffectingChange/onScrapeReapply wrappers).
+      // Unified prompt layout for "设置已修改，需要重新扫描" — jumps to 扫描 page.
       needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
         e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'频谱声纹阈值 / 时长容差 / 音质优先级 已修改，尚未重新应用到现有重复组'),
@@ -2561,17 +2582,21 @@ function App(){
   // Stable identities — required for React.memo on LibraryView/DuplicatesView
   // to actually take effect (an inline arrow prop would defeat memo on every
   // render regardless of how stable everything else is).
+  const refreshLibrary=useCallback(()=>{
+    scan.startStep(['enum','meta'],false,'音乐库更新');
+    setView('scanner');
+  },[scan]);
+
   const addScanDirNav=useCallback(dir=>{
     setSettingsState(p=>{
       const cur=p?.scan_dirs||[];
       if(cur.includes(dir))return p;
       const next=[...cur,dir];
       api.put('/api/settings',{scan_dirs:next});
-      scan.startStep(['enum','meta','basicMatch'],false,'扫描目录更新');
       return{...(p||{}),scan_dirs:next};
     });
-    setView('scanner');
-  },[scan]);
+    refreshLibrary();
+  },[scan,refreshLibrary]);
   const addScanDirOnly=useCallback(dir=>{
     setSettingsState(p=>{
       const cur=p?.scan_dirs||[];
@@ -2589,16 +2614,8 @@ function App(){
       return{...(p||{}),scan_dirs:next};
     });
   },[]);
-  // F8: this used to fire automatically (debounced) whenever 声纹相似度/
-  // 时长容差/音质优先级 changed — but that background re-match could still
-  // be running when the person then manually triggered a lane on the 扫描
-  // page, producing a spurious "已有扫描进行中" and confusing log output.
-  // It is now ONLY called from a manual button in SettingsView, and only
-  // re-runs the match step (existing fingerprints/scrape data are reused,
-  // nothing gets re-extracted).
-  // F9: this triggers an actual scan lane (即使只有 match 一步), so — like
-  // every other "设置已修改，需要重新扫描" action — it now also jumps to
-  // 扫描 page, since that's where the progress/log output lives.
+  // onMatchAffectingChange only fires from a manual button — no auto-fire
+  // on Settings keystrokes. Also jumps to 扫描 page for progress visibility.
   const onMatchAffectingChange=useCallback(()=>{
     scan.startStep(['match'],false,'设置变更后重新匹配');
     setView('scanner');
@@ -2689,10 +2706,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');},onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{scan.startStep(['enum'],false,'音乐库更新');setView('scanner');setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInWhitelist:fn=>{locateInWhitelistRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}}}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInWhitelist:fn=>{locateInWhitelistRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}}}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
