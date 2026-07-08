@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.1] — 2026-07-08
+
+### Changed
+
+- **Phase 编号重整为全局 8 步**：统一执行流程 1枚举→2提取属性→3属性匹配→4提取声纹→5频谱声纹匹配→6CP声纹匹配→7刮削→8刮削匹配，消除旧 `2b`/`2c` 后缀和非顺序编号
+- **执行顺序优化**：默认步骤 `enum→meta→basicMatch→fp→fpMatch→scrape→scrapeMatch`，属性匹配提前到声纹提取之前
+- **扫描页通道明确化**：三个匹配通道与全局步骤的对应关系写入 matcher.js 顶部注释和 README
+- **筛选栏标签重排**：匹配方法标签按属性→声纹→刮削、默认→可选、一致→相似的规则排序
+
 ## [1.12.0] — 2026-07-08
 
 ### Added
@@ -136,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SQLite 持久化
 - Express Web 服务
 
-[1.12.0]: https://github.com/geekieo/musicdedup/compare/v1.11.1...HEAD
+[1.12.1]: https://github.com/geekieo/musicdedup/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/geekieo/musicdedup/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/geekieo/musicdedup/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/geekieo/musicdedup/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/geekieo/musicdedup/compare/v1.10.0...v1.10.1
