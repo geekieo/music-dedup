@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.12.0';
+const APP_VERSION='1.12.1';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -21,16 +21,15 @@ const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN'
 /* ── Match-tag taxonomy ──────────────────────────────────────────────────
    Tags are split into two categories, each with its own filter bar:
 
-   MATCHING-METHOD tags (upper filter bar: 按匹配方法):
-     How was this duplicate group DISCOVERED? Each tag maps to a specific
-     matching phase that actively unions pairs.
-     spectral_exact    – Phase 1: spectral fingerprint byte-identical
-     same_recording    – Phase 3/4: spectral similarity ≥ user threshold
-     cp_exact          – Phase 5: Chromaprint ≥ 98%
-     cp_similar        – Phase 5: Chromaprint ≥ 90% (hardcoded CP_THRESH)
-     meta_confirmed    – Phase 2/2b: title+artist+duration agreement
-     mb_confirmed      – Phase 2c: same MusicBrainz recording id
-     acoustid_confirmed– Phase 2c: same AcoustID recording id
+   MATCHING-METHOD tags (upper filter bar: 匹配方法筛选):
+     Display order: 属性 → 声纹 → 刮削. See matcher.js for global step structure.
+     meta_confirmed    – 步骤3b: title+artist+duration agreement
+     spectral_exact    – 步骤5a: spectral fingerprint byte-identical
+     same_recording    – 步骤5b+5c: spectral similarity + duration bucket
+     cp_exact          – 步骤6: Chromaprint ≥ 98%
+     cp_similar        – 步骤6: Chromaprint ≥ 90%
+     mb_confirmed      – 步骤8: same MusicBrainz recording id
+     acoustid_confirmed– 步骤8: same AcoustID recording id
 
    CHARACTERISTIC tags (lower filter bar: 其他组内特征):
      Intra-group relationships — patterns between files within the cluster.
@@ -47,8 +46,8 @@ const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN'
 
    Source of truth: lib/rules.js detectMatchTags(). */
 const MATCH_METHOD_TAGS=new Set([
-  'spectral_exact','same_recording','cp_exact','cp_similar',
-  'meta_confirmed','mb_confirmed','acoustid_confirmed',
+  'meta_confirmed','spectral_exact','same_recording','cp_exact','cp_similar',
+  'mb_confirmed','acoustid_confirmed',
 ]);
 const CHARACTERISTIC_TAGS=new Set([
   'fp_diff','format_diff','format_same','filename_same',
@@ -1888,7 +1887,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
     // Filter bar: matching-method tags (how the group was discovered)
     filterTags.length>0&&e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'按匹配方法（可多选）：'),
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选（可多选）：'),
       filterTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);

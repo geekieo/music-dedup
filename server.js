@@ -358,7 +358,11 @@ app.post('/api/scan/start', async(req,res)=>{
   const durationTolerance=parseInt(s.duration_tolerance||'5');
   const qualityTiers=Array.isArray(s.quality_tiers)?s.quality_tiers:null;
   const smartScan=s.smart_scan!==false;
-  const steps=req.body?.steps||['enum','meta','fp','match'];
+  // 全局 8 步执行流程，详见 lib/matcher.js 顶部注释
+  //   步骤1 枚举 → 步骤2 提取属性 → 步骤3 属性匹配 → 步骤4 提取声纹
+  //   → 步骤5+6 声纹匹配 → 步骤7 刮削 → 步骤8 刮削匹配
+
+  const steps=req.body?.steps||['enum','meta','basicMatch','fp','fpMatch','scrape','scrapeMatch'];
   const force=req.body?.force===true;
   const retryMissed=req.body?.retryMissed===true;
   if(steps.includes('enum')&&!dirs.length)return res.status(400).json({ok:false,error:'未配置扫描目录'});
@@ -371,23 +375,25 @@ app.post('/api/scan/start', async(req,res)=>{
   const abort=()=>scanState.abortFlag;
   const pause=waitIfPaused;
   try{
+    // 步骤1: 枚举
     if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort,onPause:pause});
+    // 步骤2: 提取属性
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
+    // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
+    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    // 步骤4: 提取声纹
     if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:prog,onAbort:abort,onPause:pause});
-    // Scrape MUST run before match so mb_recording_id data is available for union logic
+    // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
+    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    // 步骤7: 刮削
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
       if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹（fpcalc）进行刮削匹配...'});
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
-    // Decoupled scrape-only matching: runs Phase 2c (shared mb_recording_id) only,
-    // preserving existing groups from previous full-matcher or scrape-matcher runs.
+    // 步骤8: 刮削匹配（recording ID 对比）
     if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
-    // Decoupled basic matching: Phase 2+2b only (title+artist+duration), no fingerprint.
-    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
-    // Decoupled fingerprint matching: Phases 1+3+4+5 only, spectral fingerprint required.
-    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
-    // Full matcher: all 5 phases (backward-compatible, used by "全部执行")
+    // 全量匹配（向后兼容，= 步骤3+5+6+8）
     if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
