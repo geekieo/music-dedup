@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-07-08
+
+### Added
+
+- **双源刮削架构**：MusicBrainz 和 AcoustID 刮削数据各自独立存储，`scraped_meta` 表主键改为 `(file_id, source)` 复合键，两种来源互不覆盖
+- **独立状态跟踪**：MB 和 AcoustID 各自用 `mb_checked_at` / `acoustid_checked_at` 管理处理进度，互不干扰
+- **分源统计**：刮削完成日志区分 MB/AcoustID 各自命中数；匹配启动日志显示频谱/Chromaprint 声纹数和两类 recording ID 数量
+- **数据库安全迁移**：自动添加 `scraped_meta.source` 列，并根据文件是否有 chromaprint 智能回填来源（有 chromaprint → AcoustID，否则 → MusicBrainz）
+
+### Changed
+
+- **Recording ID 合并匹配**：Phase 2c 将 MB 和 AcoustID 的 recording ID 合并到统一 Map，修复同 ID 不同来源文件无法匹配的 bug
+- **统一 tier 计算**：两个刮削源使用同一套 `computeScrapeTier` 规则（标题+艺术家+专辑三字段匹配 + CJK 繁简折叠）
+- **MB API 严格限速**：`sleep(1000)` 1 req/s，去掉过度保守的 `sleep(1100)` 额外延迟
+- **动态刮削 UI**：ScrapeDialog 对比表和 PropsModal 根据实际有数据的来源动态显示列/区块
+- **扫描步骤解耦**：library maintenance（enum+meta）与 matching channels（basic/fp/scrape）分离，新增文件夹入库不自动触发匹配
+- **注释精简**：全项目清理冗长 F9/F10 debug 过程描述，仅保留功能说明
+
+### Fixed
+
+- 修复 `scraped_meta` 旧数据库缺少 `source` 列导致复合主键迁移失败
+- 修复 MB/AcoustID recording ID 分两个独立 Map，导致 MB 刮削匹配仅 7 对（实际应为 AcoustID 同量级数百对）
+- 修复 AcoustID 刮削缺少专辑/年份/曲目号（releases 嵌套在 `releasegroups[].releases[]` 下）
+- 修复 AcoustID 流派显示为浮点小数（旧版 scraper 将 score 误存为 genre 字段）
+
 ## [1.11.1] — 2026-07-08
 
 ### Changed
@@ -111,7 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SQLite 持久化
 - Express Web 服务
 
-[1.11.0]: https://github.com/geekieo/musicdedup/compare/v1.10.1...HEAD
+[1.12.0]: https://github.com/geekieo/musicdedup/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/geekieo/musicdedup/compare/v1.11.0...v1.11.1
+[1.11.0]: https://github.com/geekieo/musicdedup/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/geekieo/musicdedup/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/geekieo/musicdedup/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/geekieo/musicdedup/compare/v1.9.0...v1.9.1
