@@ -218,7 +218,7 @@ app.post('/api/files/:id/scrape-single', async(req,res)=>{
       if (!tiers.length) return null;
       if (tiers.includes('blue')) return 'blue';
       if (tiers.includes('green')) return 'green';
-      return 'red';
+      return 'yellow';
     })();
     res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
   }catch(e){ res.status(500).json({ok:false,error:e.message}); }
@@ -248,7 +248,7 @@ app.get('/api/files/:id/scraped', (req,res)=>{
     if (!tiers.length) return null;
     if (tiers.includes('blue')) return 'blue';
     if (tiers.includes('green')) return 'green';
-    return 'red';
+    return 'yellow';
   })();
   res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
 });
@@ -306,9 +306,13 @@ app.delete('/api/whitelist/:fileId', (req,res)=>{ removeWhitelist(db,+req.params
 // ── Duplicates ────────────────────────────────────────────────────────────
 app.get('/api/duplicates', (req,res)=>{
   const resolved = req.query.resolved!==undefined ? req.query.resolved==='1' : undefined;
+  res.setHeader('Cache-Control','no-store');
   res.json({ok:true, data:getGroups(db,{resolved})});
 });
-app.get('/api/duplicates/:id', (req,res)=>{ const g=getGroupDetail(db,+req.params.id); g?res.json({ok:true,data:g}):res.status(404).json({ok:false}); });
+app.get('/api/duplicates/:id', (req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  const g=getGroupDetail(db,+req.params.id); g?res.json({ok:true,data:g}):res.status(404).json({ok:false});
+});
 app.post('/api/duplicates/:id/resolve', async(req,res)=>{
   const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
   const dels=g.tracks.filter(t=>!t.keep); const results=[];
