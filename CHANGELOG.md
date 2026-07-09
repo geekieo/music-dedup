@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.2] — 2026-07-09
+
+### Changed
+
+- **刮削分级术语统一**：`red`→`yellow`，模糊匹配从"红色"改为"黄色"，与 UI 中已使用的黄色图标保持一致
+- **匹配方法标签跨阶段保留**：部分重跑匹配（如仅重跑基础匹配）时，快照并合并旧的匹配方法标签，避免其他阶段的标签被清除
+- **Recording-ID 匹配补充检测**：部分重跑时 `mbConfirmedPairs`/`acoustidConfirmedPairs` 为 null，回退到从 track 数据直接检测 recording-ID 匹配
+- **标签悬停移除**：`MatchTag` 移除悬停说明，标签仅作为视觉标识，不再承载解释文本
+- **设置提示组件优化**：`Hint` (i) 悬停提示改为白底亮色主题；支持 `data-hint-boundary` 约束在卡片范围内；支持自动上下翻转避让；文字排版更清晰（`pre-line` 支持多行列表）；移除三角箭头
+- **标签说明移至重复组页面**：从设置页移除"重复组标签说明"区块，改为在重复组筛选栏右侧增加"标签说明"按钮，点击弹窗展示，分"匹配方法"和"其他组内特征标签"两区；匹配方法和特征标签均按固定顺序排列
+- **解释性说明归入 Hint**：CP 声纹描述、繁简忽略描述从行内文字移入 (i) 悬停提示，设置页仅保留功能说明直接可见
+- **设置页侧栏 scroll-spy**：IntersectionObserver 追踪当前可见设置区块，侧栏自动居中对应导航项；sticky `top: 20px` 保留自然留白不破坏；滚动条隐藏；保存状态随侧栏自然滚动
+- **播放栏改进**：上一曲/下一曲使用专用图标；进度条 hover 时显示拖拽滑块和时间胶囊；时间显示改为播放位置而非"已播放/总时长"格式
+- **扫描完成后曲库自动刷新**：扫描/匹配完成后曲库列表自动重新加载，无需手动切换页面
+
+### Fixed
+
+- `queryLibrary` 刮削分类筛选时未 JOIN `scraped_meta` 表导致 SQL 报错
+- `scrapedShapeFromRow` rank 函数未将 `red` 更新为 `yellow`
+- 重复组 API 未禁用浏览器缓存，导致操作后列表未刷新
+
 ## [1.12.1] — 2026-07-08
 
 ### Changed
@@ -145,7 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SQLite 持久化
 - Express Web 服务
 
-[1.12.1]: https://github.com/geekieo/musicdedup/compare/v1.12.0...HEAD
+[1.12.2]: https://github.com/geekieo/musicdedup/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/geekieo/musicdedup/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/geekieo/musicdedup/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/geekieo/musicdedup/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/geekieo/musicdedup/compare/v1.10.1...v1.11.0

@@ -50,10 +50,12 @@ const MATCH_METHOD_TAGS=new Set([
   'mb_confirmed','acoustid_confirmed',
 ]);
 const CHARACTERISTIC_TAGS=new Set([
-  'fp_diff','format_diff','format_same','filename_same',
-  'metadata_same','metadata_diff','duration_near','duration_diff',
-  'album_year_diff','meta_score_diff','retention_tie',
+  'format_same','format_diff','filename_same',
+  'metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff',
+  'fp_diff','retention_tie',
 ]);
+// Ordered display array for the tag-legend modal (stable order)
+const CHARACTERISTIC_TAGS_ARRAY=['format_same','format_diff','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff','fp_diff','retention_tie'];
 const MATCH_TAG_LABELS={
   spectral_exact:'频谱声纹一致', same_recording:'频谱声纹相似', cp_exact:'CP声纹一致', cp_similar:'CP声纹相似',
   meta_confirmed:'属性匹配', mb_confirmed:'MusicBrainz刮削一致', acoustid_confirmed:'AcoustID刮削一致',
@@ -143,6 +145,8 @@ const ICONS={
   'chevron-down':{els:[['path',{d:'M6 9l6 6 6-6'}]]},
   'chevron-left':{els:[['path',{d:'M15 6l-6 6 6 6'}]]},
   'chevron-right':{els:[['path',{d:'M9 6l6 6-6 6'}]]},
+  'skip-back':{fill:1,els:[['rect',{x:4,y:5,width:2.5,height:14,rx:1}],['path',{d:'M18 5v14l-10-7z'}]]},
+  'skip-forward':{fill:1,els:[['rect',{x:17.5,y:5,width:2.5,height:14,rx:1}],['path',{d:'M6 5v14l10-7z'}]]},
   'arrow-up':{els:[['path',{d:'M12 19V5'}],['path',{d:'M6 11l6-6 6 6'}]]},
   'arrow-down':{els:[['path',{d:'M12 5v14'}],['path',{d:'M6 13l6 6 6-6'}]]},
   click:{els:[['path',{d:'M9 9l11 4-4.5 1.8L14 19z'}],['path',{d:'M5 3v3'}],['path',{d:'M3 9h3'}],['path',{d:'M5.6 5.6l1.8 1.8'}]]},
@@ -335,6 +339,7 @@ function PlayerBar({player,onLocate}){
   // the only reliable cross-browser way to avoid "deactivation on mouse-leave".
   const railRef=useRef(null);
   const dragging=useRef(false);
+  const seekTargetRef=useRef(null); // last seek position in seconds, cleared when progress catches up
   const[hovered,setHovered]=useState(false);
   const[dragPct,setDragPct]=useState(0);    // only used during actual drag
   const[isDragging,setIsDragging]=useState(false); // trigger re-render on drag state change
@@ -358,7 +363,8 @@ function PlayerBar({player,onLocate}){
     }
     function onUp(e){
       const p=pctFromClient(e.clientX);
-      if(duration)player.seek(p*duration); // commit seek only on release
+      const target=p*duration;
+      if(duration){ seekTargetRef.current=target; player.seek(target); }
       dragging.current=false;
       setIsDragging(false);
       window.removeEventListener('mousemove',onMove);
@@ -368,11 +374,21 @@ function PlayerBar({player,onLocate}){
     window.addEventListener('mouseup',onUp);
   }
 
-  // Hover does NOT update dragPct / show thumb — only thickens the rail
-  const showThumb=isDragging;             // thumb visible ONLY while dragging
-  const fillPct=isDragging?dragPct:pct;   // preview fill while dragging
-  const timeLabel=`${fmtDur(isDragging?fillPct/100*(duration||0):progress)} / ${fmtDur(duration)}`;
+  // Once real progress reaches (or passes) the seek target, clear it
+  if(seekTargetRef.current!==null&&duration&&progress>=seekTargetRef.current-0.3){
+    seekTargetRef.current=null;
+  }
+
+  // Show thumb during drag (follows mouse) OR hover (at playback position)
+  const showThumb=isDragging || hovered || seekTargetRef.current!==null;
+  // During drag: use drag position. Right after seek: use seek target until progress catches up.
+  const fillPct=isDragging?dragPct
+    :seekTargetRef.current!==null&&duration?seekTargetRef.current/duration*100
+    :pct;
   const thumbPct=Math.max(0.5,Math.min(99.5,fillPct));
+  const timeLabel=isDragging
+    ?`${fmtDur(fillPct/100*(duration||0))} / ${fmtDur(duration)}`
+    :fmtDur(fillPct/100*(duration||0));
 
   return e('div',{className:'fade',style:{flexShrink:0,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -1px 8px rgba(0,0,0,.06)',zIndex:10}},
 
@@ -393,12 +409,13 @@ function PlayerBar({player,onLocate}){
       e('div',{style:{position:'absolute',left:0,top:0,height:'100%',
         width:fillPct+'%',background:'var(--amber)',
         transition:isDragging?'none':'width .15s'}}),
-      // Thumb + time tooltip — ONLY during active drag
+      // Thumb + time capsule — during drag OR hover
       showThumb&&e('div',{style:{position:'absolute',top:'50%',left:thumbPct+'%',
         transform:'translate(-50%,-50%)',pointerEvents:'none',zIndex:2}},
-        e('div',{style:{position:'absolute',bottom:'calc(100% + 6px)',left:'50%',transform:'translateX(-50%)',
-          background:'rgba(17,24,39,.85)',color:'#fff',fontSize:10,fontFamily:'var(--font-mono)',
-          padding:'3px 8px',borderRadius:99,whiteSpace:'nowrap',pointerEvents:'none',
+        e('div',{style:{position:'absolute',bottom:'calc(100% + 8px)',left:'50%',transform:'translateX(-50%)',
+          background:'var(--amber)',color:'#fff',fontSize:14,fontWeight:600,
+          padding:'4px 12px',borderRadius:99,whiteSpace:'nowrap',pointerEvents:'none',
+          fontVariantNumeric:'tabular-nums',textAlign:'center',lineHeight:1.2,
           boxShadow:'0 2px 8px rgba(0,0,0,.25)'}},timeLabel),
         e('div',{style:{width:14,height:14,borderRadius:'50%',background:'var(--amber)',
           boxShadow:'0 0 0 3px rgba(217,119,6,.3), 0 2px 6px rgba(217,119,6,.5)'}})
@@ -437,17 +454,19 @@ function PlayerBar({player,onLocate}){
         e('div',{style:{display:'flex',alignItems:'center',gap:6,pointerEvents:'auto'}},
           e('button',{onClick:player.playPrev,disabled:!hasQueue,title:'上一曲',
             style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',
-              opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},
-            Icon('chevron-left',{fontSize:20})),
+              opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:0,display:'flex',
+              alignItems:'center',justifyContent:'center',borderRadius:'50%',width:38,height:38}},
+            Icon('skip-back',{fontSize:24})),
           e('button',{onClick:player.toggle,
             style:{background:'var(--amber)',border:'none',borderRadius:'50%',width:38,height:38,
               display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,
               boxShadow:'0 2px 8px rgba(217,119,6,.4)'}},
-            Icon(playing?'pause':'play',{fontSize:17,color:'#fff'})),
+            Icon(playing?'pause':'play',{fontSize:24,color:'#fff'})),
           e('button',{onClick:player.playNext,disabled:!hasQueue,title:'下一曲',
             style:{background:'none',border:'none',cursor:hasQueue?'pointer':'default',
-              opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:4,display:'flex',borderRadius:'50%'}},
-            Icon('chevron-right',{fontSize:20}))
+              opacity:hasQueue?1:.3,color:'var(--tx-secondary)',padding:0,display:'flex',
+              alignItems:'center',justifyContent:'center',borderRadius:'50%',width:38,height:38}},
+            Icon('skip-forward',{fontSize:24}))
         )
       ),
 
@@ -458,8 +477,9 @@ function PlayerBar({player,onLocate}){
         e('div',{className:'volume-ctl',style:{display:'flex',alignItems:'center',gap:4}},
           e('button',{onClick:()=>setVolume(volume===0?0.8:0),title:volume===0?'取消静音':'静音',
             style:{background:'none',border:'none',cursor:'pointer',display:'flex',
-              alignItems:'center',color:'var(--tx-muted)',padding:'4px 2px',flexShrink:0}},
-            Icon(volume===0?'volume-off':volume<0.5?'volume-2':'volume',{fontSize:18})
+              alignItems:'center',justifyContent:'center',color:'var(--tx-muted)',
+              padding:0,flexShrink:0,width:38,height:38}},
+            Icon(volume===0?'volume-off':volume<0.5?'volume-2':'volume',{fontSize:24})
           ),
           e('div',{className:'volume-slider-wrap'},
             e('input',{type:'range',min:0,max:1,step:0.01,value:volume,
@@ -484,18 +504,55 @@ function QBadge({format:fmt,bitrate:br,sample_rate:sr}){
 }
 // Hover-revealed hint bubble — used everywhere an explanatory note exists,
 // so the note stays out of the way until someone actually wants to read it.
+// Uses viewport-aware positioning to avoid being clipped by window edges.
+// If an ancestor has `data-hint-boundary`, the tooltip is clamped within that
+// element instead of the viewport (used in settings cards to avoid overflow).
 function Hint({text,size=13}){
   const[show,setShow]=useState(false);
+  const[tipStyle,setTipStyle]=useState({});
+  const ref=useRef(null);
   if(!text)return null;
+  function onEnter(){
+    if(!ref.current)return;
+    const r=ref.current.getBoundingClientRect();
+    const tipW=320, gap=8;
+    // Find boundary ancestor (if any)
+    let boundary=null;
+    let el=ref.current.parentElement;
+    while(el){if(el.hasAttribute&&el.hasAttribute('data-hint-boundary')){boundary=el;break;}el=el.parentElement;}
+    const bbox=boundary?boundary.getBoundingClientRect():{left:0,top:0,right:window.innerWidth,bottom:window.innerHeight};
+    const margin=16;
+    // Horizontal: center on icon, clamp within boundary
+    let left=r.left+r.width/2-tipW/2;
+    left=Math.max(bbox.left+margin,Math.min(left,bbox.right-tipW-margin));
+    // Vertical: prefer below, flip above if not enough room
+    const below=r.bottom+gap;
+    const above=r.top-gap;
+    const estH=Math.min(200,text.length*0.4+40);
+    const fitsBelow=below+estH<bbox.bottom-margin;
+    setTipStyle({
+      left,top:fitsBelow?below:'auto',bottom:!fitsBelow?window.innerHeight-above:'auto',
+      maxWidth:tipW,
+    });
+    setShow(true);
+  }
   return e('span',{style:{position:'relative',display:'inline-flex',marginLeft:5,verticalAlign:'middle'},
-    onMouseEnter:()=>setShow(true),onMouseLeave:()=>setShow(false)},
-    e('span',{style:{display:'inline-flex',color:'var(--tx-faint)',cursor:'help'},tabIndex:0,onFocus:()=>setShow(true),onBlur:()=>setShow(false)},Icon('info-circle',{fontSize:size})),
-    show&&e('div',{className:'fade',style:{position:'absolute',zIndex:60,top:'140%',left:0,width:268,background:'#1F2937',color:'#F9FAFB',fontSize:11,lineHeight:1.7,padding:'9px 11px',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',fontWeight:400}},text)
+    onMouseEnter:onEnter,onMouseLeave:()=>setShow(false)},
+    e('span',{ref,style:{display:'inline-flex',color:'var(--tx-faint)',cursor:'help',borderRadius:'50%',
+      transition:'all .15s',background:show?'var(--bg-muted)':'transparent'},
+      tabIndex:0,onFocus:()=>onEnter(),onBlur:()=>setShow(false)},
+      Icon('info-circle',{fontSize:size})),
+    show&&e('div',{className:'fade',style:{position:'fixed',zIndex:10000,left:tipStyle.left,top:tipStyle.top,bottom:tipStyle.bottom,maxWidth:tipStyle.maxWidth,
+      background:'#fff',color:'#1F2937',fontSize:12,lineHeight:1.75,whiteSpace:'pre-line',
+      padding:'8px 12px',borderRadius:'var(--r-md)',fontWeight:400,
+      boxShadow:'0 4px 20px rgba(0,0,0,.12), 0 0 0 0.5px rgba(0,0,0,.06)'}},
+      text
+    )
   );
 }
-function MatchTag({tag,hideTooltip}){
+function MatchTag({tag}){
   const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-  return e('span',{title:hideTooltip?undefined:(MATCH_TAG_DESCRIPTIONS[tag]||''),style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',cursor:hideTooltip?'default':'help'}},MATCH_TAG_LABELS[tag]||tag);
+  return e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap'}},MATCH_TAG_LABELS[tag]||tag);
 }
 function Tag({children,color='var(--tx-faint)',bg='var(--bg-muted)',border='var(--bd-default)'}){return e('span',{style:{fontSize:10,padding:'1px 7px',borderRadius:3,background:bg,color,border:`0.5px solid ${border}`,whiteSpace:'nowrap'}},children);}
 // Compact status badge for settings-item validation rows (AcoustID Key /
@@ -565,22 +622,26 @@ function ConfirmModal({title,message,onConfirm,onClose,danger}){
 // autoSelectFields' byte-level equality check (different question from tier).
 const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
 
-const TIER_COLOR  = { green:'var(--green)', blue:'#2563EB', red:'var(--red)' };
-const TIER_LABEL  = { green:'精确匹配', blue:'精确匹配可写入', red:'模糊匹配' };
+const TIER_COLOR  = { green:'#00AA00', blue:'#2563EB', yellow:'#EAB308' };
+const TIER_LABEL  = { green:'精确匹配', blue:'精确匹配 · 可写入', yellow:'模糊匹配' };
 
 /* ── Instant-tooltip wrapper ─────────────────────────────────────────────
    `title` attribute has browser-imposed ~500 ms delay. This component
    shows the tooltip synchronously on mouseenter via a small absolutely-
    positioned div, so there's zero delay.
 */
-function InstantTooltip({tip,children,style={}}){
+function InstantTooltip({tip,children,style={},light=false}){
   const[show,setShow]=useState(false);
   const[pos,setPos]=useState({x:0,y:0});
   return e('span',{style:{position:'relative',display:'inline-flex',...style},
     onMouseEnter:ev=>{const r=ev.currentTarget.getBoundingClientRect();setPos({x:ev.clientX-r.left,y:-28});setShow(true);},
     onMouseLeave:()=>setShow(false)},
     children,
-    show&&tip&&e('div',{style:{position:'absolute',left:pos.x,top:pos.y,
+    show&&tip&&e('div',{style:light?{position:'absolute',left:pos.x,top:pos.y,
+      background:'#fff',color:'#1F2937',fontSize:11,fontFamily:'var(--font-sans)',
+      padding:'3px 10px',borderRadius:4,whiteSpace:'nowrap',zIndex:9999,pointerEvents:'none',
+      transform:'translateX(-50%)',boxShadow:'0 2px 12px rgba(0,0,0,.12)',border:'0.5px solid var(--bd-default)',lineHeight:1.4}
+      :{position:'absolute',left:pos.x,top:pos.y,
       background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:'var(--font-mono)',
       padding:'4px 8px',borderRadius:6,whiteSpace:'pre',zIndex:9999,pointerEvents:'none',
       transform:'translateX(-50%)',boxShadow:'0 2px 8px rgba(0,0,0,.3)',lineHeight:1.5}},tip)
@@ -776,8 +837,8 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   // title+artist+album matching, not just the recording-level match_basis).
   const mbTier = scraped?.mb?.scrape_tier;
   const aidTier = scraped?.acoustid?.scrape_tier;
-  const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'red' ? '（模糊）' : '';
-  const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'red' ? '（模糊）' : '';
+  const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'yellow' ? '（模糊）' : '';
+  const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'yellow' ? '（模糊）' : '';
 
   // Diff color for a field vs a specific source
   function diffStyle(key, src){
@@ -798,7 +859,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       e('div',{style:{marginBottom:12,padding:'8px 12px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
         Icon('file-music',{fontSize:13,color:'var(--tx-faint)',flexShrink:0}),
         e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},filename),
-        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:TIER_COLOR[tier||'red']+'22',color:TIER_COLOR[tier||'red'],border:'0.5px solid '+TIER_COLOR[tier||'red'],whiteSpace:'nowrap'}},
+        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:TIER_COLOR[tier||'yellow']+'22',color:TIER_COLOR[tier||'yellow'],border:'0.5px solid '+TIER_COLOR[tier||'yellow'],whiteSpace:'nowrap'}},
           TIER_LABEL[tier]||'已刮削'),
         scraped?.mb?.title&&e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'MB'),
         scraped?.acoustid?.title&&e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'AcoustID')
@@ -988,7 +1049,7 @@ function PropsModal({fileId,onClose}){
       scraped.mb?.title&&e('div',{style:{marginBottom:8,padding:'10px 14px',background:'#F5F3FF',border:'0.5px solid #DDD6FE',borderRadius:'var(--r-md)'}},
         e('div',{style:{fontSize:11,fontWeight:600,color:'#5B21B6',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
           Icon('shield-check',{fontSize:13}),'刮削数据 · MusicBrainz',
-              mbTier==='red'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
+              mbTier==='yellow'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
               mbTier==='green'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配)'),
               mbTier==='blue'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
           scraped.mb.confidence>0&&scraped.mb.confidence<0.85&&e('span',{style:{color:'#7C3AED',fontWeight:400,fontSize:9}},` 匹配度 ${(scraped.mb.confidence*100).toFixed(0)}%`)
@@ -998,7 +1059,7 @@ function PropsModal({fileId,onClose}){
       scraped.acoustid?.title&&e('div',{style:{padding:'10px 14px',background:'#ECFEFF',border:'0.5px solid #A5F3FC',borderRadius:'var(--r-md)'}},
         e('div',{style:{fontSize:11,fontWeight:600,color:'#0E7490',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
           Icon('wave-sine',{fontSize:13}),'刮削数据 · AcoustID',
-          aidTier==='red'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
+          aidTier==='yellow'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
           aidTier==='green'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(精确匹配)'),
           aidTier==='blue'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
           scraped.acoustid.confidence>0&&scraped.acoustid.confidence<0.85&&e('span',{style:{color:'#0891B2',fontWeight:400,fontSize:9}},` 匹配度 ${(scraped.acoustid.confidence*100).toFixed(0)}%`)
@@ -1065,7 +1126,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,onWhitelistChange,onTagsWritten}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,libraryKey,onWhitelistChange,onTagsWritten}){
   // ── Filter state ───────────────────────────────────────────────────────
   // 'all' | 'scraped' | 'dup'  — the 3 interactive stat cards
   const[libFilter,setLibFilter]=useState('all');
@@ -1076,7 +1137,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   const[sort,setSort]=useState('title');
   const[order,setOrder]=useState('asc');
   const[fmt,setFmt]=useState('');
-  const[scrapeFilter,setScrapeFilter]=useState(''); // '' | green|yellow|blue|red | none
+  const[scrapeFilter,setScrapeFilter]=useState(''); // '' | green|blue|yellow|none
   const[loading,setLoading]=useState(false);
   const[propsId,setPropsId]=useState(null);
   const[toast,setToast]=useState(null);
@@ -1121,6 +1182,10 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
     if(suppressAutoLoad.current){ suppressAutoLoad.current=false; return; }
     loadFresh();
   },[sort,order,fmt,libFilter,scrapeFilter]);
+  // Reload library when a scan completes (libraryKey increments from App)
+  useEffect(()=>{
+    if(libraryKey>0) loadFresh();
+  },[libraryKey]);
 
   function loadMore(){
     if(loadingMore||!hasMore)return;
@@ -1354,11 +1419,11 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
         // style rather than a matching pair).
         e('select',{value:scrapeFilter,onChange:ev=>setScrapeFilter(ev.target.value),
           style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
-            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:104}},
+            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:112}},
           e('option',{value:''},'全部刮削'),
           e('option',{value:'green'},TIER_LABEL.green),
           e('option',{value:'blue'},TIER_LABEL.blue),
-          e('option',{value:'red'},TIER_LABEL.red),
+          e('option',{value:'yellow'},TIER_LABEL.yellow),
           e('option',{value:'none'},'未刮削')
         ),
         e('span',{style:{fontSize:11,color:'var(--tx-faint)',whiteSpace:'nowrap'}},`显示 ${rows.length} / ${total.toLocaleString()} 首`)
@@ -1404,7 +1469,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                     onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'library',rowIdx:idx},playableQueue),
                     style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,
                       display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
-                    Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+                    Icon(isCur&&player.playing?'pause':'play',{fontSize:15,color:isCur?'#fff':'var(--tx-muted)'}))
                 ),
                 e('td',{style:{padding:'6px 10px',maxWidth:0,overflow:'hidden'}},
                   e('div',{style:{display:'flex',alignItems:'center',gap:5,overflow:'hidden'}},
@@ -1585,7 +1650,7 @@ function ScannerView({scan}){
         e('button',{onClick:()=>setLogs([]),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4}},Icon('trash',{fontSize:12}),'清空')
       ),
       e('div',{ref:logRef,style:{padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,
-        height:'calc(100vh - 520px)',minHeight:180,maxHeight:'calc(100vh - 300px)',
+        height:'calc(100vh - 430px)',minHeight:180,maxHeight:'calc(100vh - 300px)',
         overflowY:'auto'}},
         logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始...'),
         logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),l.msg))),
@@ -1624,7 +1689,7 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,
           title:'试听',
           style:{background:isCur?'var(--amber)':'rgba(0,0,0,.08)',border:'none',borderRadius:'50%',
             width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}},
-          Icon(isCur&&player.playing?'pause':'play',{fontSize:12,color:isCur?'#fff':'var(--tx-muted)'})
+          Icon(isCur&&player.playing?'pause':'play',{fontSize:16,color:isCur?'#fff':'var(--tx-muted)'})
         ),
         // Cover art thumbnail
         e('div',{style:{width:36,height:36,borderRadius:'var(--r-sm)',overflow:'hidden',flexShrink:0,
@@ -1700,6 +1765,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   // Locate-in-duplicates: briefly highlights the target group after scrolling to it.
   const groupRefs=useRef({});
   const[flashGroupId,setFlashGroupId]=useState(null);
+  const[showTagLegend,setShowTagLegend]=useState(false);
   const pendingLocateId=useRef(null);
   useEffect(()=>{
     if(!flashGroupId)return;
@@ -1757,7 +1823,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   function loadList(){
     setListLoading(true);
     const q=filter==='all'?'':filter==='pending'?'?resolved=0':'?resolved=1';
-    api.get('/api/duplicates'+q).then(r=>{
+    api.get('/api/duplicates'+q+(q?'&':'?')+'_='+Date.now()).then(r=>{
       if(!r.ok)return;
       let list=r.data||[];
       if(sort==='savings')list=[...list].sort((a,b)=>(b.savings_bytes||0)-(a.savings_bytes||0));
@@ -1810,8 +1876,18 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   // Only matching-method tags are shown in the filter bar.
   // Characteristic tags (format_diff, metadata_same, etc.) still appear
   // in the group detail view but are not filterable.
-  const filterTags=useMemo(()=>allTags.filter(t=>MATCH_METHOD_TAGS.has(t)),[allTags]);
-  const charTags=useMemo(()=>allTags.filter(t=>CHARACTERISTIC_TAGS.has(t)),[allTags]);
+  const filterTags=useMemo(()=>{
+    // Stable display order: 属性→声纹→刮削, 默认→可选, 一致→相似
+    const TAG_ORDER=['meta_confirmed','spectral_exact','same_recording','cp_exact','cp_similar','mb_confirmed','acoustid_confirmed'];
+    const rank=t=>{const i=TAG_ORDER.indexOf(t);return i===-1?99:i;};
+    return allTags.filter(t=>MATCH_METHOD_TAGS.has(t)).sort((a,b)=>rank(a)-rank(b));
+  },[allTags]);
+  const charTags=useMemo(()=>{
+    // Stable display order: 步骤2→3→5+6, 一致→不同
+    const CHAR_TAG_ORDER=['format_same','format_diff','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff','fp_diff','retention_tie'];
+    const rank=t=>{const i=CHAR_TAG_ORDER.indexOf(t);return i===-1?99:i;};
+    return allTags.filter(t=>CHARACTERISTIC_TAGS.has(t)).sort((a,b)=>rank(a)-rank(b));
+  },[allTags]);
 
   const visibleGroups=useMemo(()=>{
     let list=groups;
@@ -1883,6 +1959,26 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       )
     ),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
+    showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640},
+      e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
+        e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginBottom:10}},'匹配方法（判定重复的依据）'),
+        ['meta_confirmed','spectral_exact','same_recording','cp_exact','cp_similar','mb_confirmed','acoustid_confirmed'].map(tag=>{
+          const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+          return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
+            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},MATCH_TAG_LABELS[tag]||tag),
+            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
+          );
+        }),
+        e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginTop:16,marginBottom:10}},'组内其他特征标签（辅助判断信息）'),
+        CHARACTERISTIC_TAGS_ARRAY.map(tag=>{
+          const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+          return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
+            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},MATCH_TAG_LABELS[tag]||tag),
+            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
+          );
+        })
+      )
+    ),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
     // Filter bar: matching-method tags (how the group was discovered)
@@ -1891,18 +1987,34 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       filterTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
-        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),title:MATCH_TAG_DESCRIPTIONS[tag]||'',style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
+        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
       }),
+      e('span',{style:{flex:1,minWidth:8}}),
+      e('button',{
+        onClick:()=>setShowTagLegend(true),
+        style:{padding:'3px 10px',borderRadius:99,fontSize:11,cursor:'pointer',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)',color:'var(--tx-muted)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0},
+      }, Icon('info-circle',{fontSize:12}), '标签说明'),
     ),
-    // Second row: characteristic tags (what the group looks like)
+    // Second row: characteristic tags (what the group looks like) + clear button
     charTags.length>0&&e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
       e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征（可多选）：'),
       charTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
-        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),title:MATCH_TAG_DESCRIPTIONS[tag]||'',style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
+        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
       }),
-      tagFilter.size>0&&e('button',{onClick:()=>setTagFilter(new Set()),style:{padding:'3px 10px',borderRadius:99,fontSize:11,cursor:'pointer',border:'1px solid var(--bd-default)',background:'var(--bg-base)',color:'var(--tx-faint)'}},'清除筛选')
+      e('span',{style:{flex:1,minWidth:24}}),
+      e('button',{
+        onClick:()=>setTagFilter(new Set()),
+        disabled:tagFilter.size===0,
+        style:{
+          padding:'4px 12px',borderRadius:'var(--r-md)',fontSize:11,cursor:tagFilter.size>0?'pointer':'default',
+          border:'0.5px solid var(--bd-default)',background:tagFilter.size>0?'var(--bg-base)':'transparent',
+          color:tagFilter.size>0?'var(--tx-secondary)':'var(--tx-faint)',
+          opacity:tagFilter.size>0?1:0.4,whiteSpace:'nowrap',
+          display:'flex',alignItems:'center',gap:4,flexShrink:0,
+        }
+      }, Icon('x',{fontSize:12}), '清除筛选')
     ),
 
     // Toolbar
@@ -2015,12 +2127,10 @@ const SETTINGS_SECTIONS=[
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
   {id:'sec-quality', label:'音质优先级', icon:'diamond'},
-  {id:'sec-tags',    label:'重复组标签', icon:'git-merge'},
   {id:'sec-wl',      label:'白名单',     icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
-const TAG_LEGEND=['spectral_exact','same_recording','cp_exact','cp_similar','meta_confirmed','mb_confirmed','acoustid_confirmed','fp_diff','format_diff','format_same','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff','retention_tie'];
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
   const[rows,setRows]=useState(null);
@@ -2118,7 +2228,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
                         e('td',{style:{padding:'6px 8px',width:36}},
                           player&&r.file_id&&e('button',{onClick:()=>player.playTrack({id:r.file_id,title,artist,src:'settings-history'}),
                             style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
-                            Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+                            Icon(isCur&&player.playing?'pause':'play',{fontSize:15,color:isCur?'#fff':'var(--tx-muted)'}))
                         ),
                         e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180}},title||'—'),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}},artist||'—'),
@@ -2202,7 +2312,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
                     return e('tr',{key:f.id,ref:el=>{if(el)rowRefs.current[f.id]=el;else delete rowRefs.current[f.id];},className:f.id===flashId?'locate-flash':undefined,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
                       e('td',{style:{padding:'6px 8px',width:36}},
                         f.fingerprint&&player&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'settings-whitelist'}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
-                          Icon(isCur&&player.playing?'pause':'play',{fontSize:11,color:isCur?'#fff':'var(--tx-muted)'}))
+                          Icon(isCur&&player.playing?'pause':'play',{fontSize:15,color:isCur?'#fff':'var(--tx-muted)'}))
                       ),
                       e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}},f.title||'—'),
                       e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:160}},f.artist||'—'),
@@ -2223,7 +2333,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,whitelistKey,writeHistoryKey,onLocateFile,onLocate}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,whitelistKey,writeHistoryKey,onLocateFile,onLocate,mainScrollRef}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -2248,6 +2358,23 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   }
   const isFirst=useRef(true);
   const lastApplied=useRef(null); // {threshold, duration_tolerance, quality_tiers} snapshot as of the last manual reapply
+
+  // Scroll-spy: track which settings section is most visible in the main scroll area
+  const sidebarRef=useRef(null);
+  const[activeSection,setActiveSection]=useState(null);
+  useEffect(()=>{
+    if(!mainScrollRef?.current||!s)return;
+    const root=mainScrollRef.current;
+    const ratios=new Map();
+    const observer=new IntersectionObserver(entries=>{
+      for(const e of entries) ratios.set(e.target.id,e.intersectionRatio);
+      let best=null,bestR=0;
+      for(const[id,r]of ratios){if(r>bestR){bestR=r;best=id;}}
+      if(best) setActiveSection(best);
+    },{root,threshold:[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]});
+    for(const sec of SETTINGS_SECTIONS){const el=document.getElementById(sec.id);if(el)observer.observe(el);}
+    return()=>observer.disconnect();
+  },[mainScrollRef,s]);
 
   useEffect(()=>{
     api.get('/api/settings').then(r=>{
@@ -2319,15 +2446,15 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
   return e('div',{className:'fade',style:{display:'grid',gridTemplateColumns:'150px 1fr',gap:18,alignItems:'start'}},
 
-    // Left rail — one click jumps straight to the section
-    e('div',{style:{position:'sticky',top:0,display:'flex',flexDirection:'column',gap:1}},
-      SETTINGS_SECTIONS.map(sec=>e('button',{key:sec.id,onClick:()=>jump(sec.id),style:{display:'flex',alignItems:'center',gap:7,padding:'7px 9px',background:'none',border:'none',borderRadius:'var(--r-md)',cursor:'pointer',color:'var(--tx-secondary)',fontSize:12,textAlign:'left'},onMouseEnter:ev=>ev.currentTarget.style.background='var(--bg-muted)',onMouseLeave:ev=>ev.currentTarget.style.background='none'},
+    // Left rail — sticky, no overflow mask; whitespace is natural layout.
+    e('div',{ref:sidebarRef,style:{position:'sticky',top:20,display:'flex',flexDirection:'column',gap:1}},
+      SETTINGS_SECTIONS.map(sec=>e('button',{key:sec.id,'data-section':sec.id,onClick:()=>jump(sec.id),style:{display:'flex',alignItems:'center',gap:7,padding:'7px 9px',background:'none',border:'none',borderRadius:'var(--r-md)',cursor:'pointer',color:'var(--tx-secondary)',fontSize:12,textAlign:'left',flexShrink:0},onMouseEnter:ev=>ev.currentTarget.style.background='var(--bg-muted)',onMouseLeave:ev=>ev.currentTarget.style.background='none'},
         Icon(sec.icon,{fontSize:14,color:'var(--tx-faint)'}),sec.label)),
       e('div',{style:{marginTop:8,paddingTop:8,borderTop:'0.5px solid var(--bd-subtle)'}},e(SI))
     ),
 
     // Right — all sections concatenated, scrollable as part of <main>
-    e('div',{style:{display:'flex',flexDirection:'column',gap:14}},
+    e('div',{'data-hint-boundary':'',style:{display:'flex',flexDirection:'column',gap:14,paddingBottom:14}},
 
       // Unified prompt layout for "设置已修改，需要重新扫描" — jumps to 扫描 page.
       needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
@@ -2390,8 +2517,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ),
 
         e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
-          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2}},'CP 声纹（可选）'),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:8}},'频谱声纹开箱即用，不需要配置。Chromaprint 是第二种声纹，配置后会在频谱声纹之外额外做一次独立比对，两者互不影响、结果会分别标注，通常能找到频谱声纹漏掉的一些重复。同一份 Chromaprint 数据也会被「刮削匹配」里的 AcoustID 用到。'),
+          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2,display:'flex',alignItems:'center'}},'CP 声纹（可选）',e(Hint,{text:'频谱声纹开箱即用，不需要配置。Chromaprint 是第二种声纹，配置后会在频谱声纹之外额外做一次独立比对，两者互不影响、结果会分别标注，通常能找到频谱声纹漏掉的一些重复。同一份 Chromaprint 数据也会被「刮削匹配」里的 AcoustID 用到。'})),
           e('div',{style:{display:'flex',gap:6,maxWidth:460}},
             e('input',{value:s.fpcalc_path||'',
               onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
@@ -2417,8 +2543,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
             onChange:ev=>setS(p=>({...p,ignore_script_variant:ev.target.checked})),style:{marginTop:2}}),
           e('label',{htmlFor:'ignoreScript',style:{flex:1,cursor:'pointer'}},
-            e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)'}},'刮削分类 · 繁简忽略'),
-            e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},'判断标题/艺术家/专辑是否"精确匹配"时，忽略繁体与简体的写法差异（如 回到过去/回到過去 视为一致）。关闭后繁简不同会被归入「模糊匹配」。此项立即生效，无需重新扫描。')
+            e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},'刮削分类 · 繁简忽略',e(Hint,{text:'判断标题/艺术家/专辑是否"精确匹配"时，忽略繁体与简体的写法差异（如 回到过去/回到過去 视为一致）。关闭后繁简不同会被归入「模糊匹配」。此项立即生效，无需重新扫描。'})),
           )
         ),
 
@@ -2470,7 +2595,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-quality'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中按以下顺序决定保留哪个文件：① 音质档位（按本列表顺序）优先；② 相同则选年份最早的正式专辑（合辑/精选不算首发）；③ 仍相同则本地已收藏 ≥2 首的专辑版优先于单曲版；④ 最后比较标签完整度。'})),
+          e('div',{style:{flex:1}},e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中按以下顺序决定保留哪个文件：\n① 音质档位（按本列表顺序）优先\n② 相同则选年份最早的正式专辑（合辑/精选不算首发）\n③ 仍相同则本地已收藏 ≥2 首的专辑版优先于单曲版\n④ 最后比较标签完整度'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
         ),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
@@ -2484,18 +2609,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ))
       ),
 
-      // F-tags: every tag that can appear gets a visible description here —
-      // this section IS the reference, so it's not hidden behind hover.
-      e(Card,{id:'sec-tags'},
-        e(SH,{title:'重复组标签说明'}),
-        TAG_LEGEND.map(tag=>e('div',{key:tag,style:{display:'flex',gap:8,padding:'7px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
-          e(MatchTag,{tag,hideTooltip:true}),
-          e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
-        ))
-      ),
-
       e(WhitelistSection,{player,whitelistKey,onLocateFile,onLocate}),
-      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate}),
+      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate})
     )
   );
 }
@@ -2562,14 +2677,15 @@ function App(){
   const[pending,setPending]=useState(0);
   const[settings,setSettingsState]=useState(null);
   const[scanDoneKey,setScanDoneKey]=useState(0);
+  const[libraryKey,setLibraryKey]=useState(0);
   const[whitelistKey,setWhitelistKey]=useState(0);
   const[writeHistoryKey,setWriteHistoryKey]=useState(0);
   const player=useGlobalPlayer();
 
   function refreshStats(){
     api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.dupGroups||0);});
-    // Signal DuplicatesView to reload its list
     setScanDoneKey(k=>k+1);
+    setLibraryKey(k=>k+1);
   }
   const scan=useScanStream(refreshStats);
 
@@ -2705,10 +2821,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInWhitelist:fn=>{locateInWhitelistRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}}}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInWhitelist:fn=>{locateInWhitelistRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
