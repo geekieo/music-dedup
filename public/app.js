@@ -1085,7 +1085,7 @@ function PropsModal({fileId,onClose}){
 // Enter on the manual field saves immediately (no separate Add button for the
 // text). Browse button sits inside the right end of the same line. After any
 // dir change the default action is only an enumeration pass (no meta/fp/scrape)
-// so the library stays fast to update; a separate "智能执行" shortcut lets the
+// so the library stays fast to update; a separate "增量执行" shortcut lets the
 // user trigger a fuller scan without going to the 扫描 page.
 function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
   const[newDir,setNewDir]=useState('');
@@ -1538,9 +1538,10 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
    switches — see useScanStream().
    ══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
-  basic:  {label:'基础匹配',  sub:'',  desc:'枚举音频文件，读取文件属性（标题/艺术家/专辑/时长等）并据此比对重复。',icon:'tag',          steps:['enum','meta','basicMatch']},
-  fp:     {label:'声纹匹配',  sub:'',  desc:'计算频谱声纹，用于声纹一致/相似/不同的辅助参考；不同编码或母带间的相位差异会让分数偏低，所以它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
-  scrape: {label:'刮削匹配',  sub:'',  desc:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹识别；两个文件命中同一条录音即视为交叉确认。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
+  library:{label:'音乐库更新',sub:'',  desc:'依次执行「文件枚举」和「文件属性提取」两个步骤。枚举步骤扫描目录发现音频文件，属性提取步骤读取内嵌标签（标题/艺术家/专辑/时长等），更新本地音乐库索引。',icon:'folders',      steps:['enum','meta']},
+  basic:  {label:'基础匹配',  sub:'',  desc:'执行「属性匹配」步骤。按标题分组、结合艺术家与时长容差比对，输出重复候选组，不依赖声纹。',icon:'tag',          steps:['basicMatch']},
+  fp:     {label:'声纹匹配',  sub:'',  desc:'依次执行「声纹提取」和「声纹匹配」两个步骤。提取步骤计算音频频谱声纹，匹配步骤比对相似度。不同编码或母带间的相位差异会让分数偏低，因此它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
+  scrape: {label:'刮削匹配',  sub:'',  desc:'依次执行「刮削」和「刮削匹配」两个步骤。刮削步骤向 MusicBrainz 查询录音信息（可选叠加 AcoustID 声纹识别），匹配步骤比对两个文件是否命中同一条录音以交叉确认。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
 };
 function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
@@ -1576,8 +1577,8 @@ function ScannerView({scan}){
       danger:true,
     }),
 
-    // 3 lanes
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:12}},
+    // 4 lanes — "增量执行" + "高级" side by side; dropdown on "高级".
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:12}},
       Object.entries(LANE_META).map(([key,lm])=>{
         const isActive=status.running&&(runningLane===key||runningLane==='all');
         return e(Card,{key,style:{border:`0.5px solid ${isActive?'var(--amber)':'var(--bd-default)'}`}},
@@ -1590,37 +1591,54 @@ function ScannerView({scan}){
               lm.sub&&e('div',{style:{fontSize:10,color:'var(--tx-faint)'}},lm.sub)
             )
           ),
-          e('div',{style:{display:'flex',gap:5,alignItems:'center',marginTop:2}},
-            e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'智能执行'),
-            e('button',{
-              onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
-              title:'高级：强制重新执行（忽略缓存）',
-              style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},
-              e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
+          e('div',{style:{position:'relative',marginTop:2,zIndex:advanced[key]?100:'auto'}},
+            e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
+              e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'增量执行'),
+              e('button',{
+                onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
+                title:'高级：全量重新执行（忽略缓存）',
+                style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced[key]?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},
+                e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
+              )
+            ),
+            advanced[key]&&e('div',{
+              style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
+              e('button',{onClick:()=>{runLane(key,true);setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行'),
+              key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,title:'重新尝试之前刮削未命中的文件（含之前无 AcoustID Key 或未装 fpcalc 时跳过的文件），已成功匹配的文件不受影响',style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
             )
-          ),
-          advanced[key]&&e('button',{onClick:()=>runLane(key,true),disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'强制重新执行'),
-          // Retry only files that came back empty or were missed — without
-          // re-downloading everything that already matched fine.
-          advanced[key]&&key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});},disabled:status.running,title:'重新尝试之前刮削未命中的文件（含之前无 AcoustID Key 或未装 fpcalc 时跳过的文件），已成功匹配的文件不受影响',style:{marginTop:5,width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
+          )
         );
       })
     ),
 
-    // Full pipeline control
+    // Transparent backdrop — closes any open advanced dropdown when user
+    // clicks/touches/scrolls anywhere outside the button area.
+    Object.values(advanced).some(Boolean)&&e('div',{
+      onClick:()=>setAdvanced({}),
+      style:{position:'fixed',inset:0,zIndex:99}
+    }),
+
+    // Full pipeline control — label left, button group right.  Width
+    // calc(25% - 37.5px) exactly equals a single lane card's content
+    // width at any viewport, so the "增量执行" button matches the 4 above.
     e(Card,{style:{marginBottom:12}},
-      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
-        e('div',null,e('div',{style:{fontSize:13,fontWeight:600,marginBottom:2,display:'flex',alignItems:'center'}},'智能执行全部',e(Hint,{text:'依次执行枚举 → 文件属性 → 声纹 → 刮削 → 匹配，按文件修改时间与是否存在自动跳过未变更/已删除的文件。'})),
-        e('div',{style:{fontSize:11,color:'var(--tx-faint)'}},'三条匹配通道一次性全部完成')),
-        // Stretch the "强制全量重扫" button to match the button-pair width above.
-        e('div',{style:{display:'inline-flex',flexDirection:'column',alignItems:'stretch'}},
-          e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
-            e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running},'智能执行全部'),
-            e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'强制全量重扫（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
-          ),
-          advanced.all&&e('button',{onClick:()=>runAll(true),disabled:status.running,style:{marginTop:6,padding:'5px 10px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',justifyContent:'center',gap:4}},Icon('refresh',{fontSize:11}),'强制全量重扫')
+      e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
+        e('div',{style:{flex:1,minWidth:0}},
+          e('div',{style:{fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:5}},'全部扫描操作',e(Hint,{text:'依次执行全部 8 个步骤模块：文件枚举 → 文件属性提取 → 属性匹配 → 声纹提取 → 声纹匹配 → 刮削 → 刮削匹配，一次性完成从扫描到重复判定的完整流程。'})),
+        ),
+        e('div',{style:{width:'calc(25% - 37.5px)',flexShrink:0}},
+          e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
+            e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
+              e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'增量执行'),
+              e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'全量重新执行（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
+            ),
+            advanced.all&&e('div',{
+              style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
+              e('button',{onClick:()=>{runAll(true);setAdvanced(p=>({...p,all:false}));},disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行')
+            )
+          )
         )
-      )
+      ),
     ),
 
     // Progress — 暂停/继续/停止 alongside phase/percent/log output
