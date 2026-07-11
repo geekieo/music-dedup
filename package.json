@@ -1,6 +1,6 @@
 {
   "name": "musicdedup",
-  "version": "1.12.2",
+  "version": "1.12.3",
   "description": "本地重复音乐管理工具 — 纯JS声纹识别 + 智能保留策略",
   "type": "module",
   "main": "server.js",

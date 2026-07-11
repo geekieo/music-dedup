@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.12.3] — 2026-07-11
+
+### Changed
+
+- **扫描页通道拆分**：基础匹配拆分为「音乐库更新」（枚举 + 属性提取）和「基础匹配」（属性匹配），通道从 3 个扩展为 4 个
+- **"智能执行"→"增量执行"**：全局重命名，更准确描述按修改时间跳过未变更文件的增量行为
+- **全部扫描操作**：原"增量执行全部"改为「全部扫描操作」，去掉冗余副标题；右侧按钮同步改为「增量执行」，宽度与上方通道按钮一致
+- **"强制重新执行"/"强制全量重扫"→"全量重新执行"**：统一命名
+- **通道说明重构**：每个通道的 (i) 说明改为先介绍执行步骤模块（用「」标注），再描述功能
+- **高级按钮改为下拉叠窗**：点击「高级」不再改变卡片高度，而是在按钮下方弹出绝对定位的下拉菜单；点击页面其他位置自动收起（透明遮罩层实现）
+
+### Fixed
+
+- **刮削筛选与刮削操作标签一致**：`scrapedShapeFromRow` 从"选最优源"改为"合并双源"，推荐写入字段取两源并集，避免 AcoustID 有可写入字段但被 MB 源的绿色层级覆盖导致 blue→green 降级
+
 ## [1.12.2] — 2026-07-09
 
 ### Changed
