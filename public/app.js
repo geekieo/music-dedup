@@ -509,23 +509,21 @@ function QBadge({format:fmt,bitrate:br,sample_rate:sr}){
 // element instead of the viewport (used in settings cards to avoid overflow).
 function Hint({text,size=13}){
   const[show,setShow]=useState(false);
+  const[pinned,setPinned]=useState(false);
   const[tipStyle,setTipStyle]=useState({});
   const ref=useRef(null);
   if(!text)return null;
-  function onEnter(){
+  function calcStyle(){
     if(!ref.current)return;
     const r=ref.current.getBoundingClientRect();
     const tipW=320, gap=8;
-    // Find boundary ancestor (if any)
     let boundary=null;
     let el=ref.current.parentElement;
     while(el){if(el.hasAttribute&&el.hasAttribute('data-hint-boundary')){boundary=el;break;}el=el.parentElement;}
     const bbox=boundary?boundary.getBoundingClientRect():{left:0,top:0,right:window.innerWidth,bottom:window.innerHeight};
     const margin=16;
-    // Horizontal: center on icon, clamp within boundary
     let left=r.left+r.width/2-tipW/2;
     left=Math.max(bbox.left+margin,Math.min(left,bbox.right-tipW-margin));
-    // Vertical: prefer below, flip above if not enough room
     const below=r.bottom+gap;
     const above=r.top-gap;
     const estH=Math.min(200,text.length*0.4+40);
@@ -534,15 +532,32 @@ function Hint({text,size=13}){
       left,top:fitsBelow?below:'auto',bottom:!fitsBelow?window.innerHeight-above:'auto',
       maxWidth:tipW,
     });
-    setShow(true);
   }
-  return e('span',{style:{position:'relative',display:'inline-flex',marginLeft:5,verticalAlign:'middle'},
-    onMouseEnter:onEnter,onMouseLeave:()=>setShow(false)},
-    e('span',{ref,style:{display:'inline-flex',color:'var(--tx-faint)',cursor:'help',borderRadius:'50%',
-      transition:'all .15s',background:show?'var(--bg-muted)':'transparent'},
-      tabIndex:0,onFocus:()=>onEnter(),onBlur:()=>setShow(false)},
+  function open(){calcStyle();setShow(true);}
+  function close(){if(!pinned){setShow(false);}}
+  function togglePin(e){e.stopPropagation();calcStyle();setShow(true);setPinned(p=>!p);}
+  // dismiss pinned tooltip on outside click or scroll
+  useEffect(()=>{
+    if(!pinned)return;
+    function dismiss(e){
+      // ignore clicks inside the tooltip itself
+      if(ref.current&&ref.current.closest('.hint-wrap')&&e.target.closest('.hint-tip'))return;
+      setShow(false);setPinned(false);
+    }
+    document.addEventListener('click',dismiss,true);
+    window.addEventListener('scroll',dismiss,true);
+    return ()=>{
+      document.removeEventListener('click',dismiss,true);
+      window.removeEventListener('scroll',dismiss,true);
+    };
+  },[pinned]);
+  return e('span',{className:'hint-wrap',style:{position:'relative',display:'inline-flex',marginLeft:4,verticalAlign:'middle'},
+    onMouseEnter:open,onMouseLeave:close},
+    e('span',{ref,style:{display:'inline-flex',color:'var(--tx-faint)',cursor:'pointer',borderRadius:'50%',
+      transition:'all .15s',background:(show||pinned)?'var(--bg-muted)':'transparent'},
+      tabIndex:0,onFocus:open,onBlur:()=>{if(!pinned)setShow(false);},onClick:togglePin},
       Icon('info-circle',{fontSize:size})),
-    show&&e('div',{className:'fade',style:{position:'fixed',zIndex:10000,left:tipStyle.left,top:tipStyle.top,bottom:tipStyle.bottom,maxWidth:tipStyle.maxWidth,
+    show&&e('div',{className:'hint-tip fade',style:{position:'fixed',zIndex:10000,left:tipStyle.left,top:tipStyle.top,bottom:tipStyle.bottom,maxWidth:tipStyle.maxWidth,
       background:'#fff',color:'#1F2937',fontSize:12,lineHeight:1.75,whiteSpace:'pre-line',
       padding:'8px 12px',borderRadius:'var(--r-md)',fontWeight:400,
       boxShadow:'0 4px 20px rgba(0,0,0,.12), 0 0 0 0.5px rgba(0,0,0,.06)'}},
@@ -1587,7 +1602,7 @@ function ScannerView({scan}){
               isActive?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon(lm.icon,{fontSize:14,color:'var(--tx-faint)'})
             ),
             e('div',{style:{minWidth:0}},
-              e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center',gap:5}},lm.label,e(Hint,{text:lm.desc})),
+              e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center'}},lm.label,e(Hint,{text:lm.desc})),
               lm.sub&&e('div',{style:{fontSize:10,color:'var(--tx-faint)'}},lm.sub)
             )
           ),
@@ -1615,6 +1630,7 @@ function ScannerView({scan}){
     // clicks/touches/scrolls anywhere outside the button area.
     Object.values(advanced).some(Boolean)&&e('div',{
       onClick:()=>setAdvanced({}),
+      onWheel:()=>setAdvanced({}),
       style:{position:'fixed',inset:0,zIndex:99}
     }),
 
@@ -1622,14 +1638,18 @@ function ScannerView({scan}){
     // calc(25% - 37.5px) exactly equals a single lane card's content
     // width at any viewport, so the "增量执行" button matches the 4 above.
     e(Card,{style:{marginBottom:12}},
-      e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
         e('div',{style:{flex:1,minWidth:0}},
-          e('div',{style:{fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:5}},'全部扫描操作',e(Hint,{text:'依次执行全部 8 个步骤模块：文件枚举 → 文件属性提取 → 属性匹配 → 声纹提取 → 声纹匹配 → 刮削 → 刮削匹配，一次性完成从扫描到重复判定的完整流程。'})),
+          e('div',{style:{fontSize:13,fontWeight:600,display:'flex',alignItems:'center'}},
+            e('div',{style:{width:32,height:32,borderRadius:8,background:'var(--bg-muted)',border:'1.5px solid var(--bd-default)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginRight:9}},
+              Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
+            ),
+            '全部扫描操作',e(Hint,{text:'依次执行全局 8 个步骤：1.文件枚举 → 2.文件属性提取 → 3.属性匹配 → 4.声纹提取 → 5.频谱声纹匹配 → 6.CP声纹匹配 → 7.刮削 → 8.刮削匹配，一次性完成从扫描到重复判定的完整流程。'})),
         ),
         e('div',{style:{width:'calc(25% - 37.5px)',flexShrink:0}},
           e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
             e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
-              e(Btn,{icon:'radar',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'增量执行'),
+              e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'增量执行'),
               e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'全量重新执行（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
             ),
             advanced.all&&e('div',{
@@ -2359,6 +2379,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   const[reapplying,setReapplying]=useState(false);
   const[acoustidValidating,setAcoustidValidating]=useState(false);
   const[acoustidValidResult,setAcoustidValidResult]=useState(null); // null|{ok,error}
+  const[acoustidValidatedKey,setAcoustidValidatedKey]=useState(''); // last key that passed validation
   const[acoustidKeyDirty,setAcoustidKeyDirty]=useState(false);
   const[needsScrapeReapply,setNeedsScrapeReapply]=useState(false);
   const[fpcalc,setFpcalc]=useState(null);
@@ -2402,6 +2423,13 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       delete d.scan_dirs; // owned by App/props, not local state — avoid stale overwrite races
       setS(d);
       lastApplied.current={threshold:d.threshold,duration_tolerance:d.duration_tolerance,quality_tiers:JSON.stringify(d.quality_tiers)};
+      // validate stored AcoustID key against the actual API (not just assume valid)
+      const key=(d.acoustid_key||'').trim();
+      const lastValidated = localStorage.getItem('acoustid_validated_key') || '';
+      if(key && key === lastValidated){
+        setAcoustidValidatedKey(key);
+        setAcoustidValidResult({ok:true});
+      }
     });
   },[]);
 
@@ -2438,16 +2466,24 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
   const resetQ=()=>setS(p=>({...p,quality_tiers:[...DEFAULT_Q]}));
 
-  async function validateAcoustid(){
-    const key=(s?.acoustid_key||'').trim();
+  async function validateAcoustidKey(key,silent=false){
     if(!key)return;
+    const keyChanged = key !== acoustidValidatedKey;
     setAcoustidValidating(true);setAcoustidValidResult(null);
     try{
       const r=await api.post('/api/validate-acoustid',{key});
       setAcoustidValidResult(r);
-      if(r.ok){setAcoustidKeyDirty(false);setNeedsScrapeReapply(true);}
+      if(r.ok){
+        setAcoustidKeyDirty(false);
+        setAcoustidValidatedKey(key);
+        localStorage.setItem('acoustid_validated_key', key);
+        if(!silent && keyChanged) setNeedsScrapeReapply(true);
+      }
     }catch(e){setAcoustidValidResult({ok:false,error:'网络错误'});}
     finally{setAcoustidValidating(false);}
+  }
+  async function validateAcoustid(){
+    await validateAcoustidKey((s?.acoustid_key||'').trim());
   }
 
   const SI=()=>e('div',{style:{fontSize:11,height:26,display:'flex',alignItems:'center',gap:5}},
@@ -2527,9 +2563,9 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(Card,{id:'sec-fp'},
-        e(SH,{title:'声纹匹配',hint:'频谱声纹相似度阈值。不同编码/母带间的相位差异会让分数偏低，所以声纹只是辅助信号——标题、艺术家、时长已经一致的歌曲，即使声纹比对分数很低也仍会被判定为重复，只是会标注"声纹不同"而非"声纹一致/相似"。Chromaprint 声纹使用独立的硬编码阈值，不受此滑块影响。'}),
+        e(SH,{title:'声纹匹配',hint:'提取音频频谱声纹后交叉比对相似度。不同编码/母带间的相位差异会让分数偏低，因此声纹是辅助信号——标题、艺术家、时长已一致的歌曲仍会被判定为重复，仅标记「声纹不同」而非「声纹一致/相似」。Chromaprint 声纹使用独立阈值，不受下方滑块影响。'}),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)'}},'频谱声纹相似度阈值'),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'两条音轨的频谱声纹对比相似度达到此阈值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。注意：标题、艺术家、时长已一致的歌曲，即使低于此阈值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
         ),
@@ -2557,12 +2593,13 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       e(Card,{id:'sec-scrape'},
         e(SH,{title:'刮削匹配',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
 
-        e('div',{style:{display:'flex',alignItems:'flex-start',gap:8,padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
+        e('div',{style:{display:'flex',alignItems:'center',padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
-            onChange:ev=>setS(p=>({...p,ignore_script_variant:ev.target.checked})),style:{marginTop:2}}),
-          e('label',{htmlFor:'ignoreScript',style:{flex:1,cursor:'pointer'}},
-            e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},'刮削分类 · 繁简忽略',e(Hint,{text:'判断标题/艺术家/专辑是否"精确匹配"时，忽略繁体与简体的写法差异（如 回到过去/回到過去 视为一致）。关闭后繁简不同会被归入「模糊匹配」。此项立即生效，无需重新扫描。'})),
-          )
+            onChange:ev=>setS(p=>({...p,ignore_script_variant:ev.target.checked})),style:{marginRight:8,flexShrink:0}}),
+          e('label',{htmlFor:'ignoreScript',style:{cursor:'pointer'}},
+            e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)'}},'刮削分类 · 繁简忽略')
+          ),
+          e(Hint,{text:'判断标题/艺术家/专辑是否"精确匹配"时，忽略繁体与简体的写法差异（如 回到过去/回到過去 视为一致）。关闭后繁简不同会被归入「模糊匹配」。此项立即生效，无需重新扫描。'})
         ),
 
         e('div',{style:{marginBottom:12}},
@@ -2582,13 +2619,13 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
               e('div',{style:{fontSize:11,color:'var(--tx-secondary)',marginBottom:4,fontWeight:500}},'① AcoustID API Key'),
               e('div',{style:{display:'flex',gap:6}},
                 e('input',{value:s.acoustid_key||'',
-                  onChange:ev=>{setS(p=>({...p,acoustid_key:ev.target.value}));setAcoustidKeyDirty(true);setAcoustidValidResult(null);},
+                  onChange:ev=>{const v=ev.target.value;setS(p=>({...p,acoustid_key:v}));setAcoustidKeyDirty(true);if(v.trim()!==acoustidValidatedKey)setAcoustidValidResult(null);},
                   placeholder:'acoustid.org 注册应用获取',
                   style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
                 e(SettingStatus,{
                   state:acoustidValidating?'idle':acoustidValidResult?(acoustidValidResult.ok?'ok':'error'):'idle',
                   busy:acoustidValidating,
-                  message:acoustidValidating?'验证中...':acoustidValidResult?(acoustidValidResult.ok?'API Key 有效':(acoustidValidResult.error||'验证失败')):((s.acoustid_key||'').trim()?'点击验证 API Key':'请先填写 API Key'),
+                  message:acoustidValidating?'验证中...':acoustidValidResult?(acoustidValidResult.ok?'API Key 已验证':(acoustidValidResult.error||'验证失败')):((s.acoustid_key||'').trim()?'点击验证 API Key':'请先填写 API Key'),
                   onClick:(s.acoustid_key||'').trim()?validateAcoustid:undefined,
                 })
               )
@@ -2837,7 +2874,7 @@ function App(){
 
     // Main content — max-width centred column. Views are permanently mounted
     // (display:none when inactive) so tab switches don't re-fetch anything.
-    e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',display:'flex',justifyContent:'center'}},
+    e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',scrollbarGutter:'stable',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
         e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
