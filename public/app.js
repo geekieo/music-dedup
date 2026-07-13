@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.12.1';
+const APP_VERSION='1.12.3';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -1106,6 +1106,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
   const[newDir,setNewDir]=useState('');
   const[browsing,setBrowsing]=useState(false);
   const[err,setErr]=useState('');
+  const[removeIdx,setRemoveIdx]=useState(null);
   function commit(){if(!newDir.trim())return;onAddDir(newDir.trim());setNewDir('');}
   async function browse(){
     setErr('');setBrowsing(true);
@@ -1123,7 +1124,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
     dirs.map((d,i)=>e('div',{key:i,style:{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)',marginBottom:6}},
       Icon('folder-filled',{fontSize:13,color:'var(--amber)',flexShrink:0}),
       e('span',{title:d,style:{flex:1,fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},d),
-      e('button',{onClick:()=>onRemoveDir(i),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:'2px 4px',borderRadius:'var(--r-sm)'}},Icon('x',{fontSize:13}))
+      e('button',{onClick:()=>setRemoveIdx(i),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:'2px 4px',borderRadius:'var(--r-sm)'}},Icon('x',{fontSize:13}))
     )),
     e('div',{style:{display:'flex',borderRadius:'var(--r-md)',overflow:'hidden',marginBottom:6}},
       e('input',{value:newDir,onChange:ev=>setNewDir(ev.target.value),
@@ -1134,6 +1135,13 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
         Icon(browsing?'loader':'folder-open',{fontSize:12,color:'var(--tx-muted)'},browsing?'spin':undefined),'选择文件夹')
     ),
     err&&e('div',{style:{fontSize:11,color:'var(--red)',marginBottom:6}},err),
+    removeIdx!==null&&e(ConfirmModal,{
+      title:'移除音乐目录',
+      message:e('span',null,'确认移除该目录？\n\n',e('b',null,dirs[removeIdx])),
+      onConfirm:()=>onRemoveDir(removeIdx),
+      onClose:()=>setRemoveIdx(null),
+      danger:true,
+    }),
     onEnumOnly&&e('div',{style:{display:'none'}}) // button removed — caller decides when to show banner
   );
 }
@@ -1999,7 +2007,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640},
       e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
-        e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginBottom:10}},'匹配方法（判定重复的依据）'),
+        e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginBottom:10}},'重复匹配方法'),
         ['meta_confirmed','spectral_exact','same_recording','cp_exact','cp_similar','mb_confirmed','acoustid_confirmed'].map(tag=>{
           const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
           return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
@@ -2007,7 +2015,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
             e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
           );
         }),
-        e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginTop:16,marginBottom:10}},'组内其他特征标签（辅助判断信息）'),
+        e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginTop:16,marginBottom:10}},'其他组内特征'),
         CHARACTERISTIC_TAGS_ARRAY.map(tag=>{
           const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
           return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
@@ -2563,7 +2571,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(Card,{id:'sec-fp'},
-        e(SH,{title:'声纹匹配',hint:'提取音频频谱声纹后交叉比对相似度。不同编码/母带间的相位差异会让分数偏低，因此声纹是辅助信号——标题、艺术家、时长已一致的歌曲仍会被判定为重复，仅标记「声纹不同」而非「声纹一致/相似」。Chromaprint 声纹使用独立阈值，不受下方滑块影响。'}),
+        e(SH,{title:'声纹匹配',hint:'提取音频频谱声纹后交叉比对相似度。不同编码/母带间的相位差异会让声纹相似度偏低，标题、艺术家、时长已一致的歌曲仍会被判定为重复，仅标记「声纹不同」而非「声纹一致/相似」。默认提取 Goertzel 频谱声纹，配置 fpcalc 后可提取 Chromaprint 声纹。'}),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'两条音轨的频谱声纹对比相似度达到此阈值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。注意：标题、艺术家、时长已一致的歌曲，即使低于此阈值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
@@ -2584,7 +2592,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
               onClick:recheckFpcalc,
             })
           ),
-          e('div',{style:{marginTop:8,fontSize:11,color:'var(--tx-faint)'}},
+          e('div',{style:{marginTop:4,fontSize:11,color:'var(--tx-faint)'}},
             '下载地址：acoustid.org/chromaprint（对应你的系统，文件很小）。下载后把 fpcalc 放到本项目根目录，或在上面填入完整路径，两者任选一种。'
           )
         )
@@ -2604,14 +2612,11 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
         e('div',{style:{marginBottom:12}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:4}},Icon('world',{marginRight:5,fontSize:13}),'MusicBrainz'),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
-            Icon('check',{color:'var(--green)',marginRight:5}),'默认启用，无需配置，按文件属性精确匹配；属性极度不完整时退回标题模糊搜索。速率限制 1 次/秒。'
-          )
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},'默认启用，无需配置。按文件属性精确匹配，属性极度不完整时退回标题模糊搜索。速率限制 1 次/秒。')
         ),
         e('div',null,
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:6}},
-            Icon('key',{marginRight:5,fontSize:13}),'AcoustID',
-            e('span',{style:{marginLeft:8,fontSize:10,fontWeight:400,color:'var(--tx-faint)'}},'需同时满足下方两个条件')
+            Icon('key',{marginRight:5,fontSize:13}),'AcoustID（可选）'
           ),
           e('div',{style:{display:'flex',gap:14,flexWrap:'wrap'}},
             // Condition 1: API Key
