@@ -2569,7 +2569,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(Card,{id:'sec-fp'},
-        e(SH,{title:'声纹匹配',hint:'提取音频频谱声纹后交叉比对相似度。不同编码/母带间的相位差异会让声纹相似度偏低，标题、艺术家、时长已一致的歌曲仍会被判定为重复，仅标记「声纹不同」而非「声纹一致/相似」。默认提取 Goertzel 频谱声纹，配置 fpcalc 后可提取 Chromaprint 声纹。'}),
+        e(SH,{title:'声纹匹配',hint:'提取音频声纹后交叉比对相似度（滑动窗口对齐）。达到阈值即视为声纹匹配。内置 Goertzel 声纹开箱即用；配置 fpcalc 后可额外启用 Chromaprint 声纹独立比对。'}),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'两条音轨的频谱声纹对比相似度达到此阈值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。注意：标题、艺术家、时长已一致的歌曲，即使低于此阈值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
