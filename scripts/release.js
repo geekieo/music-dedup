@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 // npm run always executes from project root
 const PKG_PATH = join(process.cwd(), 'package.json');
 const CHANGELOG_PATH = join(process.cwd(), 'CHANGELOG.md');
+const APP_JS_PATH = join(process.cwd(), 'public', 'app.js');
 
 // ── helpers ──────────────────────────────────────────────
 
@@ -95,9 +96,15 @@ async function main() {
   // 4. update package.json
   pkg.version = newVersion;
   writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + '\n');
-  console.log(`\n✓ package.json → ${newVersion}`);
+  console.log(`✓ package.json → ${newVersion}`);
 
-  // 5. prepend placeholder to CHANGELOG.md
+  // 5. update APP_VERSION in public/app.js
+  let appJs = readFileSync(APP_JS_PATH, 'utf8');
+  appJs = appJs.replace(/const APP_VERSION='[\d.]+'/, `const APP_VERSION='${newVersion}'`);
+  writeFileSync(APP_JS_PATH, appJs);
+  console.log(`✓ public/app.js → ${newVersion}`);
+
+  // 6. prepend placeholder to CHANGELOG.md
   let changelog = readFileSync(CHANGELOG_PATH, 'utf8');
   const idx = changelog.indexOf('## [');
   if (idx === -1) {
@@ -127,9 +134,9 @@ async function main() {
   writeFileSync(CHANGELOG_PATH, changelog);
   console.log('✓ CHANGELOG.md — placeholder inserted');
 
-  // 6. git commit + tag
+  // 7. git commit + tag
   console.log('');
-  execSync('git add package.json CHANGELOG.md', { stdio: 'inherit', windowsHide: true });
+  execSync('git add package.json public/app.js CHANGELOG.md', { stdio: 'inherit', windowsHide: true });
   execSync(`git commit -m "chore: release ${tag}"`, { stdio: 'inherit', windowsHide: true });
   execSync(`git tag -a ${tag} -m "${tag}"`, { stdio: 'inherit', windowsHide: true });
 
