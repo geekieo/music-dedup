@@ -386,9 +386,7 @@ function PlayerBar({player,onLocate}){
     :seekTargetRef.current!==null&&duration?seekTargetRef.current/duration*100
     :pct;
   const thumbPct=Math.max(0.5,Math.min(99.5,fillPct));
-  const timeLabel=isDragging
-    ?`${fmtDur(fillPct/100*(duration||0))} / ${fmtDur(duration)}`
-    :fmtDur(fillPct/100*(duration||0));
+  const timeLabel=`${fmtDur(fillPct/100*(duration||0))} / ${fmtDur(duration)}`;
 
   return e('div',{className:'fade',style:{flexShrink:0,background:'var(--bg-base)',borderTop:'0.5px solid var(--bd-default)',boxShadow:'0 -1px 8px rgba(0,0,0,.06)',zIndex:10}},
 
@@ -2028,7 +2026,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
     // Filter bar: matching-method tags (how the group was discovered)
-    filterTags.length>0&&e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+    e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
       e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选（可多选）：'),
       filterTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
@@ -2042,7 +2040,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       }, Icon('info-circle',{fontSize:12}), '标签说明'),
     ),
     // Second row: characteristic tags (what the group looks like) + clear button
-    charTags.length>0&&e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+    e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
       e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征（可多选）：'),
       charTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
