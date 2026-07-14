@@ -14,7 +14,7 @@ import {
   getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
-import { runMatcher, runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.js';
+import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
@@ -527,8 +527,6 @@ app.post('/api/scan/start', async(req,res)=>{
     }
     // 步骤8: 刮削匹配（recording ID 对比）
     if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
-    // 全量匹配（向后兼容，= 步骤3+5+6+8）
-    if(steps.includes('match')&&!abort())await runMatcher(db,{threshold,durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
