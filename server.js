@@ -2,7 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { createReadStream, existsSync, statSync } from 'fs';
+import { createReadStream, existsSync, statSync, renameSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 
@@ -50,10 +50,24 @@ function broadcast(data) {
   for (const res of sseClients) { try { res.write(payload); } catch {} }
 }
 
+const LRC_EXTS = new Set(['.lrc','.txt','.lyric','.ass','.srt','.smi','.vtt']);
+
 async function trashFile(fp) {
-  try { const { default: trash } = await import('trash'); await trash(fp); return { ok:true }; }
-  catch { try { const { renameSync } = await import('fs'); renameSync(fp, fp+'.deleted'); return { ok:true, method:'renamed' }; }
-          catch (e) { return { ok:false, error:e.message }; } }
+  const results=[];
+  const doTrash=p=>{
+    try{renameSync(p,p+'.deleted');return{ok:true};}
+    catch(e){return{ok:false,error:e.message};}
+  };
+  // Trash the main file
+  results.push({path:fp,...doTrash(fp)});
+  // Trash matching lyric files (same basename, different ext)
+  const dir=path.dirname(fp);
+  const base=path.basename(fp,path.extname(fp));
+  for(const ext of LRC_EXTS){
+    const lrcPath=path.join(dir,base+ext);
+    if(existsSync(lrcPath)) results.push({path:lrcPath,...doTrash(lrcPath)});
+  }
+  return results;
 }
 
 function revealInExplorer(fp) {
@@ -137,7 +151,7 @@ app.get('/api/library/locate/:id', (req,res)=>{
 
 // ── Files ─────────────────────────────────────────────────────────────────
 app.get('/api/files/:id', (req,res)=>{ const f=getFileById(db,+req.params.id); f?res.json({ok:true,data:f}):res.status(404).json({ok:false,error:'Not found'}); });
-app.post('/api/files/:id/reveal', async(req,res)=>{ const f=getFileById(db,+req.params.id); if(!f)return res.status(404).json({ok:false}); await revealInExplorer(f.path); res.json({ok:true}); });
+app.post('/api/files/:id/reveal', async(req,res)=>{ const f=getFileById(db,+req.params.id); if(!f)return res.status(404).json({ok:false}); const fp=existsSync(f.path)?f.path:(existsSync(f.path+'.deleted')?f.path+'.deleted':f.path); await revealInExplorer(fp); res.json({ok:true}); });
 
 app.get('/api/files/:id/stream', (req,res)=>{
   const f = getFileById(db,+req.params.id);
@@ -315,15 +329,126 @@ app.get('/api/duplicates/:id', (req,res)=>{
 });
 app.post('/api/duplicates/:id/resolve', async(req,res)=>{
   const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
-  const dels=g.tracks.filter(t=>!t.keep); const results=[];
-  for(const t of dels){ results.push(existsSync(t.path)?{path:t.path,...await trashFile(t.path)}:{path:t.path,ok:true,method:'missing'}); }
+  const dels=g.tracks.filter(t=>!t.keep);
+  if(dels.length===0) return res.status(400).json({ok:false,error:'该组没有需要删除的文件——所有曲目均为保留状态，无需处理。'});
+  const results=[];
+  for(const t of dels){
+    if(!existsSync(t.path)){ results.push({path:t.path,ok:true,method:'missing'}); continue; }
+    const r=await trashFile(t.path); results.push(...r);
+  }
   resolveGroup(db,+req.params.id); res.json({ok:true,deleted:results});
 });
 app.post('/api/duplicates/resolve-all', async(req,res)=>{
-  const pending=getGroups(db,{resolved:false}); let del=0,err=0;
-  for(const g of pending){ const d=getGroupDetail(db,g.id); if(!d)continue; for(const t of d.tracks.filter(t=>!t.keep)){if(existsSync(t.path)){const r=await trashFile(t.path);r.ok?del++:err++;}} resolveGroup(db,g.id); }
+  const ids=req.body?.ids; // optional: only resolve specific group IDs
+  const pending=getGroups(db,{resolved:false}).filter(g=>!ids||ids.includes(g.id));
+  let del=0,err=0;
+  for(const g of pending){
+    const d=getGroupDetail(db,g.id); if(!d)continue;
+    const dels=d.tracks.filter(t=>!t.keep);
+    if(dels.length===0) continue;
+    for(const t of dels){
+      if(!existsSync(t.path)) continue;
+      const results=await trashFile(t.path);
+      for(const r of results) r.ok?del++:err++;
+    }
+    resolveGroup(db,g.id);
+  }
   res.json({ok:true,deletedCount:del,errorCount:err,groupsProcessed:pending.length});
 });
+// 撤销：恢复 .deleted 文件，标记组为未处理
+app.post('/api/duplicates/:id/unresolve', (req,res)=>{
+  const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
+  const restored=[], failed=[];
+  for(const t of g.tracks.filter(t=>!t.keep)){
+    // Restore main file
+    const delPath=t.path+'.deleted';
+    if(existsSync(delPath)){ try{renameSync(delPath,t.path);restored.push(t.path);}catch(e){failed.push({path:t.path,error:e.message});} }
+    // Restore matching lyric files
+    const dir=path.dirname(t.path);
+    const base=path.basename(t.path,path.extname(t.path));
+    for(const ext of LRC_EXTS){
+      const lrcDel=path.join(dir,base+ext+'.deleted');
+      if(existsSync(lrcDel)){ try{renameSync(lrcDel,path.join(dir,base+ext));restored.push(lrcDel);}catch(e){failed.push({path:lrcDel,error:e.message});} }
+    }
+  }
+  db.run('UPDATE dup_groups SET resolved=0,resolved_time=NULL WHERE id=?',[+req.params.id]);
+  res.json({ok:true,restored,failed});
+});
+// 批量撤销
+app.post('/api/duplicates/unresolve-all', (req,res)=>{
+  const ids=req.body?.ids;
+  const groups=getGroups(db,{resolved:true}).filter(g=>!ids||ids.includes(g.id));
+  let totalRestored=0, groupsRestored=0;
+  for(const g of groups){
+    const d=getGroupDetail(db,g.id); if(!d)continue;
+    let restored=[];
+    for(const t of d.tracks.filter(t=>!t.keep)){
+      const delPath=t.path+'.deleted';
+      if(existsSync(delPath)){ try{renameSync(delPath,t.path);restored.push(t.path);}catch(e){} }
+      const dir2=path.dirname(t.path);
+      const base2=path.basename(t.path,path.extname(t.path));
+      for(const ext of LRC_EXTS){
+        const lrcDel=path.join(dir2,base2+ext+'.deleted');
+        if(existsSync(lrcDel)){ try{renameSync(lrcDel,path.join(dir2,base2+ext));restored.push(lrcDel);}catch(e){} }
+      }
+    }
+    db.run('UPDATE dup_groups SET resolved=0,resolved_time=NULL WHERE id=?',[g.id]);
+    groupsRestored++;
+    totalRestored+=restored.length;
+  }
+  res.json({ok:true,restoredCount:totalRestored,groupsRestored});
+});
+// 彻底删除已处理组的 .deleted 文件（单组）
+app.post('/api/duplicates/:id/purge', (req,res)=>{
+  const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
+  if(!g.resolved)return res.status(400).json({ok:false,error:'该组尚未处理'});
+  const result=purgeGroupFiles(db,g);
+  res.json({ok:true,...result});
+});
+// 清空回收站：永久删除所有已处理组的 .deleted 文件 + 清理数据库
+app.post('/api/trash/empty', (req,res)=>{
+  const ids=req.body?.ids;
+  const groups=getGroups(db,{resolved:true}).filter(g=>!ids||ids.includes(g.id));
+  let totalDeleted=0, totalFailed=0, totalRemoved=0;
+  for(const g of groups){
+    const d=getGroupDetail(db,g.id); if(!d)continue;
+    const r=purgeGroupFiles(db,d);
+    totalDeleted+=r.deletedCount;
+    totalFailed+=r.failedCount;
+    if(r.groupRemoved) totalRemoved++;
+  }
+  res.json({ok:true,deletedCount:totalDeleted,failedCount:totalFailed,groupsRemoved:totalRemoved,totalGroups:groups.length});
+});
+
+function purgeGroupFiles(db, g) {
+  let deleted=0, failed=0;
+  const purgeIds=[];
+  for(const t of g.tracks.filter(t=>!t.keep)){
+    const delPath=t.path+'.deleted';
+    if(existsSync(delPath)){ try{unlinkSync(delPath);deleted++;}catch(e){failed++;} }
+    const dir=path.dirname(t.path);
+    const base=path.basename(t.path,path.extname(t.path));
+    for(const ext of LRC_EXTS){
+      const lrcDel=path.join(dir,base+ext+'.deleted');
+      if(existsSync(lrcDel)){ try{unlinkSync(lrcDel);deleted++;}catch(e){failed++;} }
+    }
+    purgeIds.push(t.id);
+  }
+  // Remove purged tracks from group_tracks; if file has no other group refs, remove from files
+  for(const fid of purgeIds){
+    db.run('DELETE FROM group_tracks WHERE group_id=? AND file_id=?',[g.id,fid]);
+    const refs=db.get('SELECT COUNT(*) n FROM group_tracks WHERE file_id=?',[fid]);
+    if(!refs||refs.n===0) db.run('DELETE FROM files WHERE id=?',[fid]);
+  }
+  // If <2 tracks remain, group is no longer a duplicate → remove entirely
+  const remaining=db.all('SELECT file_id FROM group_tracks WHERE group_id=?',[g.id]);
+  const groupRemoved=remaining.length<2;
+  if(groupRemoved){
+    db.run('DELETE FROM group_tracks WHERE group_id=?',[g.id]);
+    db.run('DELETE FROM dup_groups WHERE id=?',[g.id]);
+  }
+  return {deletedCount:deleted,failedCount:failed,groupRemoved};
+}
 app.put('/api/duplicates/:id/tracks/:fid/keep', (req,res)=>{
   const gid=+req.params.id, fid=+req.params.fid; const {keep,reason}=req.body;
   const g=getGroupDetail(db,gid); if(!g)return res.status(404).json({ok:false});
@@ -456,7 +581,7 @@ app.post('/api/validate-acoustid', async(req,res)=>{
 app.get('*', (_,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 app.listen(PORT, HOST, ()=>{
-  console.log(`\n🎵  MusicDedup 已启动`);
+  console.log(`🎵  MusicDedup 已启动`);
   console.log(`   本地访问: http://localhost:${PORT}`);
   console.log(`   数据库:   ${process.env.DB_PATH||'data/musicdedup.db'}`);
   console.log(`   按 Ctrl+C 退出服务\n`);
