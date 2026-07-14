@@ -1647,8 +1647,8 @@ function ScannerView({scan}){
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
         e('div',{style:{flex:1,minWidth:0}},
           e('div',{style:{fontSize:13,fontWeight:600,display:'flex',alignItems:'center'}},
-            e('div',{style:{width:32,height:32,borderRadius:8,background:'var(--bg-muted)',border:'1.5px solid var(--bd-default)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginRight:9}},
-              Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
+            e('div',{style:{width:32,height:32,borderRadius:8,background:(status.running&&runningLane==='all')?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${(status.running&&runningLane==='all')?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginRight:9}},
+              (status.running&&runningLane==='all')?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
             ),
             '全部扫描操作',e(Hint,{text:'依次执行全局 8 个步骤：1.文件枚举 → 2.文件属性提取 → 3.属性匹配 → 4.声纹提取 → 5.频谱声纹匹配 → 6.CP声纹匹配 → 7.刮削 → 8.刮削匹配，一次性完成从扫描到重复判定的完整流程。'})),
         ),
