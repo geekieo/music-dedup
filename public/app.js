@@ -1673,7 +1673,7 @@ function ScannerView({scan}){
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}},
         e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
           status.paused&&Icon('pause',{fontSize:12,color:'var(--amber)'}),
-          status.paused?'已暂停':({idle:'就绪',enum:'文件枚举',meta:'文件属性提取',fp:'声纹提取',matching:'相似度匹配',scrape:'刮削',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
+          status.paused?'已暂停':({idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
         ),
         e('div',{style:{display:'flex',alignItems:'center',gap:10}},
           status.running&&e('div',{style:{display:'flex',gap:6}},
@@ -2849,7 +2849,7 @@ function App(){
   // onMatchAffectingChange only fires from a manual button — no auto-fire
   // on Settings keystrokes. Also jumps to 扫描 page for progress visibility.
   const onMatchAffectingChange=useCallback(()=>{
-    scan.startStep(['match'],false,'设置变更后重新匹配');
+    scan.startStep(['basicMatch','fpMatch','scrapeMatch'],false,'设置变更后重新匹配');
     setView('scanner');
   },[scan]);
   const onScrapeReapply=useCallback(()=>{
