@@ -1859,7 +1859,10 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   const[detailLoading,setDetailLoading]=useState(false);
   const[listLoading,setListLoading]=useState(true);
   const[toast,setToast]=useState(null);
-  const[showBatch,setShowBatch]=useState(false);
+  const[showEmptyTrash,setShowEmptyTrash]=useState(false);
+  const[showBatchResolve,setShowBatchResolve]=useState(false);
+  const[showBatchUnresolve,setShowBatchUnresolve]=useState(false);
+  const[purgeConfirm,setPurgeConfirm]=useState(null); // {id, count} for per-group permanent delete
   const[propsId,setPropsId]=useState(null);
   const[scrapeId,setScrapeId]=useState(null);
   const prevScanDoneKey=useRef(0);
@@ -1952,10 +1955,18 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
   async function resolve(id){
     const r=await api.post('/api/duplicates/'+id+'/resolve');
-    if(r.ok){setToast({msg:`已处理，删除 ${r.deleted?.length||0} 个文件`,type:'success'});loadList();if(detail?.id===id)setDetail(d=>d?{...d,resolved:1}:d);setPendingCount(n=>Math.max(0,(n||1)-1));}
+    if(r.ok){setToast({msg:`已放入回收站，删除 ${r.deleted?.length||0} 个文件`,type:'success'});loadList();if(detail?.id===id)setDetail(d=>d?{...d,resolved:1}:d);setPendingCount(n=>Math.max(0,(n||1)-1));}
+    else setToast({msg:r.error||'操作失败',type:'warn'});
+  }
+  async function unresolve(id){
+    const r=await api.post('/api/duplicates/'+id+'/unresolve');
+    if(r.ok){setToast({msg:r.restored?.length?`已恢复 ${r.restored.length} 个文件`:r.failed?.length?'部分文件恢复失败':'已撤销处理',type:'success'});loadList();setDetail(null);}
     else setToast({msg:'操作失败: '+(r.error||''),type:'error'});
   }
-  async function resolveAll(){setShowBatch(false);const r=await api.post('/api/duplicates/resolve-all');if(r.ok){setToast({msg:`批量完成，删除 ${r.deletedCount} 个文件`,type:'success'});loadList();setPendingCount(0);}else setToast({msg:'失败',type:'error'});}
+  async function unresolveAll(){setShowBatchUnresolve(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/duplicates/unresolve-all',{ids});if(r.ok){setToast({msg:`已恢复 ${r.restoredCount} 个文件，${r.groupsRestored} 组`,type:'success'});loadList();}else setToast({msg:'批量撤销失败',type:'error'});}
+  async function resolveAll(){setShowBatchResolve(false);const ids=visiblePending.map(g=>g.id);const r=await api.post('/api/duplicates/resolve-all',{ids});if(r.ok){setToast({msg:`批量完成，放入回收站 ${r.deletedCount} 个文件`,type:'success'});loadList();setPendingCount(0);}else setToast({msg:r.error||'失败',type:'error'});}
+  async function emptyTrash(){setShowEmptyTrash(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/trash/empty',{ids});if(r.ok){setToast({msg:`已永久删除 ${r.deletedCount} 个文件${r.groupsRemoved?`，${r.groupsRemoved} 个组已清理`:''}`,type:'success'});loadList();if(r.groupsRemoved>0)setSelId(null);}else setToast({msg:'清空失败',type:'error'});}
+  async function purgeGroup(id){const r=await api.post('/api/duplicates/'+id+'/purge');if(r.ok){setToast({msg:r.groupRemoved?`已彻底删除并清理该组`:`已彻底删除 ${r.deletedCount} 个文件`,type:'success'});loadList();if(r.groupRemoved){setDetail(null);setSelId(null);}}else setToast({msg:'删除失败',type:'error'});}
   async function toggleTrack(gid,fid,keep,reason){const r=await api.put(`/api/duplicates/${gid}/tracks/${fid}/keep`,{keep,reason});if(r.ok)setDetail(r.data);}
   // Guard for keep-toggle: ensures at least one non-whitelisted keep remains,
   // shows a confirm dialog (with "don't ask again this session" checkbox).
@@ -1977,7 +1988,9 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   // not from all pending groups — so the count/bytes update when the user
   // applies a tag or search filter (previously showed unfiltered total always).
   const visiblePending=visibleGroups.filter(g=>!g.resolved);
+  const visibleResolved=visibleGroups.filter(g=>g.resolved);
   const savings=visiblePending.reduce((a,g)=>a+(g.savings_bytes||0),0);
+  const resolvedSavings=visibleResolved.reduce((a,g)=>a+(g.savings_bytes||0),0);
 
   const GH='calc(100vh - 260px)';
 
@@ -2076,22 +2089,62 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
           e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索曲名、艺术家...',style:{width:160,paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontSize:11}})
         )
       ),
-      filter!=='done'&&visiblePending.length>0&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
+      filter==='pending'&&visiblePending.length>0&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
         e('span',{style:{fontSize:11,color:'var(--tx-faint)'}},`${visiblePending.length} 组 · ${fmtBytes(savings)}`),
-        e(Btn,{onClick:()=>setShowBatch(true),icon:'checks',small:true},'批量确认全部')
+        e(Btn,{onClick:()=>setShowBatchResolve(true),icon:'trash',small:true},'批量放入回收站')
+      ),
+      filter==='done'&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
+        e(Btn,{onClick:()=>setShowBatchUnresolve(true),icon:'arrow-back-up',small:true,variant:'ghost'},'批量撤销'),
+        e(Btn,{onClick:()=>setShowEmptyTrash(true),icon:'trash',small:true,variant:'ghost'},'清空回收站')
       )
     ),
 
-    showBatch&&e('div',{className:'fade',style:{background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}},
-      e('div',{style:{flex:1}},e('div',{style:{fontSize:13,fontWeight:600,color:'#92400E',marginBottom:3}},'确认批量操作'),e('div',{style:{fontSize:12,color:'#A16207'}},'处理 ',e('b',null,visiblePending.length),' 个重复组，释放约 ',e('b',null,fmtBytes(savings)),'，文件移入回收站。')),
-      e('div',{style:{display:'flex',gap:8}},e(Btn,{onClick:resolveAll,icon:'check'},'确认'),e(Btn,{variant:'ghost',onClick:()=>setShowBatch(false),icon:'x'},'取消'))
-    ),
+    showEmptyTrash&&e(ConfirmModal,{
+      title:'清空回收站',
+      message:e('span',null,
+        '将永久删除 ',e('b',null,visibleResolved.length),' 个已处理组的 .deleted 文件',
+        resolvedSavings>0?e('span',null,'（约 ',fmtBytes(resolvedSavings),'）'):null,
+        '。',e('br'),e('br'),
+        '此操作不可撤销。确定要继续吗？'),
+      onConfirm:emptyTrash,
+      onClose:()=>setShowEmptyTrash(false),
+      danger:true,
+    }),
+    showBatchResolve&&e(ConfirmModal,{
+      title:'批量放入回收站',
+      message:e('span',null,
+        '将处理 ',e('b',null,visiblePending.length),' 个重复组，',
+        '释放约 ',e('b',null,fmtBytes(savings)),'。',e('br'),e('br'),
+        '文件将被重命名为 .deleted，需要时可撤销恢复。'),
+      onConfirm:resolveAll,
+      onClose:()=>setShowBatchResolve(false),
+      danger:true,
+    }),
+    showBatchUnresolve&&e(ConfirmModal,{
+      title:'批量撤销',
+      message:e('span',null,
+        '将恢复 ',e('b',null,visibleResolved.length),' 个已处理组的 .deleted 文件',
+        resolvedSavings>0?e('span',null,'（约 ',fmtBytes(resolvedSavings),'）'):null,
+        '。',e('br'),e('br'),
+        '确定要继续吗？'),
+      onConfirm:unresolveAll,
+      onClose:()=>setShowBatchUnresolve(false),
+    }),
+    purgeConfirm&&e(ConfirmModal,{
+      title:'彻底删除',
+      message:e('span',null,
+        '将永久删除此组 ',e('b',null,purgeConfirm.count),' 个 .deleted 文件。',e('br'),e('br'),
+        '此操作不可撤销。确定要继续吗？'),
+      onConfirm:()=>{const id=purgeConfirm.id;setPurgeConfirm(null);purgeGroup(id);},
+      onClose:()=>setPurgeConfirm(null),
+      danger:true,
+    }),
 
     e('div',{style:{display:'grid',gridTemplateColumns:'240px 1fr',gap:12,height:GH}},
 
       e('div',{style:{overflowY:'auto',height:'100%',paddingRight:2}},
         listLoading?e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
-        visibleGroups.length===0?e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:'20px 0',textAlign:'center',lineHeight:1.8}},(tagFilter.size||search.trim())?'当前筛选条件无结果':filter==='pending'?'无待处理组\n请先执行扫描':'暂无数据'):
+        visibleGroups.length===0?e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:'20px 0',textAlign:'center',lineHeight:1.8}},(tagFilter.size||search.trim())?'当前筛选条件无结果':filter==='pending'?'无待处理组\n请先执行扫描':filter==='done'?'暂无已处理组':'暂无数据'):
         e('div',null,
           visibleGroups.slice(0,displayCount).map(g=>{
           const isSel=g.id===selId;
@@ -2129,8 +2182,17 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
                   ...(detail.match_tags||'').split(',').filter(Boolean).map(t=>e(MatchTag,{key:t,tag:t}))
                 )
               ),
-              detail.resolved?e(Btn,{variant:'success',icon:'circle-check',disabled:true},'已处理'):
-              e(Btn,{icon:'check',onClick:()=>resolve(detail.id)},`确认删除 ${detail.tracks?.filter(t=>!t.keep&&!t.whitelisted).length||0} 个`)
+              detail.resolved?
+                (()=>{
+                  const dels=detail.tracks?.filter(t=>!t.keep)||[];
+                  return e('div',{style:{display:'flex',gap:6}},
+                    e('span',{style:{fontSize:11,fontWeight:500,color:'var(--green)',background:'var(--green-bg)',border:'0.5px solid var(--green-bd)',borderRadius:'var(--r-md)',padding:'4px 10px',display:'inline-flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-circle-check',style:{fontSize:13}}),dels.length?'已处理':'已清理'),
+                    dels.length>0&&e(Btn,{variant:'ghost',icon:'arrow-back-up',small:true,onClick:()=>unresolve(detail.id)},'撤销'),
+                    dels.length>0&&e(Btn,{variant:'ghost',icon:'trash',small:true,onClick:()=>setPurgeConfirm({id:detail.id,count:dels.length})},'彻底删除')
+                  );
+                })()
+              :
+                (()=>{const dels=detail.tracks?.filter(t=>!t.keep&&!t.whitelisted)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
             ),
 
             e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'10px 12px',marginBottom:12}},
