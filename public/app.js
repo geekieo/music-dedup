@@ -1709,11 +1709,13 @@ function ScannerView({scan}){
    ══════════════════════════════════════════════════════════════════════ */
 /* TrackRow — redesigned layout (item 3):
    LEFT  : play button + cover art thumbnail
-   MIDDLE: title + quality badge + (keep_reason tag inline with title on the KEPT track)
+   MIDDLE: title + quality badge + dimension tags (quality_best/scrape_best/...)
            subtitle line: artist · album | bitrate/size info
            path on hover/truncated
    RIGHT : keep-toggle button (✓ or ✗) + secondary actions
 */
+const TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削一致',meta_best:'属性最全',release_best:'年份更早'};
+const TAG_COLOR={quality_best:'var(--amber)',scrape_best:'var(--green)',meta_best:'#3B82F6',release_best:'#7C3AED'};
 function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,queue,isKept}){
   const keep=!!track.keep,wl=!!track.whitelisted;
   const isCur=player?.current?.id===track.id;
@@ -1752,12 +1754,7 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,
           e(QBadge,{format:track.format,bitrate:track.bitrate,sample_rate:track.sample_rate}),
           wl&&e(Tag,{children:'白名单',color:'var(--tx-faint)'}),
           track.release_type==='single'&&e(Tag,{children:'单曲'}),
-          // Decision reason tag inline with title ON THE KEPT TRACK ONLY
-          isKept&&track.keep_reason&&e('span',{
-            style:{fontSize:10,padding:'1px 7px',borderRadius:3,background:'var(--green-bg)',
-              color:'var(--green)',border:'0.5px solid var(--green-bd)',whiteSpace:'nowrap',flexShrink:0}},
-            '✓ '+track.keep_reason
-          )
+          (track._tags||[]).map(t=>e(Tag,{key:t,children:TAG_LABEL[t]||t,color:TAG_COLOR[t]||'var(--tx-faint)'}))
         ),
         e('div',{style:{fontSize:11,color:'var(--tx-secondary)',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
           track.artist&&e('span',null,track.artist),
