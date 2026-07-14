@@ -1098,7 +1098,7 @@ function PropsModal({fileId,onClose}){
 // Enter on the manual field saves immediately (no separate Add button for the
 // text). Browse button sits inside the right end of the same line. After any
 // dir change the default action is only an enumeration pass (no meta/fp/scrape)
-// so the library stays fast to update; a separate "增量执行" shortcut lets the
+// so the library stays fast to update; a separate "执行" shortcut lets the
 // user trigger a fuller scan without going to the 扫描 page.
 function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
   const[newDir,setNewDir]=useState('');
@@ -1598,7 +1598,7 @@ function ScannerView({scan}){
       danger:true,
     }),
 
-    // 4 lanes — "增量执行" + "高级" side by side; dropdown on "高级".
+    // 4 lanes — "执行" + "高级" side by side; dropdown on "高级".
     e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:12}},
       Object.entries(LANE_META).map(([key,lm])=>{
         const isActive=status.running&&(runningLane===key||runningLane==='all');
@@ -1614,7 +1614,7 @@ function ScannerView({scan}){
           ),
           e('div',{style:{position:'relative',marginTop:2,zIndex:advanced[key]?100:'auto'}},
             e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
-              e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'增量执行'),
+              e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'执行'),
               e('button',{
                 onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
                 title:'高级：全量重新执行（忽略缓存）',
@@ -1642,7 +1642,7 @@ function ScannerView({scan}){
 
     // Full pipeline control — label left, button group right.  Width
     // calc(25% - 37.5px) exactly equals a single lane card's content
-    // width at any viewport, so the "增量执行" button matches the 4 above.
+    // width at any viewport, so the "执行" button matches the 4 above.
     e(Card,{style:{marginBottom:12}},
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
         e('div',{style:{flex:1,minWidth:0}},
@@ -1655,7 +1655,7 @@ function ScannerView({scan}){
         e('div',{style:{width:'calc(25% - 37.5px)',flexShrink:0}},
           e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
             e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
-              e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'增量执行'),
+              e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'执行'),
               e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'全量重新执行（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
             ),
             advanced.all&&e('div',{
