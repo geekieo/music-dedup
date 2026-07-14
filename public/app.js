@@ -1580,7 +1580,7 @@ function ScannerView({scan}){
     startStep(lm.steps,false,lm.label);
   }
   function runAll(force=false){
-    const steps=['enum','meta','fp','scrape','match'];
+    const steps=['enum','meta','basicMatch','fp','fpMatch','scrape','scrapeMatch'];
     if(force){setConfirm({steps,force:true,label:'完整扫描',lane:'all'});return;}
     setRunningLane('all');
     startStep(steps,false,'完整扫描');
@@ -2756,7 +2756,7 @@ function useScanStream(onDone){
         if(d.message){
           setLogs(p=>{
             if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
-            const ty=d.phase==='done'?'done':d.phase==='error'?'err':d.pct>=85?'ok':'info';
+            const ty=d.phase==='done'?'done':d.phase==='error'?'err':/^(正在|开始|加载|准备|.*阶段)/.test(d.message)?'info':'ok';
             return[...p.slice(-500),{msg:d.message,ty,ts:Date.now()}];
           });
         }

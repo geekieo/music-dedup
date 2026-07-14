@@ -523,7 +523,6 @@ app.post('/api/scan/start', async(req,res)=>{
     // 步骤7: 刮削
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
-      if(acoustidKey) prog({phase:'scrape',pct:0,message:'AcoustID 已配置，将结合 Chromaprint 声纹（fpcalc）进行刮削匹配...'});
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     // 步骤8: 刮削匹配（recording ID 对比）
