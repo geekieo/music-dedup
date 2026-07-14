@@ -19,6 +19,7 @@ import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
 import { computeScrapeTier } from './lib/tier.js';
+import { tagTracks } from './lib/rules.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -325,7 +326,12 @@ app.get('/api/duplicates', (req,res)=>{
 });
 app.get('/api/duplicates/:id', (req,res)=>{
   res.setHeader('Cache-Control','no-store');
-  const g=getGroupDetail(db,+req.params.id); g?res.json({ok:true,data:g}):res.status(404).json({ok:false});
+  const g=getGroupDetail(db,+req.params.id);
+  if(!g) return res.status(404).json({ok:false});
+  const s=getAllSettings(db);
+  const tierOrder=Array.isArray(s.quality_tiers)&&s.quality_tiers.length?s.quality_tiers:null;
+  g.tracks=tagTracks(g.tracks,tierOrder);
+  res.json({ok:true,data:g});
 });
 app.post('/api/duplicates/:id/resolve', async(req,res)=>{
   const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
