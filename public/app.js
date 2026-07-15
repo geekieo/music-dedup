@@ -1714,7 +1714,7 @@ function ScannerView({scan}){
            path on hover/truncated
    RIGHT : keep-toggle button (✓ or ✗) + secondary actions
 */
-const TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削一致',meta_best:'属性最全',release_best:'年份更早'};
+const TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削一致',meta_best:'属性最全',release_best:'发售更早'};
 const TAG_COLOR={quality_best:'var(--amber)',scrape_best:'var(--green)',meta_best:'#3B82F6',release_best:'#7C3AED'};
 function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,queue,isKept}){
   const keep=!!track.keep,wl=!!track.whitelisted;
@@ -1957,7 +1957,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   }
   async function unresolve(id){
     const r=await api.post('/api/duplicates/'+id+'/unresolve');
-    if(r.ok){setToast({msg:r.restored?.length?`已恢复 ${r.restored.length} 个文件`:r.failed?.length?'部分文件恢复失败':'已撤销处理',type:'success'});loadList();setDetail(null);}
+    if(r.ok){setToast({msg:r.restored?.length?`已恢复 ${r.restored.length} 个文件`:r.failed?.length?'部分文件恢复失败':'已撤销处理',type:'success'});loadList();api.get('/api/duplicates/'+id).then(r2=>{if(r2.ok)setDetail(r2.data);});}
     else setToast({msg:'操作失败: '+(r.error||''),type:'error'});
   }
   async function unresolveAll(){setShowBatchUnresolve(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/duplicates/unresolve-all',{ids});if(r.ok){setToast({msg:`已恢复 ${r.restoredCount} 个文件，${r.groupsRestored} 组`,type:'success'});loadList();}else setToast({msg:'批量撤销失败',type:'error'});}
@@ -2165,9 +2165,9 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       ),
 
       e('div',{style:{overflowY:'auto',height:'100%',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-xs)',padding:'16px 18px'}},
+        detailLoading?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})):
         !detail||detail.id!==selId?
           e('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:10,height:'100%',color:'var(--tx-faint)',fontSize:12}},Icon('click',{fontSize:36}),'从左侧选择重复组查看详情'):
-          detailLoading?e('div',{style:{textAlign:'center',padding:60,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})):
           e('div',{className:'fade'},
             // Header — F6: just tags, no extra explanation paragraph; the tag
             // itself (with hover description) carries the meaning now.
