@@ -502,11 +502,15 @@ app.post('/api/scan/start', async(req,res)=>{
   const retryMissed=req.body?.retryMissed===true;
   if(steps.includes('enum')&&!dirs.length)return res.status(400).json({ok:false,error:'未配置扫描目录'});
   res.json({ok:true,message:'扫描已启动',steps});
-  scanState={running:true,abortFlag:false,paused:false,phase:'starting',pct:0,message:'准备中...',startTime:Date.now()};
+  scanState={running:true,abortFlag:false,paused:false,phase:'starting',pct:0,level:'info',message:`[${new Date().toLocaleTimeString([],{hour12:false})}] 准备中...`,startTime:Date.now()};
   broadcast({type:'start',...scanState});
   // Mutate scanState in place and broadcast it — broadcasting evt alone would
   // clobber running/paused/abortFlag since the frontend does a full replace.
-  const prog=evt=>{ Object.assign(scanState,evt); broadcast({type:'progress',...scanState}); };
+  const prog=evt=>{
+    const ts = new Date().toLocaleTimeString([], { hour12: false });
+    Object.assign(scanState, evt.message ? { ...evt, message: `[${ts}] ${evt.message}` } : evt);
+    broadcast({type:'progress',...scanState});
+  };
   const abort=()=>scanState.abortFlag;
   const pause=waitIfPaused;
   try{
@@ -531,8 +535,8 @@ app.post('/api/scan/start', async(req,res)=>{
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
 app.post('/api/scan/abort', (_,res)=>{ if(!scanState.running)return res.json({ok:false}); scanState.abortFlag=true; scanState.paused=false; broadcast({type:'progress',...scanState}); res.json({ok:true}); });
-app.post('/api/scan/pause', (_,res)=>{ if(!scanState.running||scanState.abortFlag)return res.json({ok:false}); scanState.paused=true; broadcast({type:'progress',...scanState,message:'已暂停 · 点击继续以恢复'}); res.json({ok:true}); });
-app.post('/api/scan/resume', (_,res)=>{ if(!scanState.running||!scanState.paused)return res.json({ok:false}); scanState.paused=false; broadcast({type:'progress',...scanState,message:'已恢复'}); res.json({ok:true}); });
+app.post('/api/scan/pause', (_,res)=>{ if(!scanState.running||scanState.abortFlag)return res.json({ok:false}); scanState.paused=true; const ts=new Date().toLocaleTimeString([],{hour12:false}); broadcast({type:'progress',...scanState,level:'info',message:`[${ts}] 已暂停 · 点击继续以恢复`}); res.json({ok:true}); });
+app.post('/api/scan/resume', (_,res)=>{ if(!scanState.running||!scanState.paused)return res.json({ok:false}); scanState.paused=false; const ts=new Date().toLocaleTimeString([],{hour12:false}); broadcast({type:'progress',...scanState,level:'info',message:`[${ts}] 已恢复`}); res.json({ok:true}); });
 
 // Cover art — extracted from embedded file tags
 app.get('/api/files/:id/cover', async(req,res)=>{

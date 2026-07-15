@@ -1697,7 +1697,7 @@ function ScannerView({scan}){
         height:'calc(100vh - 430px)',minHeight:180,maxHeight:'calc(100vh - 300px)',
         overflowY:'auto'}},
         logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始...'),
-        logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),l.msg))),
+        logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:((m=>{const ts=m[1],txt=m[2];return e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),ts&&e('span',{style:{color:'var(--tx-faint)',marginRight:6,userSelect:'none',fontWeight:400}},ts),e('span',null,txt))})(l.msg.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)/)||['',null,l.msg])))),
         status.running&&e('span',{className:'blink',style:{color:'var(--amber)'}},'█')
       )
     )
@@ -2756,7 +2756,7 @@ function useScanStream(onDone){
         if(d.message){
           setLogs(p=>{
             if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
-            const ty=d.phase==='done'?'done':d.phase==='error'?'err':/^(正在|开始|加载|准备|.*阶段)/.test(d.message)?'info':'ok';
+            const ty=d.level||'ok';
             return[...p.slice(-500),{msg:d.message,ty,ts:Date.now()}];
           });
         }
