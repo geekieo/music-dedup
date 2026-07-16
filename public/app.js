@@ -40,8 +40,9 @@ const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN'
      filename_same     – identical filenames (sans extension)
      metadata_same/diff– title+artist+album agree / disagree (normalized)
      duration_near/diff– durations within 1.5s / differ notably
-     album_year_diff   – different release years (Rule 2 may apply)
-     meta_score_diff   – different metadata completeness (Rule 4 may apply)
+     release_year_diff – different release years (pick: release_best)
+     release_type_diff – different release types (pick: album_best)
+     meta_score_diff   – different metadata completeness (pick: meta_best)
      retention_tie     – retention rules tied, manual choice needed
 
    Source of truth: lib/rules.js detectMatchTags(). */
@@ -51,17 +52,17 @@ const MATCH_METHOD_TAGS=new Set([
 ]);
 const CHARACTERISTIC_TAGS=new Set([
   'format_same','format_diff','filename_same',
-  'metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff',
+  'metadata_same','metadata_diff','duration_near','duration_diff','release_year_diff','release_type_diff','meta_score_diff',
   'fp_diff','retention_tie',
 ]);
 // Ordered display array for the tag-legend modal (stable order)
-const CHARACTERISTIC_TAGS_ARRAY=['format_same','format_diff','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff','fp_diff','retention_tie'];
+const CHARACTERISTIC_TAGS_ARRAY=['format_same','format_diff','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','release_year_diff','release_type_diff','meta_score_diff','fp_diff','retention_tie'];
 const MATCH_TAG_LABELS={
   spectral_exact:'频谱声纹一致', same_recording:'频谱声纹相似', cp_exact:'CP声纹一致', cp_similar:'CP声纹相似',
   meta_confirmed:'属性匹配', mb_confirmed:'MusicBrainz刮削一致', acoustid_confirmed:'AcoustID刮削一致',
   fp_diff:'声纹不同', format_diff:'格式不同', format_same:'格式相同', filename_same:'文件名相同',
   metadata_same:'属性一致', metadata_diff:'属性不同', duration_near:'时长接近', duration_diff:'时长不同',
-  album_year_diff:'年份不同', meta_score_diff:'属性完整度不同', retention_tie:'保留平局',
+  release_year_diff:'年份不同', release_type_diff:'发行类型不同', meta_score_diff:'属性完整度不同', retention_tie:'保留平局',
 };
 const MATCH_TAG_DESCRIPTIONS={
   spectral_exact:'频谱声纹完全一致。和文件字节是否相同无关——文件名、标签、体积都可以不一样。',
@@ -79,7 +80,8 @@ const MATCH_TAG_DESCRIPTIONS={
   metadata_diff:'组内文件的标题、艺术家或专辑不一致，标签可能存在错误或写法差异。',
   duration_near:'组内文件时长几乎完全一致（≤1.5 秒），很可能是同一录音的不同版本。',
   duration_diff:'组内文件时长差异较大（>1.5 秒），可能是不同剪辑版本。',
-  album_year_diff:'组内文件的发行年份不同，保留规则可能优先选择首发专辑。',
+  release_year_diff:'组内文件的发行年份不同，保留规则可能优先选择首发专辑。',
+  release_type_diff:'组内存在不同的发行类型（专辑/单曲/原声/合辑），保留规则优先选择专辑版。',
   meta_score_diff:'组内文件的属性完整度不同，保留规则会优先保留标签更完整的文件。',
   retention_tie:'智能保留规则无法自动决定——多个候选文件的属性相同，需要手动选择。',
 };
@@ -92,7 +94,7 @@ const TAG_COLORS={
   format_same:['#4338CA','#E0E7FF','#C7D2FE'], filename_same:['#1D4ED8','#DBEAFE','#BFDBFE'],
   metadata_same:['#0F766E','#CCFBF1','#99F6E4'], metadata_diff:['#DC2626','#FEE2E2','#FECACA'],
   duration_near:['#6B7280','#F3F4F6','#E5E7EB'], duration_diff:['#D97706','#FEF3C7','#FDE68A'],
-  album_year_diff:['#7C3AED','#EDE9FE','#DDD6FE'], meta_score_diff:['#0F766E','#CCFBF1','#99F6E4'],
+  release_year_diff:['#7C3AED','#EDE9FE','#DDD6FE'], release_type_diff:['#A21CAF','#FAE8FF','#F0ABFC'], meta_score_diff:['#0F766E','#CCFBF1','#99F6E4'],
   retention_tie:['#DC2626','#FEE2E2','#FECACA'],
 };
 
@@ -166,6 +168,7 @@ const ICONS={
   'volume-2':   {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
   'volume-off': {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M23 9l-6 6'}],['path',{d:'M17 9l6 6'}]]},
   wand:{els:[['path',{d:'M4 20L20 4'}],['path',{d:'M7 4l1.5 1.5L7 7'}],['path',{d:'M17 14l1.5 1.5-1.5 1.5'}],['path',{d:'M4 4l.5.5'}],['path',{d:'M20 20l-.5-.5'}]]},
+  'stack-2':{els:[['path',{d:'M16 16v-4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v4'}],['path',{d:'M8 12h8'}],['path',{d:'M16 8v-4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v4'}],['path',{d:'M8 4h8'}]]},
   edit:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
   pencil:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
   'arrow-back-up':{els:[['path',{d:'M9 13l-4-4 4-4'}],['path',{d:'M5 9h9a5 5 0 010 10h-2'}]]},
@@ -589,7 +592,7 @@ function Btn({children,onClick,variant='primary',small,disabled,icon,style:sx={}
   return e('button',{onClick:disabled?undefined:onClick,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
 }
 // Icon-only action button — bigger touch target + a real fill color when
-// active, so the three per-track actions (打开/属性/白名单) read as buttons
+// active, so the three per-track actions (打开/属性/保留名单) read as buttons
 // at a glance instead of being lost as small grey text links.
 function IconAction({icon,title,onClick,active,activeColor='var(--amber)',activeBg,color='var(--tx-muted)',size=15,danger}){
   const ac=danger?'var(--red)':activeColor;
@@ -600,7 +603,7 @@ function IconAction({icon,title,onClick,active,activeColor='var(--amber)',active
     Icon(icon,{fontSize:size}));
 }
 function Card({children,style:sx={},id}){return e('div',{id,style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-xs)',padding:'18px 20px',...sx}},children);}
-function SH({title,sub,hint}){return e('div',{style:{marginBottom:12}},e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center'}},title,e(Hint,{text:hint})),sub&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},sub));}
+function SH({title,sub,hint,icon}){return e('div',{style:{marginBottom:12}},e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center',gap:5}},icon&&Icon(icon,{fontSize:14,color:'var(--tx-muted)'}),title,e(Hint,{text:hint})),sub&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},sub));}
 function SC({label,val,sub,col}){return e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',padding:'12px 16px',flex:1,minWidth:80}},e('div',{style:{fontSize:11,color:'var(--tx-faint)',fontWeight:500,marginBottom:4}},label),e('div',{style:{fontSize:21,fontWeight:600,fontFamily:'var(--font-mono)',color:col||'var(--tx-primary)',lineHeight:1.2,letterSpacing:'-0.02em'}},val),sub&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},sub));}
 function Toast({msg,type='info',onClose}){
   useEffect(()=>{const t=setTimeout(onClose,3800);return()=>clearTimeout(t);},[]);
@@ -1147,7 +1150,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
 /* ══════════════════════════════════════════════════════════════════════
    LIBRARY VIEW
    ══════════════════════════════════════════════════════════════════════ */
-const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,libraryKey,onWhitelistChange,onTagsWritten}){
+const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemoveDir,onEnumOnly,onLocate,mainScrollRef,libraryKey,onRetentionChange,onTagsWritten}){
   // ── Filter state ───────────────────────────────────────────────────────
   // 'all' | 'scraped' | 'dup'  — the 3 interactive stat cards
   const[libFilter,setLibFilter]=useState('all');
@@ -1306,7 +1309,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   }
 
   // Expose locate function upward — used by the player bar's "定位到歌曲"
-  // click and by 设置 → 白名单/最近写入 → "在音乐库中查看".
+  // click and by 设置 → 保留名单/最近写入 → "在音乐库中查看".
   // Locate a file in library: if not on current page, ask server for its
   // position in the unfiltered library, reset filters, and fetch to its page.
   useEffect(()=>{
@@ -1336,16 +1339,6 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
       }catch{}
     });
   },[onLocate,sort,order]);
-
-  async function toggleWhitelist(f){
-    if(f.whitelisted)await api.del(`/api/whitelist/${f.id}`);
-    else await api.post(`/api/whitelist/${f.id}`);
-    // Update only this row in state — no full reload
-    setRows(prev=>prev.map(r=>r.id===f.id?{...r,whitelisted:f.whitelisted?0:1}:r));
-    loadStats();
-    onWhitelistChange?.(); // notify App → SettingsView → WhitelistSection
-    setToast({msg:f.whitelisted?'已从白名单移除':'已加入白名单',type:'success'});
-  }
 
   // ── Library empty state ────────────────────────────────────────────────
   if(!loading&&total===0&&(!search&&!fmt&&libFilter==='all')&&stats&&(stats.total||0)===0){
@@ -1480,10 +1473,10 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                 'data-fileid':f.id,
                 className:f.id===flashId?'locate-flash':undefined,
                 style:{borderBottom:'0.5px solid var(--bd-subtle)',
-                  background:f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
+                  background:f.in_retention_list?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
                   transition:'background .1s'},
-                onMouseEnter:ev=>ev.currentTarget.style.background=isCur?'var(--amber-bg)':f.whitelisted?'#ECEEF0':'var(--bg-subtle)',
-                onMouseLeave:ev=>ev.currentTarget.style.background=f.whitelisted?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
+                onMouseEnter:ev=>ev.currentTarget.style.background=isCur?'var(--amber-bg)':f.in_retention_list?'#ECEEF0':'var(--bg-subtle)',
+                onMouseLeave:ev=>ev.currentTarget.style.background=f.in_retention_list?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
               },
                 e('td',{style:{padding:'6px 8px',width:36}},
                   f.fingerprint&&e('button',{
@@ -1533,8 +1526,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                   e('div',{style:{display:'flex',gap:4}},
                     e(IconAction,{icon:'cloud-download',title:'刮削操作',onClick:()=>setScrapeTarget(f.id)}),
                     e(IconAction,{icon:'folder-open',title:'在文件管理器中显示',onClick:()=>api.post(`/api/files/${f.id}/reveal`)}),
-                    e(IconAction,{icon:'info-circle',title:'查看属性',onClick:()=>setPropsId(f.id)}),
-                    e(IconAction,{icon:f.whitelisted?'shield-filled':'shield-plus',title:f.whitelisted?'从白名单移除':'加入白名单',active:f.whitelisted,onClick:()=>toggleWhitelist(f)})
+                    e(IconAction,{icon:'info-circle',title:'查看属性',onClick:()=>setPropsId(f.id)})
                   )
                 )
               );
@@ -1587,7 +1579,7 @@ function ScannerView({scan}){
   }
 
   const isDone=status.phase==='done';
-  const LC={ok:'var(--green)',done:'var(--amber)',err:'var(--red)',info:'var(--tx-secondary)',sep:'var(--amber)'};
+  const LC={ok:'var(--amber)',done:'var(--green)',err:'var(--red)',info:'var(--tx-secondary)',sep:'var(--amber)'};
 
   return e('div',{className:'fade'},
     confirm&&e(ConfirmModal,{
@@ -1714,14 +1706,17 @@ function ScannerView({scan}){
            path on hover/truncated
    RIGHT : keep-toggle button (✓ or ✗) + secondary actions
 */
-const TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削一致',meta_best:'属性最全',release_best:'发售更早'};
-const TAG_COLOR={quality_best:'var(--amber)',scrape_best:'var(--green)',meta_best:'#3B82F6',release_best:'#7C3AED'};
-function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,queue,isKept}){
-  const keep=!!track.keep,wl=!!track.whitelisted;
+const PICK_TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削更准',release_best:'发售更早',album_best:'专辑优先',meta_best:'属性最全',manual_keep:'手动保留'};
+const PICK_TAG_COLOR={quality_best:'var(--amber)',scrape_best:'#0D9488',release_best:'#7C3AED',album_best:'#C2410C',meta_best:'#3B82F6',manual_keep:'var(--green)'};
+function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept}){
+  const keep=!!track._keepWinner;
+  const wl=!!track.in_retention_list||(track._pickTags||[]).includes('manual_keep');
+  // Manual only: kept purely by retention_list, not by smart cascade
+  const isManualOnly=keep&&track._winReason==='手动保留';
   const isCur=player?.current?.id===track.id;
   const[coverErr,setCoverErr]=useState(false);
-  const bd=wl?'var(--bd-default)':keep?'var(--green-bd)':'var(--red-bd)';
-  const bg=wl?'var(--bg-muted)':keep?'var(--green-bg)':'var(--red-bg)';
+  const bd=wl&&isManualOnly?'var(--bd-default)':keep?'var(--green-bd)':'var(--red-bd)';
+  const bg=wl&&isManualOnly?'var(--bg-muted)':keep?'var(--green-bg)':'var(--red-bg)';
 
   const coverSrc=`/api/files/${track.id}/cover`;
 
@@ -1752,9 +1747,8 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,
         e('div',{style:{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap'}},
           e('span',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:220}},track.title||'—'),
           e(QBadge,{format:track.format,bitrate:track.bitrate,sample_rate:track.sample_rate}),
-          wl&&e(Tag,{children:'白名单',color:'var(--tx-faint)'}),
           track.release_type==='single'&&e(Tag,{children:'单曲'}),
-          (track._tags||[]).map(t=>e(Tag,{key:t,children:TAG_LABEL[t]||t,color:TAG_COLOR[t]||'var(--tx-faint)'}))
+          (track._pickTags||[]).map(t=>e(Tag,{key:t,children:PICK_TAG_LABEL[t]||t,color:PICK_TAG_COLOR[t]||'var(--tx-faint)'}))
         ),
         e('div',{style:{fontSize:11,color:'var(--tx-secondary)',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
           track.artist&&e('span',null,track.artist),
@@ -1766,35 +1760,29 @@ function TrackRow({track,onToggle,canToggle,onWhitelist,onProps,onScrape,player,
           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:2}},track.path)
       ),
 
-      // ── RIGHT: keep toggle + actions ─────────────────────────────────
+      // ── RIGHT: keep toggle ───────────────────────────────────────────
       e('div',{style:{display:'flex',alignItems:'center',gap:4,flexShrink:0}},
         e(IconAction,{icon:'cloud-download',title:'刮削操作',onClick:onScrape}),
         e(IconAction,{icon:'folder-open',title:'打开所在目录',onClick:()=>api.post(`/api/files/${track.id}/reveal`)}),
         e(IconAction,{icon:'info-circle',title:'文件属性',onClick:onProps}),
-        e(IconAction,{icon:wl?'shield-filled':'shield-plus',title:wl?'移除白名单':'加入白名单',active:wl,onClick:onWhitelist}),
-        // Keep / discard toggle — right side, prominent
         e('button',{
-          onClick:canToggle&&!wl?onToggle:undefined,
-          title:wl?'已加入白名单':canToggle?(keep?'标记为删除（点击切换）':'标记为保留（点击切换）'):'至少保留一个',
-          style:{background:wl?'var(--bg-muted)':keep?'var(--green)':'var(--bg-base)',
-            border:`1px solid ${keep&&!wl?'var(--green)':'var(--bd-default)'}`,
+          onClick:canToggle?onToggle:undefined,
+          title:canToggle?(keep?'标记为删除':'标记为保留'):'至少保留一个',
+          style:{background:keep?'var(--green)':'var(--bg-base)',
+            border:'1px solid '+(keep?'var(--green)':'var(--bd-default)'),
             borderRadius:'var(--r-md)',width:32,height:32,
             display:'flex',alignItems:'center',justifyContent:'center',
-            cursor:canToggle&&!wl?'pointer':'default',flexShrink:0,marginLeft:2,
-            opacity:(!canToggle||wl)?.4:1}},
-          Icon(wl?'shield-check':keep?'check':'toggle-left',
-            {fontSize:15,color:wl?'var(--tx-faint)':keep?'#fff':'var(--tx-secondary)'})
-        )
+            cursor:canToggle?'pointer':'default',flexShrink:0,marginLeft:2,
+            opacity:(!canToggle)?.4:1},
+        }, keep
+          ? Icon(isManualOnly?'shield-check':'check',{fontSize:15,color:'#fff'})
+          : Icon('toggle-left',{fontSize:15,color:'var(--tx-secondary)'}))
       )
     )
   );
 }
 
-// Session-level "don't ask again" flag for keep-toggle confirm
-// (stored outside component so it survives re-renders but resets on page reload)
-let _keepToggleSkipConfirm=false;
-
-const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,onLocate}){
+const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,onLocate,onRetentionChange}){
   const[filter,setFilter]=useState('pending');
   const[sort,setSort]=useState('savings');
   const[groups,setGroups]=useState([]);
@@ -1851,7 +1839,6 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       scrollToGroupRetry(gid);
     }
   },[groups]);
-  const[keepConfirm,setKeepConfirm]=useState(null); // {groupId,fileId,currentKeep,tracks}
   const[detail,setDetail]=useState(null);
   const[detailLoading,setDetailLoading]=useState(false);
   const[listLoading,setListLoading]=useState(true);
@@ -1928,7 +1915,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   },[allTags]);
   const charTags=useMemo(()=>{
     // Stable display order: 步骤2→3→5+6, 一致→不同
-    const CHAR_TAG_ORDER=['format_same','format_diff','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','album_year_diff','meta_score_diff','fp_diff','retention_tie'];
+    const CHAR_TAG_ORDER=['format_same','format_diff','filename_same','metadata_same','metadata_diff','duration_near','duration_diff','release_year_diff','release_type_diff','meta_score_diff','fp_diff','retention_tie'];
     const rank=t=>{const i=CHAR_TAG_ORDER.indexOf(t);return i===-1?99:i;};
     return allTags.filter(t=>CHARACTERISTIC_TAGS.has(t)).sort((a,b)=>rank(a)-rank(b));
   },[allTags]);
@@ -1964,20 +1951,10 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   async function resolveAll(){setShowBatchResolve(false);const ids=visiblePending.map(g=>g.id);const r=await api.post('/api/duplicates/resolve-all',{ids});if(r.ok){setToast({msg:`批量完成，放入回收站 ${r.deletedCount} 个文件`,type:'success'});loadList();setPendingCount(0);}else setToast({msg:r.error||'失败',type:'error'});}
   async function emptyTrash(){setShowEmptyTrash(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/trash/empty',{ids});if(r.ok){setToast({msg:`已永久删除 ${r.deletedCount} 个文件${r.groupsRemoved?`，${r.groupsRemoved} 个组已清理`:''}`,type:'success'});loadList();if(r.groupsRemoved>0)setSelId(null);}else setToast({msg:'清空失败',type:'error'});}
   async function purgeGroup(id){const r=await api.post('/api/duplicates/'+id+'/purge');if(r.ok){setToast({msg:r.groupRemoved?`已彻底删除并清理该组`:`已彻底删除 ${r.deletedCount} 个文件`,type:'success'});loadList();if(r.groupRemoved){setDetail(null);setSelId(null);}}else setToast({msg:'删除失败',type:'error'});}
-  async function toggleTrack(gid,fid,keep,reason){const r=await api.put(`/api/duplicates/${gid}/tracks/${fid}/keep`,{keep,reason});if(r.ok)setDetail(r.data);}
-  // Guard for keep-toggle: ensures at least one non-whitelisted keep remains,
-  // shows a confirm dialog (with "don't ask again this session" checkbox).
+  async function toggleTrack(gid,fid,keep,reason){const r=await api.put(`/api/duplicates/${gid}/tracks/${fid}/keep`,{keep,reason});if(r.ok){setDetail(r.data);onRetentionChange?.();}}
+  // Toggle keep: adds/removes from retention list (manual override).
   function onTrackToggle(groupId,fileId,currentKeep,tracks){
-    const nonWlKeeps=(tracks||[]).filter(t=>t.keep&&!t.whitelisted&&t.id!==fileId);
-    if(currentKeep&&nonWlKeeps.length===0)return; // would leave zero kept files — block
-    if(_keepToggleSkipConfirm){ toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动指定保留':'手动指定删除'); return; }
-    setKeepConfirm({groupId,fileId,currentKeep,tracks});
-  }
-  async function handleWL(fileId,isWl,groupId){
-    isWl?await api.del(`/api/whitelist/${fileId}`):await api.post(`/api/whitelist/${fileId}`);
-    const r=await api.get('/api/duplicates/'+groupId);
-    if(r.ok)setDetail(r.data);
-    setToast({msg:isWl?'已从白名单移除':'已加入白名单',type:'success'});
+    toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动指定保留':'移除手动保留');
   }
 
   const pending=groups.filter(g=>!g.resolved);
@@ -1995,23 +1972,6 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
       onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
       onTagsWritten:()=>{}}),
-    keepConfirm&&e('div',{style:{position:'fixed',inset:0,zIndex:900,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center'},
-      onClick:ev=>{if(ev.target===ev.currentTarget)setKeepConfirm(null);}},
-      e('div',{className:'fade',style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:380,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.18)'}},
-        e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},keepConfirm.currentKeep?'标记为删除？':'标记为保留？'),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:16}},
-          keepConfirm.currentKeep?'将此曲目标记为「删除」。智能决策保留的其他曲目不受影响。':'将此曲目也标记为「保留」。同组可以同时有多首保留曲目。'
-        ),
-        e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:11,color:'var(--tx-faint)',marginBottom:18,cursor:'pointer'}},
-          e('input',{type:'checkbox',onChange:ev=>{_keepToggleSkipConfirm=ev.target.checked;}}),
-          '本次打开不再提示'
-        ),
-        e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
-          e(Btn,{variant:'ghost',onClick:()=>setKeepConfirm(null)},'取消'),
-          e(Btn,{onClick:()=>{const{groupId,fileId,currentKeep}=keepConfirm;setKeepConfirm(null);toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动指定保留':'手动指定删除');}},keepConfirm.currentKeep?'确认删除':'确认保留')
-        )
-      )
-    ),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640},
       e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
@@ -2146,8 +2106,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
           visibleGroups.slice(0,displayCount).map(g=>{
           const isSel=g.id===selId;
           const tags=(g.match_tags||'').split(',').filter(Boolean).slice(0,2);
-          const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t.keep)?.title:null)||`组 #${g.id}`;
-          const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t.keep)?.artist:null)||'';
+          const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.title:null)||`组 #${g.id}`;
+          const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.artist:null)||'';
           return e('div',{key:g.id,ref:el=>{if(el)groupRefs.current[g.id]=el;else delete groupRefs.current[g.id];},className:g.id===flashGroupId?'locate-flash':undefined,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
             e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:3}},
               e('span',{style:{fontSize:12,fontWeight:600,color:isSel?'#92400E':'var(--tx-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,maxWidth:160}},title),
@@ -2173,15 +2133,15 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
             // itself (with hover description) carries the meaning now.
             e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14,gap:10}},
               e('div',{style:{flex:1,minWidth:0}},
-                e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t.keep)?.title||'—'),
-                e('div',{style:{fontSize:12,color:'var(--tx-muted)',marginBottom:6}},detail.tracks?.find(t=>t.keep)?.artist||''),
+                e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t._keepWinner)?.title||'—'),
+                e('div',{style:{fontSize:12,color:'var(--tx-muted)',marginBottom:6}},detail.tracks?.find(t=>t._keepWinner)?.artist||''),
                 e('div',{style:{display:'flex',gap:5,flexWrap:'wrap'}},
                   ...(detail.match_tags||'').split(',').filter(Boolean).map(t=>e(MatchTag,{key:t,tag:t}))
                 )
               ),
               detail.resolved?
                 (()=>{
-                  const dels=detail.tracks?.filter(t=>!t.keep)||[];
+                  const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];
                   return e('div',{style:{display:'flex',gap:6}},
                     e('span',{style:{fontSize:11,fontWeight:500,color:'var(--green)',background:'var(--green-bg)',border:'0.5px solid var(--green-bd)',borderRadius:'var(--r-md)',padding:'4px 10px',display:'inline-flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-circle-check',style:{fontSize:13}}),dels.length?'已处理':'已清理'),
                     dels.length>0&&e(Btn,{variant:'ghost',icon:'arrow-back-up',small:true,onClick:()=>unresolve(detail.id)},'撤销'),
@@ -2189,20 +2149,19 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
                   );
                 })()
               :
-                (()=>{const dels=detail.tracks?.filter(t=>!t.keep&&!t.whitelisted)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
+                (()=>{const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
             ),
 
             e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'10px 12px',marginBottom:12}},
               e('div',{style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',marginBottom:8,display:'flex',alignItems:'center',gap:4}},Icon('chart-bar',{fontSize:12}),'文件大小对比'),
-              (()=>{const mx=Math.max(...(detail.tracks||[]).map(t=>t.size||1));return(detail.tracks||[]).map(t=>e('div',{key:t.id,style:{display:'flex',alignItems:'center',gap:8,marginBottom:5}},e('div',{style:{width:90,fontSize:10,fontFamily:'var(--font-mono)',color:t.keep?'var(--green)':'var(--tx-faint)',textAlign:'right',flexShrink:0,fontWeight:t.keep?600:400}},fmtBR(t.bitrate,t.format)),e('div',{style:{flex:1,height:8,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},e('div',{style:{width:(t.size/mx*100).toFixed(1)+'%',height:'100%',background:t.keep?'var(--green)':'var(--red)',opacity:t.keep?.85:.3,borderRadius:99}})),e('div',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:56,flexShrink:0,textAlign:'right'}},fmtBytes(t.size))));})()
+              (()=>{const mx=Math.max(...(detail.tracks||[]).map(t=>t.size||1));return(detail.tracks||[]).map(t=>e('div',{key:t.id,style:{display:'flex',alignItems:'center',gap:8,marginBottom:5}},e('div',{style:{width:90,fontSize:10,fontFamily:'var(--font-mono)',color:t._keepWinner?'var(--green)':'var(--tx-faint)',textAlign:'right',flexShrink:0,fontWeight:t._keepWinner?600:400}},fmtBR(t.bitrate,t.format)),e('div',{style:{flex:1,height:8,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},e('div',{style:{width:(t.size/mx*100).toFixed(1)+'%',height:'100%',background:t._keepWinner?'var(--green)':'var(--red)',opacity:t._keepWinner?.85:.3,borderRadius:99}})),e('div',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:56,flexShrink:0,textAlign:'right'}},fmtBytes(t.size))));})()
             ),
 
             (detail.tracks||[]).map(t=>e(TrackRow,{key:t.id,track:t,player,
-              isKept:!!t.keep&&!t.whitelisted,
+              isKept:!!t._keepWinner,
               queue:(detail.tracks||[]).filter(x=>x.fingerprint).map(x=>({id:x.id,title:x.title,artist:x.artist,src:'duplicates',groupId:detail.id})),
-              onToggle:()=>onTrackToggle(detail.id,t.id,t.keep,detail.tracks||[]),
+              onToggle:()=>onTrackToggle(detail.id,t.id,t._keepWinner,detail.tracks||[]),
               canToggle:!detail.resolved,
-              onWhitelist:()=>handleWL(t.id,!!t.whitelisted,detail.id),
               onProps:()=>setPropsId(t.id),
               onScrape:()=>setScrapeId(t.id),
             })),
@@ -2216,7 +2175,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
 /* ══════════════════════════════════════════════════════════════════════
    SETTINGS VIEW — F6: single scrollable page, anchored sections:
-   扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 音质优先级 → 重复组标签 → 白名单.
+   扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 音质优先级 → 重复组标签 → 保留名单.
    A sticky left rail jumps to each anchor. Explanatory text that used to
    sit as an always-visible box is now a hover-revealed Hint next to the
    heading it explains, except 重复组标签 which IS the reference itself
@@ -2230,10 +2189,12 @@ const SETTINGS_SECTIONS=[
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
   {id:'sec-quality', label:'音质优先级', icon:'diamond'},
-  {id:'sec-wl',      label:'白名单',     icon:'shield-check'},
+  {id:'sec-pick',    label:'保留优先级', icon:'stack-2'},
+  {id:'sec-wl',      label:'保留名单',     icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
+const DEFAULT_PICK=['quality_best','release_best','meta_best','scrape_best','album_best'];
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
   const[rows,setRows]=useState(null);
@@ -2355,15 +2316,15 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
 }
 
 
-function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
+function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
-  function load(){setLoading(true);api.get('/api/whitelist').then(r=>{if(r.ok)setRows(r.data||[]);}).finally(()=>setLoading(false));}
+  function load(){setLoading(true);api.get('/api/retention-list').then(r=>{if(r.ok)setRows(r.data||[]);}).finally(()=>setLoading(false));}
   useEffect(()=>{load();},[]);
-  useEffect(()=>{if(whitelistKey>0)load();},[whitelistKey]);
-  async function remove(id){await api.del(`/api/whitelist/${id}`);setToast({msg:'已从白名单移除',type:'success'});load();}
+  useEffect(()=>{if(retentionListKey>0)load();},[retentionListKey]);
+  async function remove(id){await api.del(`/api/retention-list/${id}`);setToast({msg:'已从保留名单移除',type:'success'});load();}
 
   // Locate-in-此列表 — same pattern as WriteHistorySection.
   const rowRefs=useRef({});
@@ -2371,7 +2332,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
   useEffect(()=>{ if(!flashId)return; const t=setTimeout(()=>setFlashId(null),3200); return()=>clearTimeout(t); },[flashId]);
   useEffect(()=>{
     if(!onLocate)return;
-    onLocate.setLocateInWhitelist?.(fid=>{
+    onLocate.setLocateInRetentionList?.(fid=>{
       document.getElementById('sec-wl')?.scrollIntoView({behavior:'smooth',block:'start'});
       setSearch('');
       let attempts=15;
@@ -2390,12 +2351,12 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
 
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
-    e(SH,{title:`白名单（${rows.length} 个文件）`,sub:'白名单中的文件不参与重复检测'}),
+    e(SH,{title:`保留名单（${rows.length} 个文件）`,sub:'名单中的文件参与重复检测，但受保护不被删除'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
       ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
           Icon('shield-check',{fontSize:28,display:'block',margin:'0 auto 8px'}),
-          '白名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入白名单'))
+          '保留名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入保留名单'))
       : e('div',null,
           e('div',{style:{position:'relative',marginBottom:8}},
             Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
@@ -2414,7 +2375,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
                     const isCur=player?.current?.id===f.id;
                     return e('tr',{key:f.id,ref:el=>{if(el)rowRefs.current[f.id]=el;else delete rowRefs.current[f.id];},className:f.id===flashId?'locate-flash':undefined,style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
                       e('td',{style:{padding:'6px 8px',width:36}},
-                        f.fingerprint&&player&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'settings-whitelist'}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
+                        f.fingerprint&&player&&e('button',{onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'settings-retention-list'}),style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},
                           Icon(isCur&&player.playing?'pause':'play',{fontSize:15,color:isCur?'#fff':'var(--tx-muted)'}))
                       ),
                       e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:200}},f.title||'—'),
@@ -2424,7 +2385,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
                       e('td',{style:{padding:'4px 8px'}},
                         e('div',{style:{display:'flex',gap:3,alignItems:'center'}},
                           onLocateFile&&e(IconAction,{icon:'music-locate',title:'在音乐库中查看',onClick:()=>onLocateFile(f.id)}),
-                          e(IconAction,{icon:'shield-x',title:'移除白名单',danger:true,onClick:()=>remove(f.id)})
+                          e(IconAction,{icon:'shield-x',title:'移除保留名单',danger:true,onClick:()=>remove(f.id)})
                         )
                       )
                     );
@@ -2436,7 +2397,7 @@ function WhitelistSection({player,whitelistKey,onLocateFile,onLocate}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,whitelistKey,writeHistoryKey,onLocateFile,onLocate,mainScrollRef}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onLocate,mainScrollRef}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -2485,9 +2446,10 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       if(!r.ok)return;
       const d=r.data;
       if(!d.quality_tiers||!Array.isArray(d.quality_tiers))d.quality_tiers=[...DEFAULT_Q];
+      if(!d.pick_tag_order||!Array.isArray(d.pick_tag_order))d.pick_tag_order=[...DEFAULT_PICK];
       delete d.scan_dirs; // owned by App/props, not local state — avoid stale overwrite races
       setS(d);
-      lastApplied.current={threshold:d.threshold,duration_tolerance:d.duration_tolerance,quality_tiers:JSON.stringify(d.quality_tiers)};
+      lastApplied.current={threshold:d.threshold,duration_tolerance:d.duration_tolerance,quality_tiers:JSON.stringify(d.quality_tiers),pick_tag_order:JSON.stringify(d.pick_tag_order)};
       // validate stored AcoustID key against the actual API (not just assume valid)
       const key=(d.acoustid_key||'').trim();
       const lastValidated = localStorage.getItem('acoustid_validated_key') || '';
@@ -2509,10 +2471,12 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         if(!r.ok){setSaveState('error');return;}
         setSaveState('saved');setTimeout(()=>setSaveState('idle'),2200);
         const qj=JSON.stringify(s.quality_tiers||[]);
+        const pj=JSON.stringify(s.pick_tag_order||[]);
         const changed = lastApplied.current && (
           lastApplied.current.threshold!==s.threshold ||
           lastApplied.current.duration_tolerance!==s.duration_tolerance ||
-          lastApplied.current.quality_tiers!==qj
+          lastApplied.current.quality_tiers!==qj ||
+          lastApplied.current.pick_tag_order!==pj
         );
         if(changed)setNeedsReapply(true);
       });
@@ -2523,13 +2487,15 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   function reapply(){
     setReapplying(true);
     onMatchAffectingChange?.();
-    lastApplied.current={threshold:s.threshold,duration_tolerance:s.duration_tolerance,quality_tiers:JSON.stringify(s.quality_tiers||[])};
+    lastApplied.current={threshold:s.threshold,duration_tolerance:s.duration_tolerance,quality_tiers:JSON.stringify(s.quality_tiers||[]),pick_tag_order:JSON.stringify(s.pick_tag_order||[])};
     setNeedsReapply(false);
     setTimeout(()=>setReapplying(false),1500);
   }
 
   const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
   const resetQ=()=>setS(p=>({...p,quality_tiers:[...DEFAULT_Q]}));
+  const movePick=(i,d)=>{const q=[...(s.pick_tag_order||DEFAULT_PICK)];const j=i+d;if(j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,pick_tag_order:q}));};
+  const resetPick=()=>setS(p=>({...p,pick_tag_order:[...DEFAULT_PICK]}));
 
   async function validateAcoustidKey(key,silent=false){
     if(!key)return;
@@ -2562,6 +2528,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   if(!s)return e('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',height:320,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:28}}));
 
   const q=s.quality_tiers||DEFAULT_Q;
+  const pick=s.pick_tag_order||DEFAULT_PICK;
 
   return e('div',{className:'fade',style:{display:'grid',gridTemplateColumns:'150px 1fr',gap:18,alignItems:'start'}},
 
@@ -2578,7 +2545,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       // Unified prompt layout for "设置已修改，需要重新扫描" — jumps to 扫描 page.
       needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'频谱声纹阈值 / 时长容差 / 音质优先级 已修改，尚未重新应用到现有重复组'),
+        e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'频谱声纹阈值 / 时长容差 / 音质优先级 / 保留优先级 已修改，尚未重新应用到现有重复组'),
         e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配')
       ),
 
@@ -2712,7 +2679,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-quality'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中按以下顺序决定保留哪个文件：\n① 音质档位（按本列表顺序）优先\n② 相同则选年份最早的正式专辑（合辑/精选不算首发）\n③ 仍相同则本地已收藏 ≥2 首的专辑版优先于单曲版\n④ 最后比较标签完整度'})),
+          e('div',{style:{flex:1}},e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组内，格式/码率/采样率/位深更高的文件优先保留。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
         ),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
@@ -2726,7 +2693,23 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ))
       ),
 
-      e(WhitelistSection,{player,whitelistKey,onLocateFile,onLocate}),
+      e(Card,{id:'sec-pick'},
+        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
+          e('div',{style:{flex:1}},e(SH,{icon:'stack-2',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中依次按以下维度决定保留哪个文件：\n音质最优 → 格式/码率/采样率/位深最高\n发售更早 → 年份越早越好\n属性最全 → 标签字段越完整越好\n刮削更准 → 标签是否与 MusicBrainz 官方数据吻合\n专辑优先 → 专辑版优先于单曲版\n\n调整顺序后，重复组的保留结果会据此变化。'})),
+          e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetPick},'恢复默认')
+        ),
+        pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
+          e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<2?'var(--green)':i<4?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
+          e('span',{style:{flex:1,fontSize:12,color:i<5?'var(--tx-secondary)':'var(--tx-faint)'}},PICK_TAG_LABEL[key]||key),
+          i===0&&e('span',{style:{fontSize:10,padding:'1px 6px',borderRadius:3,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}},'最优先'),
+          e('div',{style:{display:'flex',flexDirection:'column',gap:1}},
+            e('button',{onClick:()=>movePick(i,-1),disabled:i===0,style:{background:'none',border:'none',cursor:i===0?'default':'pointer',padding:'1px 4px',opacity:i===0?.2:1,color:'var(--tx-muted)'}},Icon('chevron-up',{fontSize:13})),
+            e('button',{onClick:()=>movePick(i,1),disabled:i===pick.length-1,style:{background:'none',border:'none',cursor:i===pick.length-1?'default':'pointer',padding:'1px 4px',opacity:i===pick.length-1?.2:1,color:'var(--tx-muted)'}},Icon('chevron-down',{fontSize:13}))
+          )
+        ))
+      ),
+
+      e(RetentionListSection,{player,retentionListKey,onLocateFile,onLocate}),
       e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate})
     )
   );
@@ -2785,7 +2768,7 @@ function useScanStream(onDone){
 
 /* ══════════════════════════════════════════════════════════════════════
    APP SHELL — F4: tab order is 音乐库 → 重复组 → 扫描 → 设置 (重复组 and
-   扫描 swapped from before); 白名单 folded into 设置, no longer a top tab.
+   扫描 swapped from before); 保留名单 folded into 设置, no longer a top tab.
    扫描目录 (scan_dirs) is lifted here so LibraryView's empty state and
    Settings' 扫描目录 section are reading/writing the exact same data.
    ══════════════════════════════════════════════════════════════════════ */
@@ -2795,7 +2778,7 @@ function App(){
   const[settings,setSettingsState]=useState(null);
   const[scanDoneKey,setScanDoneKey]=useState(0);
   const[libraryKey,setLibraryKey]=useState(0);
-  const[whitelistKey,setWhitelistKey]=useState(0);
+  const[retentionListKey,setRetentionListKey]=useState(0);
   const[writeHistoryKey,setWriteHistoryKey]=useState(0);
   const player=useGlobalPlayer();
 
@@ -2878,10 +2861,10 @@ function App(){
   },[player.current?.id]);
 
   // Refs for the locate-scroll functions registered by each view/section —
-  // one per possible "播放来源": 音乐库, 重复组, 设置→白名单, 设置→最近写入.
+  // one per possible "播放来源": 音乐库, 重复组, 设置→保留名单, 设置→最近写入.
   const locateInLibraryRef=useRef(null);
   const locateInDuplicatesRef=useRef(null);
-  const locateInWhitelistRef=useRef(null);
+  const locateInRetentionListRef=useRef(null);
   const locateInHistoryRef=useRef(null);
   const navigateToFile = (fileId) => {
     setView('library');
@@ -2890,7 +2873,7 @@ function App(){
   const mainScrollRef=useRef(null); // ref to the <main> scroll container, shared with LibraryView
   // Called when user clicks the info panel in PlayerBar — jumps back to
   // whichever list the currently-playing track was played from (音乐库、
-  // 重复组、或设置→白名单/最近写入), scrolled to that track's exact row.
+  // 重复组、或设置→保留名单/最近写入), scrolled to that track's exact row.
   const handleLocate=useCallback(track=>{
     if(!track)return;
     if(track.src==='duplicates'||track.groupId){
@@ -2898,9 +2881,9 @@ function App(){
       if(track.groupId)setTimeout(()=>locateInDuplicatesRef.current?.(track.groupId),150);
       return;
     }
-    if(track.src==='settings-whitelist'){
+    if(track.src==='settings-retention-list'){
       setView('settings');
-      if(track.id)setTimeout(()=>locateInWhitelistRef.current?.(track.id),150);
+      if(track.id)setTimeout(()=>locateInRetentionListRef.current?.(track.id),150);
       return;
     }
     if(track.src==='settings-history'){
@@ -2938,10 +2921,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',scrollbarGutter:'stable',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onWhitelistChange:()=>setWhitelistKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
-        e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
+        e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,whitelistKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInWhitelist:fn=>{locateInWhitelistRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.

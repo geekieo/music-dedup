@@ -8,8 +8,8 @@ import { exec } from 'child_process';
 
 import {
   getDB, statsQuery, getGroups, getGroupDetail, resolveGroup,
-  setTrackKeep, getAllSettings, getSetting, setSetting,
-  addWhitelist, removeWhitelist, getWhitelist, getFileById,
+  getAllSettings, getSetting, setSetting,
+  addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds, getFileById,
   queryLibrary, queryLibraryByTier, locateFileInLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
   getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
 } from './lib/db.js';
@@ -313,12 +313,24 @@ app.get('/api/system/fpcalc', async(req,res)=>{
   }});
 });
 
-// ── Whitelist ─────────────────────────────────────────────────────────────
-app.get('/api/whitelist', (_,res)=>res.json({ok:true,data:getWhitelist(db)}));
-app.post('/api/whitelist/:fileId', (req,res)=>{ const f=getFileById(db,+req.params.fileId); if(!f)return res.status(404).json({ok:false}); addWhitelist(db,+req.params.fileId); res.json({ok:true}); });
-app.delete('/api/whitelist/:fileId', (req,res)=>{ removeWhitelist(db,+req.params.fileId); res.json({ok:true}); });
+// ── Retention list ───────────────────────────────────────────────────────
+app.get('/api/retention-list', (_,res)=>res.json({ok:true,data:getRetentionList(db)}));
+app.post('/api/retention-list/:fileId', (req,res)=>{ const f=getFileById(db,+req.params.fileId); if(!f)return res.status(404).json({ok:false}); addRetentionList(db,+req.params.fileId); res.json({ok:true}); });
+app.delete('/api/retention-list/:fileId', (req,res)=>{ removeRetentionList(db,+req.params.fileId); res.json({ok:true}); });
 
 // ── Duplicates ────────────────────────────────────────────────────────────
+
+// Compute the set of "kept" file IDs for a group (smart winner ∪ retention list).
+// Mirrors evaluateGroup's OR logic so resolve/unresolve/purge are consistent.
+function computeKeepSet(tracks) {
+  const s = getAllSettings(db);
+  const tierOrder = Array.isArray(s.quality_tiers) && s.quality_tiers.length ? s.quality_tiers : null;
+  const pickTagOrder = Array.isArray(s.pick_tag_order) && s.pick_tag_order.length ? s.pick_tag_order : null;
+  const retentionFileIds = getRetentionFileIds(db);
+  const excludeFileIds = getExcludeFileIds(db);
+  const annotated = tagTracks(tracks, tierOrder, pickTagOrder, retentionFileIds, excludeFileIds);
+  return new Set(annotated.filter(t => t._keepWinner).map(t => t.id));
+}
 app.get('/api/duplicates', (req,res)=>{
   const resolved = req.query.resolved!==undefined ? req.query.resolved==='1' : undefined;
   res.setHeader('Cache-Control','no-store');
@@ -330,12 +342,16 @@ app.get('/api/duplicates/:id', (req,res)=>{
   if(!g) return res.status(404).json({ok:false});
   const s=getAllSettings(db);
   const tierOrder=Array.isArray(s.quality_tiers)&&s.quality_tiers.length?s.quality_tiers:null;
-  g.tracks=tagTracks(g.tracks,tierOrder);
+  const pickTagOrder=Array.isArray(s.pick_tag_order)&&s.pick_tag_order.length?s.pick_tag_order:null;
+  const retentionFileIds=getRetentionFileIds(db);
+  const excludeFileIds=getExcludeFileIds(db);
+  g.tracks=tagTracks(g.tracks,tierOrder,pickTagOrder,retentionFileIds,excludeFileIds);
   res.json({ok:true,data:g});
 });
 app.post('/api/duplicates/:id/resolve', async(req,res)=>{
   const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
-  const dels=g.tracks.filter(t=>!t.keep);
+  const keepSet=computeKeepSet(g.tracks);
+  const dels=g.tracks.filter(t=>!keepSet.has(t.id));
   if(dels.length===0) return res.status(400).json({ok:false,error:'该组没有需要删除的文件——所有曲目均为保留状态，无需处理。'});
   const results=[];
   for(const t of dels){
@@ -350,7 +366,8 @@ app.post('/api/duplicates/resolve-all', async(req,res)=>{
   let del=0,err=0;
   for(const g of pending){
     const d=getGroupDetail(db,g.id); if(!d)continue;
-    const dels=d.tracks.filter(t=>!t.keep);
+    const keepSet=computeKeepSet(d.tracks);
+    const dels=d.tracks.filter(t=>!keepSet.has(t.id));
     if(dels.length===0) continue;
     for(const t of dels){
       if(!existsSync(t.path)) continue;
@@ -364,8 +381,9 @@ app.post('/api/duplicates/resolve-all', async(req,res)=>{
 // 撤销：恢复 .deleted 文件，标记组为未处理
 app.post('/api/duplicates/:id/unresolve', (req,res)=>{
   const g=getGroupDetail(db,+req.params.id); if(!g)return res.status(404).json({ok:false});
+  const keepSet=computeKeepSet(g.tracks);
   const restored=[], failed=[];
-  for(const t of g.tracks.filter(t=>!t.keep)){
+  for(const t of g.tracks.filter(t=>!keepSet.has(t.id))){
     // Restore main file
     const delPath=t.path+'.deleted';
     if(existsSync(delPath)){ try{renameSync(delPath,t.path);restored.push(t.path);}catch(e){failed.push({path:t.path,error:e.message});} }
@@ -387,8 +405,9 @@ app.post('/api/duplicates/unresolve-all', (req,res)=>{
   let totalRestored=0, groupsRestored=0;
   for(const g of groups){
     const d=getGroupDetail(db,g.id); if(!d)continue;
+    const keepSet=computeKeepSet(d.tracks);
     let restored=[];
-    for(const t of d.tracks.filter(t=>!t.keep)){
+    for(const t of d.tracks.filter(t=>!keepSet.has(t.id))){
       const delPath=t.path+'.deleted';
       if(existsSync(delPath)){ try{renameSync(delPath,t.path);restored.push(t.path);}catch(e){} }
       const dir2=path.dirname(t.path);
@@ -429,7 +448,8 @@ app.post('/api/trash/empty', (req,res)=>{
 function purgeGroupFiles(db, g) {
   let deleted=0, failed=0;
   const purgeIds=[];
-  for(const t of g.tracks.filter(t=>!t.keep)){
+  const keepSet=computeKeepSet(g.tracks);
+  for(const t of g.tracks.filter(t=>!keepSet.has(t.id))){
     const delPath=t.path+'.deleted';
     if(existsSync(delPath)){ try{unlinkSync(delPath);deleted++;}catch(e){failed++;} }
     const dir=path.dirname(t.path);
@@ -459,15 +479,50 @@ app.put('/api/duplicates/:id/tracks/:fid/keep', (req,res)=>{
   const gid=+req.params.id, fid=+req.params.fid; const {keep,reason}=req.body;
   const g=getGroupDetail(db,gid); if(!g)return res.status(404).json({ok:false});
   if(keep){
-    // Only mark the specified track as keep — do NOT touch other tracks' keep state
-    setTrackKeep(db,gid,fid,true,reason||'手动指定保留',1);
+    // Remove any existing exclude override first
+    removeRetentionList(db,fid);
+    // Check whether this track would be a smart winner without any override.
+    // If yes, let it revert to smart-retain rather than forcing manual keep.
+    const s=getAllSettings(db);
+    const tierOrder=Array.isArray(s.quality_tiers)&&s.quality_tiers.length?s.quality_tiers:null;
+    const pickTagOrder=Array.isArray(s.pick_tag_order)&&s.pick_tag_order.length?s.pick_tag_order:null;
+    const retentionFileIds=getRetentionFileIds(db);
+    const excludeFileIds=getExcludeFileIds(db);
+    const annotated=tagTracks(g.tracks,tierOrder,pickTagOrder,retentionFileIds,excludeFileIds);
+    const track=annotated.find(t=>t.id===fid);
+    if(!track||!track._keepWinner){
+      // Not a smart winner — needs manual keep
+      addRetentionList(db,fid,reason||'手动保留',1);
+    }
+    // If it IS a smart winner, we're done — just removed the exclude override
   } else {
-    // Ensure at least one other non-whitelisted track remains as keep
-    if(!g.tracks.filter(t=>t.keep&&t.id!==fid&&!t.whitelisted).length)
-      return res.status(400).json({ok:false,error:'至少保留一个'});
-    setTrackKeep(db,gid,fid,false,'手动指定删除',1);
+    // Remove any manual-keep entry, then add an exclude override so
+    // smart-winner tracks can also be toggled to "delete" state.
+    removeRetentionList(db,fid);
+    // Check whether this track would still be a smart winner after removal
+    const s=getAllSettings(db);
+    const tierOrder=Array.isArray(s.quality_tiers)&&s.quality_tiers.length?s.quality_tiers:null;
+    const pickTagOrder=Array.isArray(s.pick_tag_order)&&s.pick_tag_order.length?s.pick_tag_order:null;
+    const retentionFileIds=getRetentionFileIds(db);
+    const excludeFileIds=getExcludeFileIds(db);
+    const annotated=tagTracks(g.tracks,tierOrder,pickTagOrder,retentionFileIds,excludeFileIds);
+    const track=annotated.find(t=>t.id===fid);
+    if(track&&track._keepWinner){
+      // Still a smart winner — add exclude override
+      addRetentionList(db,fid,null,0);
+    }
   }
-  res.json({ok:true,data:getGroupDetail(db,gid)});
+  // Return updated group detail with recomputed keep
+  const updated=getGroupDetail(db,gid);
+  if(updated){
+    const s=getAllSettings(db);
+    const tierOrder=Array.isArray(s.quality_tiers)&&s.quality_tiers.length?s.quality_tiers:null;
+    const pickTagOrder=Array.isArray(s.pick_tag_order)&&s.pick_tag_order.length?s.pick_tag_order:null;
+    const retentionFileIds=getRetentionFileIds(db);
+    const excludeFileIds=getExcludeFileIds(db);
+    updated.tracks=tagTracks(updated.tracks,tierOrder,pickTagOrder,retentionFileIds,excludeFileIds);
+  }
+  res.json({ok:true,data:updated});
 });
 
 // ── SSE ───────────────────────────────────────────────────────────────────
@@ -492,6 +547,7 @@ app.post('/api/scan/start', async(req,res)=>{
   const threads=parseInt(s.threads||'8'), threshold=parseInt(s.threshold||'90');
   const durationTolerance=parseInt(s.duration_tolerance||'5');
   const qualityTiers=Array.isArray(s.quality_tiers)?s.quality_tiers:null;
+  const pickTagOrder=Array.isArray(s.pick_tag_order)&&s.pick_tag_order.length?s.pick_tag_order:null;
   const smartScan=s.smart_scan!==false;
   // 全局 8 步执行流程，详见 lib/matcher.js 顶部注释
   //   步骤1 枚举 → 步骤2 提取属性 → 步骤3 属性匹配 → 步骤4 提取声纹
@@ -519,18 +575,18 @@ app.post('/api/scan/start', async(req,res)=>{
     // 步骤2: 提取属性
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
-    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,qualityTiers,pickTagOrder,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤4: 提取声纹
     if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
-    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,qualityTiers,pickTagOrder,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤7: 刮削
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     // 步骤8: 刮削匹配（recording ID 对比）
-    if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{qualityTiers,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{qualityTiers,pickTagOrder,onProgress:prog,onAbort:abort,onPause:pause});
   }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
