@@ -8,18 +8,22 @@ import { exec } from 'child_process';
 
 import {
   getDB, statsQuery, getGroups, getGroupDetail, resolveGroup,
-  getAllSettings, getSetting, setSetting,
+  getAllSettings, setSetting,
   addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds, getFileById,
-  queryLibrary, queryLibraryByTier, locateFileInLibrary, libraryStats, upsertScrapedMeta, getFilesNeedingScrape, getScrapedMeta,
-  getTagSnapshots, getAllTagSnapshots, getTagSnapshot, getWriteHistory,
+  queryLibrary, queryLibraryByTier, locateFileInLibrary, libraryStats, getScrapedMeta,
+  getTagSnapshots, getWriteHistory,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.js';
 import { runScrape, scrapeSingleFile } from './lib/scraper.js';
-import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, buildFilename, getExiftoolStatus } from './lib/tagger.js';
+import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
 import { computeScrapeTier } from './lib/tier.js';
-import { tagTracks } from './lib/rules.js';
+import { tagTracks, MATCH_TAG_LABELS, MATCH_TAG_DESCRIPTIONS, TAG_COLORS,
+  PICK_TAG_LABEL, PICK_TAG_COLOR, DEFAULT_PICK_TAG_ORDER,
+  MATCHING_METHOD_KEYS, CHARACTERISTIC_TAGS_ARRAY, MATCH_METHOD_TAGS_ARRAY,
+  RTYPE_LABEL, DIMENSION_DEFS, mergePickOrder, EXCLUSIVE_TAG_GROUPS,
+  DEFAULT_TIER_ORDER, TIER_COLOR, TIER_LABEL } from './lib/rules.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,6 +109,35 @@ function pickFolderDialog() {
 app.get('/api/stats', (_,res)=>{ try{res.json({ok:true,data:statsQuery(db)});}catch(e){res.status(500).json({ok:false,error:e.message})}});
 app.get('/api/settings', (_,res)=>res.json({ok:true,data:getAllSettings(db)}));
 app.put('/api/settings', (req,res)=>{ for(const[k,v] of Object.entries(req.body))setSetting(db,k,v); res.json({ok:true}); });
+
+// Serve tag metadata as JS globals for the client (single source: lib/rules.js)
+app.get('/rules-meta.js', (_,res)=>{
+  // Serialize DIMENSION_DEFS manually — cell functions can't go through JSON
+  const dimItems = DIMENSION_DEFS.map(d =>
+    `{key:${JSON.stringify(d.key)},label:${JSON.stringify(d.label)},cell:${d.cell.toString()}}`
+  ).join(',');
+  res.type('application/javascript');
+  res.send([
+    `const MATCH_TAG_LABELS=${JSON.stringify(MATCH_TAG_LABELS)};`,
+    `const MATCH_TAG_DESCRIPTIONS=${JSON.stringify(MATCH_TAG_DESCRIPTIONS)};`,
+    `const TAG_COLORS=${JSON.stringify(TAG_COLORS)};`,
+    `const PICK_TAG_LABEL=${JSON.stringify(PICK_TAG_LABEL)};`,
+    `const PICK_TAG_COLOR=${JSON.stringify(PICK_TAG_COLOR)};`,
+    `const DEFAULT_PICK_TAG_ORDER=${JSON.stringify(DEFAULT_PICK_TAG_ORDER)};`,
+    `const DEFAULT_PICK=DEFAULT_PICK_TAG_ORDER;`,
+    `const MATCH_METHOD_TAGS=new Set(${JSON.stringify([...MATCHING_METHOD_KEYS])});`,
+    `const MATCH_METHOD_TAGS_ARRAY=${JSON.stringify(MATCH_METHOD_TAGS_ARRAY)};`,
+    `const CHARACTERISTIC_TAGS=new Set(${JSON.stringify(CHARACTERISTIC_TAGS_ARRAY)});`,
+    `const CHARACTERISTIC_TAGS_ARRAY=${JSON.stringify(CHARACTERISTIC_TAGS_ARRAY)};`,
+    `const EXCLUSIVE_TAG_GROUPS=${JSON.stringify(EXCLUSIVE_TAG_GROUPS)};`,
+    `const RTYPE_LABEL=${JSON.stringify(RTYPE_LABEL)};`,
+    `const DIMENSION_COLUMNS=[${dimItems}];`,
+    `const mergePickOrder=${mergePickOrder.toString()};`,
+    `const DEFAULT_Q=${JSON.stringify(DEFAULT_TIER_ORDER)};`,
+    `const TIER_COLOR=${JSON.stringify(TIER_COLOR)};`,
+    `const TIER_LABEL=${JSON.stringify(TIER_LABEL)};`,
+  ].join('\n'));
+});
 
 // ── Native folder picker — opens an OS-native "choose folder" dialog on the
 // machine running this server (assumed to be the same machine as the browser,
@@ -546,8 +579,6 @@ app.post('/api/scan/start', async(req,res)=>{
   const dirs=s.scan_dirs||[], exclude=s.exclude_patterns||[];
   const threads=parseInt(s.threads||'8'), threshold=parseInt(s.threshold||'90');
   const durationTolerance=parseInt(s.duration_tolerance||'5');
-  const qualityTiers=Array.isArray(s.quality_tiers)?s.quality_tiers:null;
-  const pickTagOrder=Array.isArray(s.pick_tag_order)&&s.pick_tag_order.length?s.pick_tag_order:null;
   const smartScan=s.smart_scan!==false;
   // 全局 8 步执行流程，详见 lib/matcher.js 顶部注释
   //   步骤1 枚举 → 步骤2 提取属性 → 步骤3 属性匹配 → 步骤4 提取声纹
@@ -575,19 +606,19 @@ app.post('/api/scan/start', async(req,res)=>{
     // 步骤2: 提取属性
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
-    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,qualityTiers,pickTagOrder,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤4: 提取声纹
     if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
-    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,qualityTiers,pickTagOrder,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤7: 刮削
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     // 步骤8: 刮削匹配（recording ID 对比）
-    if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{qualityTiers,pickTagOrder,onProgress:prog,onAbort:abort,onPause:pause});
-  }catch(e){ prog({phase:'error',pct:0,message:`失败: ${e.message}`}); }
+    if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{onProgress:prog,onAbort:abort,onPause:pause});
+  }catch(e){ prog({phase:'error',pct:0,level:'err',message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
 app.post('/api/scan/abort', (_,res)=>{ if(!scanState.running)return res.json({ok:false}); scanState.abortFlag=true; scanState.paused=false; broadcast({type:'progress',...scanState}); res.json({ok:true}); });
