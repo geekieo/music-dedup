@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-07-17
+
+### Added
+
+- **时长准确保留维度**：组级精确刮削时长为参考（MB 优先于 AcoustID，容差 3s），判断每个文件本地时长是否准确。读的是音频本身而非标签，是保留优先级中最硬的信号
+- **多段 LSH 分桶**：频谱和 CP 声纹各取 5 段（`NUM_LSH_SEGMENTS=5`）分布在整个时长上，每文件进 ~5 个桶，任一命中即触发比对，大幅提升偏移/裁剪场景的召回率
+- **滑动窗口对齐**：`fingerprintSimilarity` / `chromaprintSimilarity` 新增 `maxOffset=8` 参数，±8 帧偏移搜索最优对齐位置，解决编码器 priming/padding 导致指纹序列偏移后相似度骤降的问题
+- **递归时长桶细分**：时长桶超 600 不再跳过，改为按指纹段递归细分（`subdivideDurBucket`，最多 3 层），消灭超大桶导致的漏检
+- **刮削 duration 字段**：`scraped_meta` 表新增 `duration REAL` 列，MB 从录音长度（ms→s）换算，AcoustID 独立记录，为 `duration_accurate` 维度提供 AcoustID 数据源
+- **回收站生命周期**：`/api/duplicates/:id/unresolve`（恢复单组）、`/api/duplicates/unresolve-all`（批量恢复）、`/api/duplicates/:id/purge`（彻底删除）、`/api/duplicates/empty-trash`（清空回收站）；连带回收同名歌词文件（.lrc/.txt/.lyric 等）
+- **release 脚本**：`scripts/release.js` 标准化版本发布（bump → CHANGELOG placeholder → git tag -a）
+
+### Changed
+
+- **保留系统完全重构**：
+  - `group_tracks` 表移除 `keep` / `keep_reason` / `manual_override` 列，保留结果改为动态计算（`evaluateGroup` → `applyRetentionRules`）
+  - `whitelist` 表更名为 `retention_list`，概念从"排除检测"转为"受保护不被删除"（文件仍参与重复检测，但在保留决策中标记为优先保留）
+  - 保留优先级从 4 级扩展为 6 级级联：`duration_accurate → quality_best → album_best → release_best → scrape_best → meta_best`，硬信号（音频本身）优先，可被刮削覆写的软标签靠后
+  - `scrape_best` 不再混入时长匹配（`countScrapeMatches` 仅比较年份/曲目号/风格），时长独立由 `duration_accurate` 判断，避免正确时长的文件因标签字段少而被时长有误的文件逆袭
+- **统一进度报告系统**：SSE 进度推送规范化，`phase:'done'` 完成提示，`runMetadata` 按文件粒度更新进度
+- **TrackRow 标签化展示**：从单一 `keep_reason` 改为 `_tags` 多维标签数组，每个保留维度独立标注颜色和图标
+- **批量操作 UI 安全加固**：单组回收站无弹窗；批量恢复确认弹窗显示组数和空间；已处理组"撤销"/"彻底删除"；"待处理"/"已处理"批处理功能区分
+- **过滤标签互斥组**：`EXCLUSIVE_TAG_GROUPS` 定义 5 组互斥标签对，同组选中一个自动替换另一个，避免 AND 语义下返回零结果
+- **筛选栏框架始终可见**：重复组筛选栏不会因标签为空而消失
+- **`fp_diff` 文案修正**："声纹不同" → "无声纹佐证"，标签和描述均更新，说明标注代表"没有可比对的声纹结果"而非"比对不通过"
+- **刮削状态图标**：`shield-check` → `cloud-check`，区分"刮削已确认"与"保留名单受保护"
+- **设置页新增图标**：`audio-levels`（音质优先级，三段均衡器）、`priority-podium`（保留优先级，领奖台+星标）
+- **播放进度条**：悬停和拖拽时统一显示"进度 / 总时长"
+- **版本号管理**：`release.js` 同步更新 `package.json` + `public/app.js`（`APP_VERSION`）+ CHANGELOG
+- **自定义优先级向后兼容**：旧 `pick_tag_order` 设置缺少新维度键时从默认顺序尾部补齐，不会静默丢失
+
+### Fixed
+
+- UI 细节：Hint 点击常驻/滚动收起、AcoustID 验证持久化（localStorage）、布局晃动修复（`scrollbar-gutter:stable`）
+- 修复"全部扫描操作"步骤序列错误
+- 修复重复组详情载入逻辑
+- 声纹匹配 hint 文案修正
+
 ## [1.12.3] — 2026-07-11
 
 ### Changed
