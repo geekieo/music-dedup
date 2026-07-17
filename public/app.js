@@ -60,7 +60,7 @@ const CHARACTERISTIC_TAGS_ARRAY=['format_same','format_diff','filename_same','me
 const MATCH_TAG_LABELS={
   spectral_exact:'频谱声纹一致', same_recording:'频谱声纹相似', cp_exact:'CP声纹一致', cp_similar:'CP声纹相似',
   meta_confirmed:'属性匹配', mb_confirmed:'MusicBrainz刮削一致', acoustid_confirmed:'AcoustID刮削一致',
-  fp_diff:'声纹不同', format_diff:'格式不同', format_same:'格式相同', filename_same:'文件名相同',
+  fp_diff:'无声纹佐证', format_diff:'格式不同', format_same:'格式相同', filename_same:'文件名相同',
   metadata_same:'属性一致', metadata_diff:'属性不同', duration_near:'时长接近', duration_diff:'时长不同',
   release_year_diff:'年份不同', release_type_diff:'发行类型不同', meta_score_diff:'属性完整度不同', retention_tie:'保留平局',
 };
@@ -72,7 +72,7 @@ const MATCH_TAG_DESCRIPTIONS={
   meta_confirmed:'标题、艺术家、时长一致——属性匹配判定为重复，不需要声纹参与。',
   mb_confirmed:'两个文件被 MusicBrainz 文本搜索匹配到同一条录音，第三方数据库交叉确认。',
   acoustid_confirmed:'两个文件被 AcoustID 声纹识别到同一条录音——由声纹验证，比纯文本搜索的确认更可信。',
-  fp_diff:'频谱声纹和 Chromaprint 声纹都没有比对上，凭标题、艺术家、时长等信息判定为重复。',
+  fp_diff:'频谱声纹和 Chromaprint 声纹都没有可比对的结果（可能是声纹未提取，也可能比对未达阈值），凭标题、艺术家、时长等信息判定。',
   format_diff:'组内存在不同的文件格式（如 FLAC + MP3），保留规则会优先保留高质量格式。',
   format_same:'组内所有文件格式相同，保留决策取决于码率、采样率等其他因素。',
   filename_same:'文件名（不含扩展名）完全相同。',
@@ -138,6 +138,27 @@ const ICONS={
   'shield-check':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9 12l2 2 4-4'}]]},
   'shield-filled':{fill:1,els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}]]},
   'shield-plus':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M12 9v5M9.5 11.5h5'}]]},
+  // 刮削确认 — same cloud silhouette as the "刮削操作" action icon
+  // (cloud-download), but with a checkmark instead of the download arrow,
+  // so the status reads as "data fetched & confirmed" rather than
+  // "protected" (that meaning is reserved for shield-check/保留名单).
+  'cloud-check':{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}],['path',{d:'M8.5 14.3l2.3 2.3 4.7-4.9'}]]},
+  // 音质优先级 — a 3-band audio equalizer (vertical tracks + slider knobs),
+  // reads as "sound quality levels" rather than a generic gem/rating mark.
+  'audio-levels':{els:[
+    ['path',{d:'M6 19V15'}],['path',{d:'M6 12V5'}],['circle',{cx:6,cy:13.5,r:1.4,fill:'currentColor'}],
+    ['path',{d:'M12 19V10'}],['path',{d:'M12 7V5'}],['circle',{cx:12,cy:8.5,r:1.4,fill:'currentColor'}],
+    ['path',{d:'M18 19V17'}],['path',{d:'M18 14V5'}],['circle',{cx:18,cy:15.5,r:1.4,fill:'currentColor'}]
+  ]},
+  // 保留优先级 — a ranking podium with the tallest (1st-place) column
+  // starred, reads as "which file wins and gets kept" rather than an
+  // ambiguous card stack.
+  'priority-podium':{els:[
+    ['rect',{x:3,y:13,width:5,height:8,rx:1}],
+    ['rect',{x:9.5,y:8,width:5,height:13,rx:1}],
+    ['rect',{x:16,y:15,width:5,height:6,rx:1}],
+    ['path',{d:'M12 3.8l.7 1.5 1.6.2-1.2 1.2.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.2 1.6-.2z',fill:'currentColor',stroke:'none'}]
+  ]},
   trash:{els:[['path',{d:'M4 7h16'}],['path',{d:'M9 7V4h6v3'}],['path',{d:'M6 7l1 13h10l1-13'}]]},
   refresh:{els:[['path',{d:'M4 12a8 8 0 0114-5.3'}],['path',{d:'M20 12a8 8 0 01-14 5.3'}],['path',{d:'M18 4v4h-4'}],['path',{d:'M6 20v-4h4'}]]},
   key:{els:[['circle',{cx:7,cy:15,r:4}],['path',{d:'M10 12l9-9'}],['path',{d:'M16 6l2 2'}],['path',{d:'M13 9l2 2'}]]},
@@ -1064,7 +1085,7 @@ function PropsModal({fileId,onClose}){
     (scraped?.mb?.title||scraped?.acoustid?.title)&&e('div',{style:{marginTop:12}},
       scraped.mb?.title&&e('div',{style:{marginBottom:8,padding:'10px 14px',background:'#F5F3FF',border:'0.5px solid #DDD6FE',borderRadius:'var(--r-md)'}},
         e('div',{style:{fontSize:11,fontWeight:600,color:'#5B21B6',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
-          Icon('shield-check',{fontSize:13}),'刮削数据 · MusicBrainz',
+          Icon('cloud-check',{fontSize:13}),'刮削数据 · MusicBrainz',
               mbTier==='yellow'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
               mbTier==='green'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配)'),
               mbTier==='blue'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
@@ -1515,7 +1536,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                     ].filter(Boolean).join('\n');
                     return e(InstantTooltip,{tip:tipLines},
                       e('button',{onClick:()=>setScrapeTarget(f.id),style:{background:'none',border:'none',cursor:'pointer',display:'inline-flex',padding:2}},
-                        Icon('shield-check',{fontSize:15,color:TIER_COLOR[tier]})
+                        Icon('cloud-check',{fontSize:15,color:TIER_COLOR[tier]})
                       )
                     );
                   })()
@@ -1706,8 +1727,8 @@ function ScannerView({scan}){
            path on hover/truncated
    RIGHT : keep-toggle button (✓ or ✗) + secondary actions
 */
-const PICK_TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削更准',release_best:'发售更早',album_best:'专辑优先',meta_best:'属性最全',manual_keep:'手动保留'};
-const PICK_TAG_COLOR={quality_best:'var(--amber)',scrape_best:'#0D9488',release_best:'#7C3AED',album_best:'#C2410C',meta_best:'#3B82F6',manual_keep:'var(--green)'};
+const PICK_TAG_LABEL={quality_best:'音质最优',scrape_best:'刮削更准',release_best:'发售更早',album_best:'专辑优先',meta_best:'属性最全',duration_accurate:'时长准确',manual_keep:'手动保留'};
+const PICK_TAG_COLOR={quality_best:'var(--amber)',scrape_best:'#0D9488',release_best:'#7C3AED',album_best:'#C2410C',meta_best:'#3B82F6',duration_accurate:'#DB2777',manual_keep:'var(--green)'};
 function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept}){
   const keep=!!track._keepWinner;
   const wl=!!track.in_retention_list||(track._pickTags||[]).includes('manual_keep');
@@ -1904,9 +1925,12 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     return [...s];
   },[groups]);
 
-  // Only matching-method tags are shown in the filter bar.
-  // Characteristic tags (format_diff, metadata_same, etc.) still appear
-  // in the group detail view but are not filterable.
+  // Both matching-method tags and characteristic tags are filterable —
+  // they share the same tagFilter set (two button rows below), combined
+  // with AND semantics. See EXCLUSIVE_TAG_GROUPS for how mutually
+  // exclusive tags within one row (e.g. format_same vs format_diff) are
+  // kept from being selected together, which would otherwise always
+  // yield zero results.
   const filterTags=useMemo(()=>{
     // Stable display order: 属性→声纹→刮削, 默认→可选, 一致→相似
     const TAG_ORDER=['meta_confirmed','spectral_exact','same_recording','cp_exact','cp_similar','mb_confirmed','acoustid_confirmed'];
@@ -1935,7 +1959,28 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     return list;
   },[groups,tagFilter,search]);
 
-  function toggleTagFilter(tag){setTagFilter(prev=>{const n=new Set(prev);n.has(tag)?n.delete(tag):n.add(tag);return n;});}
+  // Tag pairs that can never co-occur on the same group (detectMatchTags
+  // assigns at most one from each pair via if/else-if). tagFilter combines
+  // selections with AND, so letting both be selected together would be a
+  // self-contradictory filter that always returns zero results — not a
+  // real "no matches" state, just a broken query the UI shouldn't allow.
+  const EXCLUSIVE_TAG_GROUPS=[
+    ['spectral_exact','same_recording'],
+    ['cp_exact','cp_similar'],
+    ['format_same','format_diff'],
+    ['duration_near','duration_diff'],
+    ['metadata_same','metadata_diff'],
+  ];
+  function toggleTagFilter(tag){
+    setTagFilter(prev=>{
+      const n=new Set(prev);
+      if(n.has(tag)){n.delete(tag);return n;}
+      const excl=EXCLUSIVE_TAG_GROUPS.find(g=>g.includes(tag));
+      if(excl)for(const other of excl)if(other!==tag)n.delete(other);
+      n.add(tag);
+      return n;
+    });
+  }
 
   async function resolve(id){
     const r=await api.post('/api/duplicates/'+id+'/resolve');
@@ -1997,7 +2042,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
     // Filter bar: matching-method tags (how the group was discovered)
     e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选（可多选）：'),
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选（可多选）：',e(Hint,{text:'多个已选条件为"同时满足"关系。"频谱声纹一致/相似"、"CP声纹一致/相似"这两组互斥标签选中一个会自动替换掉同组的另一个。'})),
       filterTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
@@ -2011,7 +2056,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     ),
     // Second row: characteristic tags (what the group looks like) + clear button
     e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征（可多选）：'),
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征（可多选）：',e(Hint,{text:'多个已选条件为"同时满足"关系。"格式相同/不同"、"时长接近/不同"、"属性一致/不同"这三组互斥标签选中一个会自动替换掉同组的另一个。'})),
       charTags.map(tag=>{
         const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
@@ -2188,13 +2233,21 @@ const SETTINGS_SECTIONS=[
   {id:'sec-basic',   label:'基础匹配',   icon:'tag'},
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
-  {id:'sec-quality', label:'音质优先级', icon:'diamond'},
-  {id:'sec-pick',    label:'保留优先级', icon:'stack-2'},
+  {id:'sec-quality', label:'音质优先级', icon:'audio-levels'},
+  {id:'sec-pick',    label:'保留优先级', icon:'priority-podium'},
   {id:'sec-wl',      label:'保留名单',     icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 const DEFAULT_Q=['Hi-Res FLAC / WAV (96kHz+)','FLAC / WAV (44.1kHz)','AIFF','M4A / AAC ≥ 256k','MP3 320k','MP3 256k','MP3 192k','OGG / Opus','MP3 128k 及以下'];
-const DEFAULT_PICK=['quality_best','release_best','meta_best','scrape_best','album_best'];
+const DEFAULT_PICK=['duration_accurate','quality_best','album_best','release_best','scrape_best','meta_best'];
+// Old saved pick_tag_order values (from before duration_accurate existed)
+// won't contain the new key — append any DEFAULT_PICK keys the user's
+// saved order is missing, so upgrades don't silently drop new dimensions
+// from both the scoring cascade and the settings drag list.
+function mergePickOrder(saved){
+  if(!Array.isArray(saved)||!saved.length)return[...DEFAULT_PICK];
+  return[...saved,...DEFAULT_PICK.filter(k=>!saved.includes(k))];
+}
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
   const[rows,setRows]=useState(null);
@@ -2446,7 +2499,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       if(!r.ok)return;
       const d=r.data;
       if(!d.quality_tiers||!Array.isArray(d.quality_tiers))d.quality_tiers=[...DEFAULT_Q];
-      if(!d.pick_tag_order||!Array.isArray(d.pick_tag_order))d.pick_tag_order=[...DEFAULT_PICK];
+      d.pick_tag_order=mergePickOrder(d.pick_tag_order);
       delete d.scan_dirs; // owned by App/props, not local state — avoid stale overwrite races
       setS(d);
       lastApplied.current={threshold:d.threshold,duration_tolerance:d.duration_tolerance,quality_tiers:JSON.stringify(d.quality_tiers),pick_tag_order:JSON.stringify(d.pick_tag_order)};
@@ -2528,7 +2581,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
   if(!s)return e('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',height:320,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:28}}));
 
   const q=s.quality_tiers||DEFAULT_Q;
-  const pick=s.pick_tag_order||DEFAULT_PICK;
+  const pick=mergePickOrder(s.pick_tag_order);
 
   return e('div',{className:'fade',style:{display:'grid',gridTemplateColumns:'150px 1fr',gap:18,alignItems:'start'}},
 
@@ -2679,7 +2732,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-quality'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组内，格式/码率/采样率/位深更高的文件优先保留。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组内，格式/码率/采样率/位深更高的文件优先保留。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
         ),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
@@ -2695,12 +2748,12 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-pick'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'stack-2',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中依次按以下维度决定保留哪个文件：\n音质最优 → 格式/码率/采样率/位深最高\n发售更早 → 年份越早越好\n属性最全 → 标签字段越完整越好\n刮削更准 → 标签是否与 MusicBrainz 官方数据吻合\n专辑优先 → 专辑版优先于单曲版\n\n调整顺序后，重复组的保留结果会据此变化。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中依次按以下维度决定保留哪个文件(默认顺序按"硬信号优先、可被刮削覆写的软标签靠后"排列,越靠前风险越低):\n时长准确 → 本地时长是否与精确刮削一致;MB与AcoustID冲突时以MB为准,组内全部准确则不标注——读的是音频本身,标签改不了它\n音质最优 → 格式/码率/采样率/位深最高——同样是音频本身的客观事实\n专辑优先 → 专辑版优先于单曲版,选的是更正确的版本\n发售更早 → 年份越早越好,选的是更早的原版\n刮削更准 → 年份/曲目号/风格与 MusicBrainz 官方数据吻合多(不含时长,时长已单独判断)——只能证明标签被刮削比对过,不代表这份文件本身更原始\n属性最全 → 标签字段越完整越好——原始未刮削过的文件往往标签更少,这一项容易误伤"原汁原味"的版本,因此排最后,仅作为其他维度都打平时的兜底\n\n调整顺序后,重复组的保留结果会据此变化。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetPick},'恢复默认')
         ),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<2?'var(--green)':i<4?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
-          e('span',{style:{flex:1,fontSize:12,color:i<5?'var(--tx-secondary)':'var(--tx-faint)'}},PICK_TAG_LABEL[key]||key),
+          e('span',{style:{flex:1,fontSize:12,color:i<pick.length?'var(--tx-secondary)':'var(--tx-faint)'}},PICK_TAG_LABEL[key]||key),
           i===0&&e('span',{style:{fontSize:10,padding:'1px 6px',borderRadius:3,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}},'最优先'),
           e('div',{style:{display:'flex',flexDirection:'column',gap:1}},
             e('button',{onClick:()=>movePick(i,-1),disabled:i===0,style:{background:'none',border:'none',cursor:i===0?'default':'pointer',padding:'1px 4px',opacity:i===0?.2:1,color:'var(--tx-muted)'}},Icon('chevron-up',{fontSize:13})),
