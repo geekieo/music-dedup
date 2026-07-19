@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] — 2026-07-19
+
+### Added
+
+- **入库时间保留维度 (`ctime_best`)**：文件创建时间越新越优先，排在音质之后、专辑之前。同一专辑后导入的可能是修正过的版本，避免旧文件因先入库而占据优势
+- **重复组详情维度对比表**：每首歌 × 七个保留维度的具体取值，胜出项绿色加粗，文件大小以比例条展示
+
+### Changed
+
+- **级联算法重构**：每个保留维度改为在"当前候选池"里实时取最高分排序，而非预计算全局最优——文件缺某项数据时不参与该轮，不会被淘汰
+- **时长维度按容差分桶比较**：以组内精确刮削时长为参考（MB 优先，容差 3s），本地时长一致的优先
+- **代码整合**：`lib/tags.js` 功能合并到 `lib/rules.js`，消除中间抽象层，减少跨文件跳转
+- **`match_tags` → `group_tags`**：全栈重命名（数据库列、API 字段、前端变量），更准确描述"重复组的标签"这一用途
+- **`fp_diff` 动态注入**：仅当频谱声纹和 Chromaprint 声纹都不相似时才标记，之前预计算导致误标
+- **`metaScore` 简化**：直接统计有效字段数（title/artist/album/year/track/genre），去掉加权计算，与其他维度同质可比
+- **维度对比表 UI 增强**：去掉折叠/展开切换，常驻展示；列宽按内容像素估算自适应（`table-layout:fixed`）；新增 table-compare / ruler / clock / disc / calendar 图标
+- **维度说明弹窗重构**：网格布局（维度名列 + 说明列），顶部增加级联规则的引导文案
+- **标签说明弹窗重构**：互斥标签对（如 `spectral_exact`/`same_recording`）合并为单行展示，`buildLegendRows()` 自动合并；网格布局对齐标签与描述
+- **重复组详情头部重排**：标题+艺术家与操作按钮同行，标签移到下方独立一行，视觉层次更清晰
+- **保留维度从 6 个扩展到 7 个**：`duration_accurate → quality_best → ctime_best → album_best → release_best → scrape_best → meta_best`
+- **文案精简**：`GROUP_TAG_DESCRIPTIONS` 统一为简洁风格，互斥对共享同一描述避免信息重复
+
+### Removed
+
+- `lib/tags.js` — 功能已完全合并到 `lib/rules.js`，不再需要中间层
+
 ## [1.13.0] — 2026-07-17
 
 ### Added
