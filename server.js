@@ -19,10 +19,10 @@ import { runScrape, scrapeSingleFile } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
 import { computeScrapeTier } from './lib/tier.js';
-import { tagTracks, MATCH_TAG_LABELS, MATCH_TAG_DESCRIPTIONS, TAG_COLORS,
+import { tagTracks, GROUP_TAG_LABELS, GROUP_TAG_DESCRIPTIONS, GROUP_TAG_COLORS,
   PICK_TAG_LABEL, PICK_TAG_COLOR, DEFAULT_PICK_TAG_ORDER,
   MATCHING_METHOD_KEYS, CHARACTERISTIC_TAGS_ARRAY, MATCH_METHOD_TAGS_ARRAY,
-  RTYPE_LABEL, DIMENSION_DEFS, mergePickOrder, EXCLUSIVE_TAG_GROUPS,
+  RTYPE_LABEL, DIMENSION_DEFS, DIMENSION_INFO, mergePickOrder, EXCLUSIVE_TAG_GROUPS,
   DEFAULT_TIER_ORDER, TIER_COLOR, TIER_LABEL } from './lib/rules.js';
 import { parseFile } from 'music-metadata';
 
@@ -114,13 +114,13 @@ app.put('/api/settings', (req,res)=>{ for(const[k,v] of Object.entries(req.body)
 app.get('/rules-meta.js', (_,res)=>{
   // Serialize DIMENSION_DEFS manually — cell functions can't go through JSON
   const dimItems = DIMENSION_DEFS.map(d =>
-    `{key:${JSON.stringify(d.key)},label:${JSON.stringify(d.label)},cell:${d.cell.toString()}}`
+    `{key:${JSON.stringify(d.key)},label:${JSON.stringify(d.label)},icon:${JSON.stringify(d.icon)},cell:${d.cell.toString()}}`
   ).join(',');
   res.type('application/javascript');
   res.send([
-    `const MATCH_TAG_LABELS=${JSON.stringify(MATCH_TAG_LABELS)};`,
-    `const MATCH_TAG_DESCRIPTIONS=${JSON.stringify(MATCH_TAG_DESCRIPTIONS)};`,
-    `const TAG_COLORS=${JSON.stringify(TAG_COLORS)};`,
+    `const GROUP_TAG_LABELS=${JSON.stringify(GROUP_TAG_LABELS)};`,
+    `const GROUP_TAG_DESCRIPTIONS=${JSON.stringify(GROUP_TAG_DESCRIPTIONS)};`,
+    `const GROUP_TAG_COLORS=${JSON.stringify(GROUP_TAG_COLORS)};`,
     `const PICK_TAG_LABEL=${JSON.stringify(PICK_TAG_LABEL)};`,
     `const PICK_TAG_COLOR=${JSON.stringify(PICK_TAG_COLOR)};`,
     `const DEFAULT_PICK_TAG_ORDER=${JSON.stringify(DEFAULT_PICK_TAG_ORDER)};`,
@@ -132,6 +132,7 @@ app.get('/rules-meta.js', (_,res)=>{
     `const EXCLUSIVE_TAG_GROUPS=${JSON.stringify(EXCLUSIVE_TAG_GROUPS)};`,
     `const RTYPE_LABEL=${JSON.stringify(RTYPE_LABEL)};`,
     `const DIMENSION_COLUMNS=[${dimItems}];`,
+    `const DIMENSION_INFO=${JSON.stringify(DIMENSION_INFO)};`,
     `const mergePickOrder=${mergePickOrder.toString()};`,
     `const DEFAULT_Q=${JSON.stringify(DEFAULT_TIER_ORDER)};`,
     `const TIER_COLOR=${JSON.stringify(TIER_COLOR)};`,

@@ -18,10 +18,10 @@ const fmtBR=(br,fmt)=>{const f=(fmt||'').toUpperCase();return['FLAC','WAV','AIFF
 const fmtDur=s=>{if(!s)return'—';const m=Math.floor(s/60),sec=Math.floor(s%60);return`${m}:${String(sec).padStart(2,'0')}`;};
 const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN',{dateStyle:'short',timeStyle:'short'});};
 
-// Match-tag taxonomy is documented in lib/rules.js → detectMatchTags().
-// All tag metadata (MATCH_TAG_LABELS, MATCH_TAG_DESCRIPTIONS, TAG_COLORS,
+// Group-tag taxonomy is documented in lib/rules.js → detectGroupTags().
+// All tag metadata (GROUP_TAG_LABELS, GROUP_TAG_DESCRIPTIONS, GROUP_GROUP_TAG_COLORS,
 // PICK_TAG_LABEL, PICK_TAG_COLOR, MATCH_METHOD_TAGS, CHARACTERISTIC_TAGS,
-// CHARACTERISTIC_TAGS_ARRAY, RTYPE_LABEL, DIMENSION_COLUMNS, DEFAULT_PICK,
+// CHARACTERISTIC_TAGS_ARRAY, RTYPE_LABEL, DIMENSION_COLUMNS, DIMENSION_INFO, DEFAULT_PICK,
 // DEFAULT_Q, mergePickOrder, TIER_COLOR, TIER_LABEL)
 // are served by /rules-meta.js (source: lib/rules.js)
 
@@ -514,9 +514,9 @@ function Hint({text,size=13}){
     )
   );
 }
-function MatchTag({tag}){
-  const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-  return e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap'}},MATCH_TAG_LABELS[tag]||tag);
+function GroupTag({tag}){
+  const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+  return e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap'}},GROUP_TAG_LABELS[tag]||tag);
 }
 function Tag({children,color='var(--tx-faint)',bg='var(--bg-muted)',border='var(--bd-default)'}){return e('span',{style:{fontSize:10,padding:'1px 7px',borderRadius:3,background:bg,color,border:`0.5px solid ${border}`,whiteSpace:'nowrap'}},children);}
 // Compact status badge for settings-item validation rows (AcoustID Key /
@@ -1655,26 +1655,49 @@ function ScannerView({scan}){
 // RTYPE_LABEL, DIMENSION_COLUMNS are served by /rules-meta.js (source: lib/rules.js)
 
 function DimensionTable({tracks}){
-  const[open,setOpen]=useState(false);
+  const[open,setOpen]=useState(true);
+  const[showInfo,setShowInfo]=useState(false);
   if(!tracks||tracks.length<2)return null;
+  const mxSize=Math.max(...tracks.map(t=>t.size||1));
   return e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'10px 12px',marginBottom:12}},
-    e('div',{onClick:()=>setOpen(o=>!o),style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4,cursor:'pointer',userSelect:'none',marginBottom:open?8:0}},
-      Icon(open?'chevron-down':'chevron-right',{fontSize:12}),Icon('audio-levels',{fontSize:12}),'各维度详细对比',
-      e('span',{style:{color:'var(--tx-faint)',fontWeight:400,marginLeft:2}},open?'':'（点击展开）')
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:open?8:0}},
+      e('div',{onClick:()=>setOpen(o=>!o),style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4,cursor:'pointer',userSelect:'none'}},
+        Icon(open?'chevron-down':'chevron-right',{fontSize:12}),Icon('audio-levels',{fontSize:12}),'各维度对比'
+      ),
+      e('button',{
+        onClick:()=>setShowInfo(true),
+        style:{padding:'3px 10px',borderRadius:99,fontSize:11,cursor:'pointer',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)',color:'var(--tx-muted)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0},
+      }, Icon('info-circle',{fontSize:12}), '维度说明')
     ),
     open&&e('div',{style:{overflowX:'auto'}},
       e('table',{style:{borderCollapse:'collapse',width:'100%',fontSize:10.5}},
         e('thead',null,e('tr',null,
-          e('th',{style:{textAlign:'left',padding:'2px 8px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},'文件'),
-          ...DIMENSION_COLUMNS.map(c=>e('th',{key:c.key,style:{textAlign:'left',padding:'2px 8px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},c.label))
+          e('th',{style:{textAlign:'left',padding:'2px 8px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},Icon('chart-bar',{fontSize:11}),' 大小'),
+          ...DIMENSION_COLUMNS.map(c=>e('th',{key:c.key,style:{textAlign:'left',padding:'2px 8px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},Icon(c.icon,{fontSize:11}),' ',c.label))
         )),
         e('tbody',null,tracks.map(t=>e('tr',{key:t.id},
-          e('td',{style:{padding:'3px 8px 3px 0',color:t._keepWinner?'var(--green)':'var(--tx-secondary)',fontWeight:t._keepWinner?600:400,whiteSpace:'nowrap',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis'}},t.title||t.path),
+          e('td',{style:{padding:'3px 8px 3px 0',whiteSpace:'nowrap',minWidth:120}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+              e('div',{style:{flex:1,height:6,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden',minWidth:50}},
+                e('div',{style:{width:(t.size/mxSize*100).toFixed(1)+'%',height:'100%',background:t._keepWinner?'var(--green)':'var(--red)',opacity:t._keepWinner?.85:.3,borderRadius:99}})
+              ),
+              e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:t._keepWinner?'var(--green)':'var(--tx-faint)',fontWeight:t._keepWinner?600:400}},fmtBytes(t.size))
+            )
+          ),
           ...DIMENSION_COLUMNS.map(c=>{
             const{text,ok,muted}=c.cell(t,tracks);
             return e('td',{key:c.key,style:{padding:'3px 8px 3px 0',whiteSpace:'nowrap',color:muted?'var(--tx-faint)':ok?'var(--green)':'var(--tx-secondary)',fontWeight:ok?600:400}},text);
           })
         )))
+      )
+    ),
+    showInfo&&e(Modal,{title:'维度说明',width:600,onClose:()=>setShowInfo(false)},
+      e('div',{style:{fontSize:12,lineHeight:1.8,color:'var(--tx-secondary)'}},
+        ...DIMENSION_COLUMNS.map(c=>DIMENSION_INFO[c.key]?e('div',{key:c.key,style:{marginBottom:10}},
+          e('span',{style:{fontWeight:600,color:'var(--tx-primary)'}},c.label),'：',
+          DIMENSION_INFO[c.key]
+        ):null),
+        e('div',{style:{marginTop:12,fontSize:11,color:'var(--tx-faint)'}},'比较的是当前还没被淘汰的文件之间的真实分数（不是只看谁是全组唯一最优），文件缺这项数据时不参与也不会被淘汰。')
       )
     )
   );
@@ -1873,7 +1896,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
   const allTags=useMemo(()=>{
     const s=new Set();
-    groups.forEach(g=>(g.match_tags||'').split(',').filter(Boolean).forEach(t=>s.add(t)));
+    groups.forEach(g=>(g.group_tags||'').split(',').filter(Boolean).forEach(t=>s.add(t)));
     return [...s];
   },[groups]);
 
@@ -1896,7 +1919,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     let list=groups;
     if(tagFilter.size){
       list=list.filter(g=>{
-        const tags=new Set((g.match_tags||'').split(',').filter(Boolean));
+        const tags=new Set((g.group_tags||'').split(',').filter(Boolean));
         return[...tagFilter].every(t=>tags.has(t));
       });
     }
@@ -1956,20 +1979,24 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640},
       e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
+        e('div',{style:{fontSize:11,color:'var(--tx-muted)',marginBottom:14,lineHeight:1.7}},
+          '可多选，多选为同时满足关系。以下互斥标签组选中一个会自动替换同组另一个：',
+          e('div',{style:{marginTop:3}},EXCLUSIVE_TAG_GROUPS.map(g=>g.map(t=>GROUP_TAG_LABELS[t]||t).join('/')).join('、'))
+        ),
         e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginBottom:10}},'重复匹配方法'),
-        ['meta_confirmed','spectral_exact','same_recording','cp_exact','cp_similar','mb_confirmed','acoustid_confirmed'].map(tag=>{
-          const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+        MATCH_METHOD_TAGS_ARRAY.map(tag=>{
+          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
           return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
-            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},MATCH_TAG_LABELS[tag]||tag),
-            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
+            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},GROUP_TAG_LABELS[tag]||tag),
+            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},GROUP_TAG_DESCRIPTIONS[tag])
           );
         }),
         e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginTop:16,marginBottom:10}},'其他组内特征'),
         CHARACTERISTIC_TAGS_ARRAY.map(tag=>{
-          const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
           return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
-            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},MATCH_TAG_LABELS[tag]||tag),
-            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},MATCH_TAG_DESCRIPTIONS[tag])
+            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},GROUP_TAG_LABELS[tag]||tag),
+            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},GROUP_TAG_DESCRIPTIONS[tag])
           );
         })
       )
@@ -1978,11 +2005,11 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
     // Filter bar: matching-method tags (how the group was discovered)
     e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选（可多选）：',e(Hint,{text:'多个已选条件为"同时满足"关系。"频谱声纹一致/相似"、"CP声纹一致/相似"这两组互斥标签选中一个会自动替换掉同组的另一个。'})),
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
       filterTags.map(tag=>{
-        const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+        const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
-        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
+        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
       }),
       e('span',{style:{flex:1,minWidth:8}}),
       e('button',{
@@ -1992,11 +2019,11 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     ),
     // Second row: characteristic tags (what the group looks like) + clear button
     e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征（可多选）：',e(Hint,{text:'多个已选条件为"同时满足"关系。"格式相同/不同"、"时长接近/不同"、"属性一致/不同"这三组互斥标签选中一个会自动替换掉同组的另一个。'})),
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征：'),
       charTags.map(tag=>{
-        const[col,bg,bd]=TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+        const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
         const active=tagFilter.has(tag);
-        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},MATCH_TAG_LABELS[tag]||tag);
+        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
       }),
       e('span',{style:{flex:1,minWidth:24}}),
       e('button',{
@@ -2086,7 +2113,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
         e('div',null,
           visibleGroups.slice(0,displayCount).map(g=>{
           const isSel=g.id===selId;
-          const tags=(g.match_tags||'').split(',').filter(Boolean).slice(0,2);
+          const tags=(g.group_tags||'').split(',').filter(Boolean).slice(0,2);
           const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.title:null)||`组 #${g.id}`;
           const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.artist:null)||'';
           return e('div',{key:g.id,ref:el=>{if(el)groupRefs.current[g.id]=el;else delete groupRefs.current[g.id];},className:g.id===flashGroupId?'locate-flash':undefined,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
@@ -2097,7 +2124,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
             artist&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},artist),
             e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
               (g.savings_bytes>0)&&e('span',{style:{fontSize:10,padding:'1px 6px',borderRadius:3,background:'#FEF3C7',color:'#92400E',border:'0.5px solid #FDE68A'}},fmtBytes(g.savings_bytes)),
-              tags.map(t=>e(MatchTag,{key:t,tag:t}))
+              tags.map(t=>e(GroupTag,{key:t,tag:t}))
             )
           );
         }),
@@ -2117,7 +2144,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
                 e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t._keepWinner)?.title||'—'),
                 e('div',{style:{fontSize:12,color:'var(--tx-muted)',marginBottom:6}},detail.tracks?.find(t=>t._keepWinner)?.artist||''),
                 e('div',{style:{display:'flex',gap:5,flexWrap:'wrap'}},
-                  ...(detail.match_tags||'').split(',').filter(Boolean).map(t=>e(MatchTag,{key:t,tag:t}))
+                  ...(detail.group_tags||'').split(',').filter(Boolean).map(t=>e(GroupTag,{key:t,tag:t}))
                 )
               ),
               detail.resolved?
@@ -2133,10 +2160,6 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
                 (()=>{const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
             ),
 
-            e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'10px 12px',marginBottom:12}},
-              e('div',{style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',marginBottom:8,display:'flex',alignItems:'center',gap:4}},Icon('chart-bar',{fontSize:12}),'文件大小对比'),
-              (()=>{const mx=Math.max(...(detail.tracks||[]).map(t=>t.size||1));return(detail.tracks||[]).map(t=>e('div',{key:t.id,style:{display:'flex',alignItems:'center',gap:8,marginBottom:5}},e('div',{style:{width:90,fontSize:10,fontFamily:'var(--font-mono)',color:t._keepWinner?'var(--green)':'var(--tx-faint)',textAlign:'right',flexShrink:0,fontWeight:t._keepWinner?600:400}},fmtBR(t.bitrate,t.format)),e('div',{style:{flex:1,height:8,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},e('div',{style:{width:(t.size/mx*100).toFixed(1)+'%',height:'100%',background:t._keepWinner?'var(--green)':'var(--red)',opacity:t._keepWinner?.85:.3,borderRadius:99}})),e('div',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',width:56,flexShrink:0,textAlign:'right'}},fmtBytes(t.size))));})()
-            ),
 
             e(DimensionTable,{tracks:detail.tracks||[]}),
 
@@ -2579,7 +2602,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       e(Card,{id:'sec-fp'},
         e(SH,{title:'声纹匹配',hint:'提取音频声纹后交叉比对相似度（滑动窗口对齐）。达到阈值即视为声纹匹配。内置 Goertzel 声纹开箱即用；配置 fpcalc 后可额外启用 Chromaprint 声纹独立比对。'}),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'两条音轨的频谱声纹对比相似度达到此阈值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。注意：标题、艺术家、时长已一致的歌曲，即使低于此阈值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'两条音轨的频谱声纹对比相似度达到此阈值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。注意：标题、艺术家、时长近似的歌曲，即使低于此阈值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
         ),
@@ -2661,7 +2684,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-quality'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组内，格式/码率/采样率/位深更高的文件优先保留。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'按列表顺序对格式/码率/采样率/位深分级打分，作为保留优先级中"音质最优"维度的评分依据。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
         ),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
@@ -2677,7 +2700,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-pick'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'同一重复组中依次按以下维度决定保留哪个文件(默认顺序按"硬信号优先、可被刮削覆写的软标签靠后"排列,越靠前风险越低):\n时长准确 → 本地时长是否与精确刮削一致;MB与AcoustID冲突时以MB为准,组内全部准确则不标注——读的是音频本身,标签改不了它\n音质最优 → 格式/码率/采样率/位深最高——同样是音频本身的客观事实\n专辑优先 → 专辑版优先于单曲版,选的是更正确的版本\n发行更早 → 年份越早越好,选的是更早的原版\n刮削更准 → 年份/曲目号/风格与 MusicBrainz 官方数据吻合多(不含时长,时长已单独判断)——只能证明标签被刮削比对过,不代表这份文件本身更原始\n属性最全 → 标签字段越完整越好——原始未刮削过的文件往往标签更少,这一项容易误伤"原汁原味"的版本,因此排最后,仅作为其他维度都打平时的兜底\n\n调整顺序后,重复组的保留结果会据此变化。每一项比较的都是当前还没被淘汰的文件之间的真实分数（不是只看谁是全组唯一最优），文件缺这项数据时不参与也不会被淘汰。具体分数可以在重复组详情里展开"各维度详细对比"查看。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件的级联规则：按列表顺序依次比较，每轮在当前候选池中取最高分文件晋级，直至唯一胜出。文件缺某项数据时不参与该轮，不会被淘汰。具体各维度含义见重复组详情"各维度对比"旁的说明按钮。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetPick},'恢复默认')
         ),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
