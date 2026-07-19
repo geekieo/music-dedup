@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.13.0';
+const APP_VERSION='1.13.1';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={
@@ -86,6 +86,25 @@ const ICONS={
     ['rect',{x:16,y:15,width:5,height:6,rx:1}],
     ['path',{d:'M12 3.8l.7 1.5 1.6.2-1.2 1.2.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.2 1.6-.2z',fill:'currentColor',stroke:'none'}]
   ]},
+  // 维度对比 — a comparison table (header row + column dividers), reads as
+  // "compare across columns" rather than any single dimension's own icon
+  // (avoids colliding with 音质优先级/audio-levels, which is one specific
+  // dimension, not the whole comparison).
+  'table-compare':{els:[
+    ['rect',{x:3,y:4.5,width:18,height:15,rx:1.5}],['path',{d:'M3 9.5h18'}],
+    ['path',{d:'M9.3 9.5v10'}],['path',{d:'M15 9.5v10'}]
+  ]},
+  // 大小 dimension — a ruler (distinct from priority-podium's stacked bars,
+  // so "size" and "保留优先级" don't read as the same glyph).
+  ruler:{els:[
+    ['rect',{x:3,y:9,width:18,height:6,rx:1}],['path',{d:'M7 9v2.2'}],['path',{d:'M11 9v3.2'}],
+    ['path',{d:'M15 9v2.2'}],['path',{d:'M18 9v3.2'}]
+  ]},
+  clock:{els:[['circle',{cx:12,cy:12,r:9}],['path',{d:'M12 7.2v5l3.4 2'}]]},
+  disc:{els:[['circle',{cx:12,cy:12,r:9}],['circle',{cx:12,cy:12,r:2.2}]]},
+  calendar:{els:[['rect',{x:4,y:5,width:16,height:15,rx:1.5}],['path',{d:'M4 10h16'}],['path',{d:'M8 3v4'}],['path',{d:'M16 3v4'}]]},
+  'list-check':{els:[['path',{d:'M9.5 6.5h10'}],['path',{d:'M9.5 12h10'}],['path',{d:'M9.5 17.5h10'}],
+    ['path',{d:'M4 6.5l1 1 2-2'}],['path',{d:'M4 12l1 1 2-2'}],['path',{d:'M4 17.5l1 1 2-2'}]]},
   trash:{els:[['path',{d:'M4 7h16'}],['path',{d:'M9 7V4h6v3'}],['path',{d:'M6 7l1 13h10l1-13'}]]},
   refresh:{els:[['path',{d:'M4 12a8 8 0 0114-5.3'}],['path',{d:'M20 12a8 8 0 01-14 5.3'}],['path',{d:'M18 4v4h-4'}],['path',{d:'M6 20v-4h4'}]]},
   key:{els:[['circle',{cx:7,cy:15,r:4}],['path',{d:'M10 12l9-9'}],['path',{d:'M16 6l2 2'}],['path',{d:'M13 9l2 2'}]]},
@@ -560,12 +579,15 @@ function Toast({msg,type='info',onClose}){
     Icon(s.ic,{fontSize:16,flexShrink:0}),e('span',{style:{flex:1}},msg),
     e('button',{onClick:onClose,style:{background:'none',border:'none',color:s.col,cursor:'pointer',padding:2}},Icon('x',{fontSize:13})));
 }
-function Modal({title,children,onClose,width=520}){
+function Modal({title,children,onClose,width=520,description}){
   return e('div',{style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.25)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:ev=>ev.target===ev.currentTarget&&onClose()},
     e('div',{className:'fade',style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-xl)',boxShadow:'0 20px 60px rgba(0,0,0,.15)',width:'100%',maxWidth:width,maxHeight:'85vh',display:'flex',flexDirection:'column'}},
-      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px',borderBottom:'0.5px solid var(--bd-subtle)'}},
-        e('span',{style:{fontSize:14,fontWeight:600}},title),
-        e('button',{onClick:onClose,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4}},Icon('x',{fontSize:18}))
+      e('div',{style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px'}},
+          e('span',{style:{fontSize:14,fontWeight:600}},title),
+          e('button',{onClick:onClose,style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:4}},Icon('x',{fontSize:18}))
+        ),
+        description&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',lineHeight:1.6,padding:'0 20px 12px 20px'}},description)
       ),
       e('div',{style:{overflowY:'auto',padding:'16px 20px',flex:1}},children)
     ));
@@ -1655,28 +1677,44 @@ function ScannerView({scan}){
 // RTYPE_LABEL, DIMENSION_COLUMNS are served by /rules-meta.js (source: lib/rules.js)
 
 function DimensionTable({tracks}){
-  const[open,setOpen]=useState(true);
   const[showInfo,setShowInfo]=useState(false);
   if(!tracks||tracks.length<2)return null;
   const mxSize=Math.max(...tracks.map(t=>t.size||1));
+  // Estimate rendered pixel width at fontSize 10.5: CJK ~10.5px, Latin/digit ~6px
+  const textPx=s=>{let w=0;for(const c of s){w+=/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3000-\u303f\uff00-\uffef]/.test(c)?10.5:6}return Math.ceil(w)};
+  // Header width = icon(~11px) + gap(~2px) + label
+  const hdrPx=label=>13+textPx(label);
+  // Size column inner: bar(min 100px) + internal gap(6) + widest bytes text
+  const sizeInner=Math.max(80+6+Math.max(...tracks.map(t=>textPx(fmtBytes(t.size)))),hdrPx('大小'))+4;
+  // Dimension columns inner: max(header, widest cell) + buffer
+  const dimInner={};
+  DIMENSION_COLUMNS.forEach(c=>{
+    const dataPx=Math.max(...tracks.map(t=>textPx(c.cell(t,tracks).text)));
+    dimInner[c.key]=Math.max(hdrPx(c.label),dataPx)+4;
+  });
+  // Convert inner widths → percentages for table-layout:fixed
+  const totalInner=sizeInner+Object.values(dimInner).reduce((a,b)=>a+b,0);
+  const pct=v=>(v/totalInner*100).toFixed(1)+'%';
+  const GAP=10; // right padding = visual gap between columns (no borders)
+  const GAP_FIRST=18; // extra gap after size column — bar fills cell, needs clearer separation
   return e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'10px 12px',marginBottom:12}},
-    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:open?8:0}},
-      e('div',{onClick:()=>setOpen(o=>!o),style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4,cursor:'pointer',userSelect:'none'}},
-        Icon(open?'chevron-down':'chevron-right',{fontSize:12}),Icon('audio-levels',{fontSize:12}),'各维度对比'
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}},
+      e('div',{style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},
+        Icon('table-compare',{fontSize:12}),'维度对比'
       ),
       e('button',{
         onClick:()=>setShowInfo(true),
         style:{padding:'3px 10px',borderRadius:99,fontSize:11,cursor:'pointer',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)',color:'var(--tx-muted)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0},
       }, Icon('info-circle',{fontSize:12}), '维度说明')
     ),
-    open&&e('div',{style:{overflowX:'auto'}},
-      e('table',{style:{borderCollapse:'collapse',width:'100%',fontSize:10.5}},
+    e('div',{style:{overflowX:'auto'}},
+      e('table',{style:{borderCollapse:'collapse',tableLayout:'fixed',width:'100%',fontSize:10.5}},
         e('thead',null,e('tr',null,
-          e('th',{style:{textAlign:'left',padding:'2px 8px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},Icon('chart-bar',{fontSize:11}),' 大小'),
-          ...DIMENSION_COLUMNS.map(c=>e('th',{key:c.key,style:{textAlign:'left',padding:'2px 8px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},Icon(c.icon,{fontSize:11}),' ',c.label))
+          e('th',{style:{textAlign:'left',padding:'2px '+GAP_FIRST+'px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap',width:pct(sizeInner)}},Icon('ruler',{fontSize:11}),' 大小'),
+          ...DIMENSION_COLUMNS.map(c=>e('th',{key:c.key,style:{textAlign:'left',padding:'2px '+GAP+'px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap',width:pct(dimInner[c.key])}},Icon(c.icon,{fontSize:11}),' ',c.label))
         )),
         e('tbody',null,tracks.map(t=>e('tr',{key:t.id},
-          e('td',{style:{padding:'3px 8px 3px 0',whiteSpace:'nowrap',minWidth:120}},
+          e('td',{style:{padding:'3px '+GAP_FIRST+'px 3px 0',whiteSpace:'nowrap'}},
             e('div',{style:{display:'flex',alignItems:'center',gap:6}},
               e('div',{style:{flex:1,height:6,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden',minWidth:50}},
                 e('div',{style:{width:(t.size/mxSize*100).toFixed(1)+'%',height:'100%',background:t._keepWinner?'var(--green)':'var(--red)',opacity:t._keepWinner?.85:.3,borderRadius:99}})
@@ -1686,18 +1724,19 @@ function DimensionTable({tracks}){
           ),
           ...DIMENSION_COLUMNS.map(c=>{
             const{text,ok,muted}=c.cell(t,tracks);
-            return e('td',{key:c.key,style:{padding:'3px 8px 3px 0',whiteSpace:'nowrap',color:muted?'var(--tx-faint)':ok?'var(--green)':'var(--tx-secondary)',fontWeight:ok?600:400}},text);
+            return e('td',{key:c.key,style:{padding:'3px '+GAP+'px 3px 0',whiteSpace:'nowrap',color:muted?'var(--tx-faint)':ok?'var(--green)':'var(--tx-secondary)',fontWeight:ok?600:400}},text);
           })
         )))
       )
     ),
-    showInfo&&e(Modal,{title:'维度说明',width:600,onClose:()=>setShowInfo(false)},
+    showInfo&&e(Modal,{title:'维度说明',width:600,onClose:()=>setShowInfo(false),description:'重复组内每首歌按以下6个维度逐项比较，绿色加粗为该项胜出。维度按优先级从高到低排列，上一级打平时交由下一级裁决，全部打平则全保留，由用户手动选择。'},
       e('div',{style:{fontSize:12,lineHeight:1.8,color:'var(--tx-secondary)'}},
-        ...DIMENSION_COLUMNS.map(c=>DIMENSION_INFO[c.key]?e('div',{key:c.key,style:{marginBottom:10}},
-          e('span',{style:{fontWeight:600,color:'var(--tx-primary)'}},c.label),'：',
-          DIMENSION_INFO[c.key]
-        ):null),
-        e('div',{style:{marginTop:12,fontSize:11,color:'var(--tx-faint)'}},'比较的是当前还没被淘汰的文件之间的真实分数（不是只看谁是全组唯一最优），文件缺这项数据时不参与也不会被淘汰。')
+        e('div',{style:{display:'grid',gridTemplateColumns:'minmax(72px,max-content) 1fr',columnGap:12,rowGap:2,marginBottom:10}},
+          ...DIMENSION_COLUMNS.map(c=>DIMENSION_INFO[c.key]?e('div',{key:c.key,style:{display:'contents'}},
+            e('div',{style:{fontWeight:600,color:'var(--tx-primary)',padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},c.label),
+            e('div',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},DIMENSION_INFO[c.key])
+          ):null)
+        )
       )
     )
   );
@@ -1776,6 +1815,21 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept
       )
     )
   );
+}
+
+// Merge mutually-exclusive tag pairs (EXCLUSIVE_TAG_GROUPS) into a single
+// legend row — they never co-occur on the same group, so they share one
+// line and one description instead of two near-duplicate entries.
+function buildLegendRows(tagArray){
+  const shown=new Set(),rows=[];
+  for(const tag of tagArray){
+    if(shown.has(tag))continue;
+    const pair=EXCLUSIVE_TAG_GROUPS.find(g=>g.includes(tag)&&g.every(t=>tagArray.includes(t)));
+    const row=pair||[tag];
+    row.forEach(t=>shown.add(t));
+    rows.push(row);
+  }
+  return rows;
 }
 
 const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,onLocate,onRetentionChange}){
@@ -1977,28 +2031,36 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
       onTagsWritten:()=>{}}),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
-    showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640},
+    showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640,description:'可多选，多选为同时满足关系；同一行内的标签互斥，只会出现其一。'},
       e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
-        e('div',{style:{fontSize:11,color:'var(--tx-muted)',marginBottom:14,lineHeight:1.7}},
-          '可多选，多选为同时满足关系。以下互斥标签组选中一个会自动替换同组另一个：',
-          e('div',{style:{marginTop:3}},EXCLUSIVE_TAG_GROUPS.map(g=>g.map(t=>GROUP_TAG_LABELS[t]||t).join('/')).join('、'))
-        ),
         e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginBottom:10}},'重复匹配方法'),
-        MATCH_METHOD_TAGS_ARRAY.map(tag=>{
-          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-          return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
-            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},GROUP_TAG_LABELS[tag]||tag),
-            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},GROUP_TAG_DESCRIPTIONS[tag])
-          );
-        }),
+        e('div',{style:{display:'grid',gridTemplateColumns:'minmax(96px,max-content) 1fr',columnGap:12,rowGap:2}},
+          buildLegendRows(MATCH_METHOD_TAGS_ARRAY).map(row=>
+            e('div',{key:row.join('+'),style:{display:'contents'}},
+              e('div',{style:{display:'flex',flexWrap:'wrap',gap:4,alignContent:'flex-start',padding:'6px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},
+                row.map(tag=>{
+                  const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+                  return e('span',{key:tag,style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap'}},GROUP_TAG_LABELS[tag]||tag);
+                })
+              ),
+              e('div',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6,padding:'6px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},GROUP_TAG_DESCRIPTIONS[row[0]])
+            )
+          )
+        ),
         e('div',{style:{fontSize:13,fontWeight:700,color:'var(--tx-primary)',marginTop:16,marginBottom:10}},'其他组内特征'),
-        CHARACTERISTIC_TAGS_ARRAY.map(tag=>{
-          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-          return e('div',{key:tag,style:{display:'flex',gap:10,padding:'5px 0',borderBottom:'0.5px solid var(--bd-subtle)',alignItems:'flex-start'}},
-            e('span',{style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap',flexShrink:0,marginTop:2}},GROUP_TAG_LABELS[tag]||tag),
-            e('span',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6}},GROUP_TAG_DESCRIPTIONS[tag])
-          );
-        })
+        e('div',{style:{display:'grid',gridTemplateColumns:'minmax(96px,max-content) 1fr',columnGap:12,rowGap:2}},
+          buildLegendRows(CHARACTERISTIC_TAGS_ARRAY).map(row=>
+            e('div',{key:row.join('+'),style:{display:'contents'}},
+              e('div',{style:{display:'flex',flexWrap:'wrap',gap:4,alignContent:'flex-start',padding:'6px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},
+                row.map(tag=>{
+                  const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+                  return e('span',{key:tag,style:{fontSize:10,fontWeight:500,color:col,background:bg,border:`0.5px solid ${bd}`,padding:'1px 7px',borderRadius:3,whiteSpace:'nowrap'}},GROUP_TAG_LABELS[tag]||tag);
+                })
+              ),
+              e('div',{style:{fontSize:11,color:'var(--tx-secondary)',lineHeight:1.6,padding:'6px 0',borderBottom:'0.5px solid var(--bd-subtle)'}},GROUP_TAG_DESCRIPTIONS[row[0]])
+            )
+          )
+        )
       )
     ),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
@@ -2139,25 +2201,27 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
           e('div',{className:'fade'},
             // Header — F6: just tags, no extra explanation paragraph; the tag
             // itself (with hover description) carries the meaning now.
-            e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14,gap:10}},
-              e('div',{style:{flex:1,minWidth:0}},
-                e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t._keepWinner)?.title||'—'),
-                e('div',{style:{fontSize:12,color:'var(--tx-muted)',marginBottom:6}},detail.tracks?.find(t=>t._keepWinner)?.artist||''),
-                e('div',{style:{display:'flex',gap:5,flexWrap:'wrap'}},
-                  ...(detail.group_tags||'').split(',').filter(Boolean).map(t=>e(GroupTag,{key:t,tag:t}))
-                )
+            e('div',{style:{marginBottom:14}},
+              e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10}},
+                e('div',{style:{flex:1,minWidth:0}},
+                  e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t._keepWinner)?.title||'—'),
+                  e('div',{style:{fontSize:12,color:'var(--tx-muted)'}},detail.tracks?.find(t=>t._keepWinner)?.artist||'')
+                ),
+                detail.resolved?
+                  (()=>{
+                    const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];
+                    return e('div',{style:{display:'flex',gap:6}},
+                      e('span',{style:{fontSize:11,fontWeight:500,color:'var(--green)',background:'var(--green-bg)',border:'0.5px solid var(--green-bd)',borderRadius:'var(--r-md)',padding:'4px 10px',display:'inline-flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-circle-check',style:{fontSize:13}}),dels.length?'已处理':'已清理'),
+                      dels.length>0&&e(Btn,{variant:'ghost',icon:'arrow-back-up',small:true,onClick:()=>unresolve(detail.id)},'撤销'),
+                      dels.length>0&&e(Btn,{variant:'ghost',icon:'trash',small:true,onClick:()=>setPurgeConfirm({id:detail.id,count:dels.length})},'彻底删除')
+                    );
+                  })()
+                :
+                  (()=>{const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
               ),
-              detail.resolved?
-                (()=>{
-                  const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];
-                  return e('div',{style:{display:'flex',gap:6}},
-                    e('span',{style:{fontSize:11,fontWeight:500,color:'var(--green)',background:'var(--green-bg)',border:'0.5px solid var(--green-bd)',borderRadius:'var(--r-md)',padding:'4px 10px',display:'inline-flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-circle-check',style:{fontSize:13}}),dels.length?'已处理':'已清理'),
-                    dels.length>0&&e(Btn,{variant:'ghost',icon:'arrow-back-up',small:true,onClick:()=>unresolve(detail.id)},'撤销'),
-                    dels.length>0&&e(Btn,{variant:'ghost',icon:'trash',small:true,onClick:()=>setPurgeConfirm({id:detail.id,count:dels.length})},'彻底删除')
-                  );
-                })()
-              :
-                (()=>{const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
+              e('div',{style:{display:'flex',gap:5,flexWrap:'wrap',marginTop:6}},
+                ...(detail.group_tags||'').split(',').filter(Boolean).map(t=>e(GroupTag,{key:t,tag:t}))
+              )
             ),
 
 
@@ -2700,7 +2764,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
 
       e(Card,{id:'sec-pick'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件的级联规则：按列表顺序依次比较，每轮在当前候选池中取最高分文件晋级，直至唯一胜出。文件缺某项数据时不参与该轮，不会被淘汰。具体各维度含义见重复组详情"各维度对比"旁的说明按钮。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件的级联规则：按列表顺序依次比较，每轮在当前候选池中取最高分文件晋级，直至唯一胜出。文件缺某项数据时不参与该轮，不会被淘汰。具体各维度含义见重复组详情"维度对比"旁的说明按钮。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetPick},'恢复默认')
         ),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
