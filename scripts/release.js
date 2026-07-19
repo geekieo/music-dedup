@@ -8,6 +8,7 @@ import { execSync } from 'child_process';
 
 // npm run always executes from project root
 const PKG_PATH = join(process.cwd(), 'package.json');
+const PKG_LOCK_PATH = join(process.cwd(), 'package-lock.json');
 const CHANGELOG_PATH = join(process.cwd(), 'CHANGELOG.md');
 const APP_JS_PATH = join(process.cwd(), 'public', 'app.js');
 
@@ -110,6 +111,13 @@ async function main() {
   writeFileSync(PKG_PATH, JSON.stringify(pkg, null, 2) + '\n');
   console.log(`✓ package.json → ${newVersion}`);
 
+  // 4b. update package-lock.json
+  const lock = JSON.parse(readFileSync(PKG_LOCK_PATH, 'utf8'));
+  lock.version = newVersion;
+  lock.packages[''].version = newVersion;
+  writeFileSync(PKG_LOCK_PATH, JSON.stringify(lock, null, 2) + '\n');
+  console.log(`✓ package-lock.json → ${newVersion}`);
+
   // 5. update APP_VERSION in public/app.js
   let appJs = readFileSync(APP_JS_PATH, 'utf8');
   appJs = appJs.replace(/const APP_VERSION='[\d.]+'/, `const APP_VERSION='${newVersion}'`);
@@ -148,8 +156,8 @@ async function main() {
 
 // 7. git commit + tag
   console.log('');
-  execSync('git add package.json public/app.js CHANGELOG.md', { stdio: 'inherit', windowsHide: true });
-  execSync(`git commit -m "chore: release ${tag}"`, { stdio: 'inherit', windowsHide: true });
+  execSync('git add package.json package-lock.json public/app.js CHANGELOG.md', { stdio: 'inherit', windowsHide: true });
+  execSync(`git commit -m "release ${tag}"`, { stdio: 'inherit', windowsHide: true });
   execSync(`git tag -a ${tag} -m "${tag}"`, { stdio: 'inherit', windowsHide: true });
 
   console.log(`\n✓ Released ${tag} (Local)`);
