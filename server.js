@@ -188,6 +188,40 @@ app.get('/api/library/locate/:id', (req,res)=>{
 app.get('/api/files/:id', (req,res)=>{ const f=getFileById(db,+req.params.id); f?res.json({ok:true,data:f}):res.status(404).json({ok:false,error:'Not found'}); });
 app.post('/api/files/:id/reveal', async(req,res)=>{ const f=getFileById(db,+req.params.id); if(!f)return res.status(404).json({ok:false}); const fp=existsSync(f.path)?f.path:(existsSync(f.path+'.deleted')?f.path+'.deleted':f.path); await revealInExplorer(fp); res.json({ok:true}); });
 
+// Check if a file belongs to any duplicate group (prefers unresolved groups).
+app.get('/api/files/:id/in-group', (req,res)=>{
+  try{
+    const row = db.get(
+      `SELECT gt.group_id FROM group_tracks gt
+       JOIN dup_groups g ON g.id=gt.group_id
+       WHERE gt.file_id=?
+       ORDER BY g.resolved ASC, g.id ASC LIMIT 1`,
+      [+req.params.id]
+    );
+    res.json({ok:true, inGroup: !!row, groupId: row ? row.group_id : null});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// Batch check: which of the given file IDs belong to duplicate groups.
+app.post('/api/files/in-groups', (req,res)=>{
+  try{
+    const {ids} = req.body||{};
+    if(!Array.isArray(ids)||!ids.length) return res.json({ok:true,data:{}});
+    const placeholders = ids.map(()=>'?').join(',');
+    const rows = db.all(
+      `SELECT gt.file_id, gt.group_id FROM group_tracks gt
+       JOIN dup_groups g ON g.id=gt.group_id
+       WHERE gt.file_id IN (${placeholders})
+       ORDER BY g.resolved ASC, g.id ASC`,
+      ids
+    );
+    const map = {};
+    for(const r of rows){ if(!(r.file_id in map)) map[r.file_id] = r.group_id; }
+    for(const id of ids){ if(!(id in map)) map[id] = null; }
+    res.json({ok:true, data:map});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
 app.get('/api/files/:id/stream', (req,res)=>{
   const f = getFileById(db,+req.params.id);
   if(!f||!existsSync(f.path)) return res.status(404).json({ok:false,error:'Not found'});
