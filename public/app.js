@@ -1024,12 +1024,10 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
 /* ── Props Modal ─────────────────────────────────────────────────────── */
 function PropsModal({fileId,onClose}){
   const[data,setData]=useState(null);
-  const[scraped,setScraped]=useState(null);
   const[coverUrl,setCoverUrl]=useState(null);
   const[coverBig,setCoverBig]=useState(false);
   useEffect(()=>{
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setData(r.data);});
-    api.get(`/api/files/${fileId}/scraped`).then(r=>{if(r.ok&&r.data)setScraped(r.data);});
     // Try loading cover art
     fetch(`/api/files/${fileId}/cover`).then(r=>{if(r.ok)setCoverUrl(`/api/files/${fileId}/cover`);}).catch(()=>{});
   },[fileId]);
@@ -1038,8 +1036,6 @@ function PropsModal({fileId,onClose}){
   // and Chromaprint via fpcalc (for AcoustID queries). Shown as separate rows.
   const fpMethodLabel={spectral:'已提取',metadata:'未解码，退化为属性匹配'}[data.fingerprint_method]||'未提取';
   const chromaprintLabel=data.chromaprint?'已提取':'未提取（前往设置 → CP 声纹 配置）';
-  const mbTier = scraped?.mb?.scrape_tier;
-  const aidTier = scraped?.acoustid?.scrape_tier;
   const rows=[['完整路径',data.path,true],['标题',data.title||'—'],['艺术家',data.artist||'—'],['专辑',data.album||'—'],['年份',data.album_year||'—'],['音轨',data.track_number||'—'],['流派',data.genre||'—'],['格式',data.format||'—'],['比特率',data.bitrate?data.bitrate+'k':'—'],['采样率',data.sample_rate?(data.sample_rate/1000).toFixed(1)+' kHz':'—'],['位深',data.bits_per_sample?data.bits_per_sample+' bit':'—'],['时长',fmtDur(data.duration)],['文件大小',fmtBytes(data.size)],['创建时间',fmtDate(data.file_ctime)],['修改时间',fmtDate(data.file_mtime)],['频谱声纹',fpMethodLabel],['CP 声纹',chromaprintLabel]];
   return e(Modal,{title:'文件属性',onClose,width:560},
     // Cover art row
@@ -1059,29 +1055,6 @@ function PropsModal({fileId,onClose}){
       e('div',{style:{fontSize:11,color:'var(--tx-faint)',width:72,flexShrink:0,paddingTop:1}},k),
       e('div',{style:{fontSize:12,color:'var(--tx-primary)',fontFamily:mono?'var(--font-mono)':undefined,wordBreak:'break-all',flex:1}},String(v))
     )),
-    // Dual-source scrape data sections
-    (scraped?.mb?.title||scraped?.acoustid?.title)&&e('div',{style:{marginTop:12}},
-      scraped.mb?.title&&e('div',{style:{marginBottom:8,padding:'10px 14px',background:'#F5F3FF',border:'0.5px solid #DDD6FE',borderRadius:'var(--r-md)'}},
-        e('div',{style:{fontSize:11,fontWeight:600,color:'#5B21B6',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
-          Icon('cloud-check',{fontSize:13}),'刮削数据 · MusicBrainz',
-              mbTier==='yellow'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
-              mbTier==='green'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配)'),
-              mbTier==='blue'&&e('span',{style:{fontSize:9,color:'#7C3AED',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
-          scraped.mb.confidence>0&&scraped.mb.confidence<0.85&&e('span',{style:{color:'#7C3AED',fontWeight:400,fontSize:9}},` 匹配度 ${(scraped.mb.confidence*100).toFixed(0)}%`)
-        ),
-        [['标题',scraped.mb.title],['艺术家',scraped.mb.artist],['专辑',scraped.mb.album],['年份',scraped.mb.album_year||'']].map(([k,v])=>v?e('div',{key:k,style:{fontSize:11,color:'#5B21B6',display:'flex',gap:8}},e('span',{style:{color:'#7C3AED',width:36}},k+':'),v):null)
-      ),
-      scraped.acoustid?.title&&e('div',{style:{padding:'10px 14px',background:'#ECFEFF',border:'0.5px solid #A5F3FC',borderRadius:'var(--r-md)'}},
-        e('div',{style:{fontSize:11,fontWeight:600,color:'#0E7490',marginBottom:6,display:'flex',alignItems:'center',gap:5}},
-          Icon('wave-sine',{fontSize:13}),'刮削数据 · AcoustID',
-          aidTier==='yellow'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(模糊匹配)'),
-          aidTier==='green'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(精确匹配)'),
-          aidTier==='blue'&&e('span',{style:{fontSize:9,color:'#0891B2',fontWeight:400,marginLeft:4}},'(精确匹配 · 可写入)'),
-          scraped.acoustid.confidence>0&&scraped.acoustid.confidence<0.85&&e('span',{style:{color:'#0891B2',fontWeight:400,fontSize:9}},` 匹配度 ${(scraped.acoustid.confidence*100).toFixed(0)}%`)
-        ),
-        [['标题',scraped.acoustid.title],['艺术家',scraped.acoustid.artist],['专辑',scraped.acoustid.album],['年份',scraped.acoustid.album_year||'']].map(([k,v])=>v?e('div',{key:k,style:{fontSize:11,color:'#0E7490',display:'flex',gap:8}},e('span',{style:{color:'#0891B2',width:36}},k+':'),v):null)
-      )
-    ),
     e('div',{style:{marginTop:14,display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-start',alignItems:'center'}},
       e(Btn,{icon:'folder-open',small:true,variant:'ghost',onClick:()=>api.post(`/api/files/${fileId}/reveal`)},'在文件管理器中显示'),
       e(Btn,{small:true,variant:'ghost',icon:'copy',onClick:()=>navigator.clipboard?.writeText(data.path)},'复制路径')
