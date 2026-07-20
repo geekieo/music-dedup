@@ -18,6 +18,37 @@ const fmtBR=(br,fmt)=>{const f=(fmt||'').toUpperCase();return['FLAC','WAV','AIFF
 const fmtDur=s=>{if(!s)return'—';const m=Math.floor(s/60),sec=Math.floor(s%60);return`${m}:${String(sec).padStart(2,'0')}`;};
 const fmtDate=ms=>{if(!ms)return'—';return new Date(ms).toLocaleString('zh-CN',{dateStyle:'short',timeStyle:'short'});};
 
+/* ── Shared search ────────────────────────────────────────────────────── */
+function normalizeForSearch(s){
+  if(!s)return'';
+  // NFKD decomposes accented chars (é→e+́), strip combining marks, lowercase,
+  // keep only Unicode letters/numbers/whitespace, collapse runs of whitespace.
+  return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
+}
+
+/** filterBySearch(items, search, fields)
+ *  fields: array of string keys OR accessor functions (item)=>string */
+function filterBySearch(items,search,fields){
+  const q=normalizeForSearch(search);
+  if(!q)return items;
+  return items.filter(item=>fields.some(f=>{
+    const val=typeof f==='function'?f(item):(item[f]||'');
+    return normalizeForSearch(val).includes(q);
+  }));
+}
+
+/** Unified search input. Props: value, onChange, placeholder?, minWidth? */
+const SearchInput=({value,onChange,placeholder='搜索标题、艺术家、专辑...',minWidth=180,style:containerStyle})=>
+  e('div',{style:{position:'relative',flex:1,minWidth,...containerStyle}},
+    Icon('search',{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--tx-faint)',pointerEvents:'none'}),
+    e('input',{value,onChange:ev=>onChange(ev.target.value),placeholder,
+      style:{width:'100%',paddingLeft:32,paddingRight:10,paddingTop:6,paddingBottom:6,
+        boxSizing:'border-box',borderRadius:'var(--r-md)',
+        background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',
+        boxShadow:'var(--sh-xs)',outline:'none',fontSize:13}})
+  );
+
 // Group-tag taxonomy is documented in lib/rules.js → detectGroupTags().
 // All tag metadata (GROUP_TAG_LABELS, GROUP_TAG_DESCRIPTIONS, GROUP_GROUP_TAG_COLORS,
 // PICK_TAG_LABEL, PICK_TAG_COLOR, MATCH_METHOD_TAGS, CHARACTERISTIC_TAGS,
@@ -1379,15 +1410,9 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 
       // Search + format filter
       e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
-        e('div',{style:{position:'relative',flex:1,minWidth:200}},
-          Icon('search',{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--tx-faint)',pointerEvents:'none'}),
-          e('input',{value:search,onChange:ev=>onSearch(ev.target.value),placeholder:'搜索标题、艺术家、专辑...',
-            style:{width:'100%',paddingLeft:32,paddingRight:10,paddingTop:7,paddingBottom:7,
-              borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',
-              boxShadow:'var(--sh-xs)',outline:'none',fontSize:12}})
-        ),
+        e(SearchInput,{value:search,onChange:onSearch,placeholder:'搜索标题、艺术家、专辑...',minWidth:200}),
         e('select',{value:fmt,onChange:ev=>{setFmt(ev.target.value);},
-          style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
+          style:{fontSize:12,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
             color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:104}},
           e('option',{value:''},'全部格式'),
           ...['FLAC','MP3','M4A','OGG','WAV','AIFF'].map(f=>e('option',{key:f,value:f},f))
@@ -1398,7 +1423,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
         // changed color per selection, which read as a different control
         // style rather than a matching pair).
         e('select',{value:scrapeFilter,onChange:ev=>setScrapeFilter(ev.target.value),
-          style:{fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
+          style:{fontSize:12,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
             color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:112}},
           e('option',{value:''},'全部刮削'),
           e('option',{value:'green'},TIER_LABEL.green),
@@ -1979,7 +2004,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     }
     const q=search.trim().toLowerCase();
     if(q){
-      list=list.filter(g=>(g.keep_title||'').toLowerCase().includes(q)||(g.keep_artist||'').toLowerCase().includes(q));
+      list=filterBySearch(list,search,['keep_title','keep_artist']);
     }
     return list;
   },[groups,tagFilter,search]);
@@ -2066,7 +2091,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
     // Filter bar: matching-method tags (how the group was discovered)
-    e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+    e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18}},
       e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
       filterTags.map(tag=>{
         const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
@@ -2080,7 +2105,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       }, Icon('info-circle',{fontSize:12}), '标签说明'),
     ),
     // Second row: characteristic tags (what the group looks like) + clear button
-    e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+    e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18}},
       e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征：'),
       charTags.map(tag=>{
         const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
@@ -2102,27 +2127,24 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     ),
 
     // Toolbar
-    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:8,flexWrap:'wrap'}},
-      e('div',{style:{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}},
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:8,flexWrap:'wrap',paddingRight:18}},
+      e('div',{style:{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',flex:1,minWidth:0}},
         e('div',{style:{display:'flex',background:'var(--bg-muted)',padding:2,borderRadius:'var(--r-md)',gap:2}},
           ...[['pending','待处理'],['done','已处理'],['all','全部']].map(([f,l])=>
-            e('button',{key:f,onClick:()=>{setFilter(f);setSelId(null);},style:{padding:'4px 12px',fontSize:11,fontWeight:filter===f?600:400,cursor:'pointer',borderRadius:'var(--r-sm)',background:filter===f?'var(--bg-base)':'transparent',color:filter===f?'var(--tx-primary)':'var(--tx-muted)',border:'none',boxShadow:filter===f?'var(--sh-xs)':'none',transition:'all .15s'}},l))
+            e('button',{key:f,onClick:()=>{setFilter(f);setSelId(null);},style:{padding:'4px 10px',fontSize:11,fontWeight:filter===f?600:400,cursor:'pointer',borderRadius:'var(--r-sm)',background:filter===f?'var(--bg-base)':'transparent',color:filter===f?'var(--tx-primary)':'var(--tx-muted)',border:'none',boxShadow:filter===f?'var(--sh-xs)':'none',transition:'all .15s'}},l))
         ),
-        e('select',{value:sort,onChange:ev=>setSort(ev.target.value),style:{fontSize:11,padding:'5px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
+        e('select',{value:sort,onChange:ev=>setSort(ev.target.value),style:{fontSize:12,padding:'5px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
           e('option',{value:'savings'},'按可释放空间'),e('option',{value:'sim'},'按相似度'),e('option',{value:'files'},'按文件数')
         ),
-        e('div',{style:{position:'relative'}},
-          Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
-          e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索曲名、艺术家...',style:{width:160,paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontSize:11}})
-        )
+        e(SearchInput,{value:search,onChange:setSearch,placeholder:'搜索标题、艺术家...'}),
       ),
       filter==='pending'&&visiblePending.length>0&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
         e('span',{style:{fontSize:11,color:'var(--tx-faint)'}},`${visiblePending.length} 组 · ${fmtBytes(savings)}`),
-        e(Btn,{onClick:()=>setShowBatchResolve(true),icon:'trash',small:true},'批量放入回收站')
+        e(Btn,{onClick:()=>setShowBatchResolve(true),icon:'trash',style:{padding:'5px 12px',fontSize:12}},'批量放入回收站')
       ),
       filter==='done'&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
-        e(Btn,{onClick:()=>setShowBatchUnresolve(true),icon:'arrow-back-up',small:true,variant:'ghost'},'批量撤销'),
-        e(Btn,{onClick:()=>setShowEmptyTrash(true),icon:'trash',small:true,variant:'ghost'},'清空回收站')
+        e(Btn,{onClick:()=>setShowBatchUnresolve(true),icon:'arrow-back-up',variant:'ghost',style:{padding:'5px 12px',fontSize:12}},'批量撤销'),
+        e(Btn,{onClick:()=>setShowEmptyTrash(true),icon:'trash',variant:'ghost',style:{padding:'5px 12px',fontSize:12}},'清空回收站')
       )
     ),
 
@@ -2308,10 +2330,10 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
     setPurgeConfirm(null);load();
   }
 
-  const q=search.trim().toLowerCase();
-  const filtered=(rows||[]).filter(r=>!q||
-    (r.file_title||r.cur_title||'').toLowerCase().includes(q)||
-    (r.file_artist||r.cur_artist||'').toLowerCase().includes(q));
+  const filtered=filterBySearch(rows||[],search,[
+    r=>(r.file_title||r.cur_title||''),
+    r=>(r.file_artist||r.cur_artist||'')
+  ]);
 
   const COLS=['播放','标题','艺术家','修改字段','修改时间','剩余天数','操作'];
 
@@ -2335,12 +2357,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
             e('span',{style:{fontSize:11}},'在刮削列写入字段后，原始标签将被快照保存于此')
           )
         : e('div',null,
-            e('div',{style:{position:'relative',marginBottom:8}},
-              Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
-              e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索标题、艺术家...',
-                style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
-                  borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
-            ),
+            e(SearchInput,{value:search,onChange:setSearch,placeholder:'搜索标题、艺术家...',style:{marginBottom:8}}),
             e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
               e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
                 e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
@@ -2415,8 +2432,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
     });
   },[onLocate]);
 
-  const q=search.trim().toLowerCase();
-  const filtered=q?rows.filter(f=>(f.title||'').toLowerCase().includes(q)||(f.artist||'').toLowerCase().includes(q)||(f.album||'').toLowerCase().includes(q)):rows;
+  const filtered=filterBySearch(rows,search,['title','artist','album']);
 
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
@@ -2427,12 +2443,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
           Icon('shield-check',{fontSize:28,display:'block',margin:'0 auto 8px'}),
           '保留名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入保留名单'))
       : e('div',null,
-          e('div',{style:{position:'relative',marginBottom:8}},
-            Icon('search',{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--tx-faint)',pointerEvents:'none'}),
-            e('input',{value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'搜索标题、艺术家、专辑...',
-              style:{width:'100%',paddingLeft:26,paddingRight:8,paddingTop:5,paddingBottom:5,boxSizing:'border-box',
-                borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',outline:'none',fontSize:11}})
-          ),
+          e(SearchInput,{value:search,onChange:setSearch,placeholder:'搜索标题、艺术家、专辑...',style:{marginBottom:8}}),
           e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
             e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
