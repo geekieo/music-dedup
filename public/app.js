@@ -75,11 +75,18 @@ const ICONS={
   // top-left) plus a filled locate-pin badge (bottom-right) so it reads as
   // "find this in the library" rather than an unrelated bookshelf icon.
   'music-locate':{els:[
-    ['path',{d:'M4.5 14.5V6l7.5-1.3v7.3'}],
-    ['circle',{cx:3,cy:14.5,r:1.9}],
-    ['circle',{cx:10.5,cy:13.2,r:1.9}],
-    ['path',{d:'M19.5 12.2c0 3-3.3 6.3-3.3 6.3s-3.3-3.3-3.3-6.3a3.3 3.3 0 016.6 0z',fill:'currentColor',stroke:'none'}],
-    ['circle',{cx:16.2,cy:12.2,r:1.15,fill:'var(--bg-base)',stroke:'none'}]
+    ['path',{d:'M6.58 12.16V4.1l7.44 -1.24v8.06'}],
+    ['circle',{cx:4.72,cy:12.16,r:1.86}],
+    ['circle',{cx:12.16,cy:10.92,r:1.86}],
+    ['path',{d:'M19.83 19.33l-2.12 2.12a1 1 0 0 1 -1.41 0l-2.12 -2.12a4 4 0 1 1 5.66 0z'}],
+    ['circle',{cx:17,cy:16.5,r:1.5}]
+  ]},
+  // "在重复组中查看" — folders glyph (duplicate groups) top-left + locate pin bottom-right
+  'group-locate':{els:[
+    ['rect',{x:6.58,y:6.58,width:6.82,height:6.82,rx:1.24}],
+    ['path',{d:'M4.1 10.3V4.1a1.24 1.24 0 0 1 1.24 -1.24h6.2'}],
+    ['path',{d:'M19.83 19.33l-2.12 2.12a1 1 0 0 1 -1.41 0l-2.12 -2.12a4 4 0 1 1 5.66 0z'}],
+    ['circle',{cx:17,cy:16.5,r:1.5}]
   ]},
   'music-off':{els:[['path',{d:'M9 18V5l12-2v13'}],['circle',{cx:6,cy:18,r:3}],['circle',{cx:18,cy:16,r:3}],['path',{d:'M3 3l18 18'}]]},
   radar:{els:[['circle',{cx:12,cy:12,r:9}],['circle',{cx:12,cy:12,r:5}],['circle',{cx:12,cy:12,r:1,fill:'currentColor'}],['path',{d:'M12 3a9 9 0 019 9'}]]},
@@ -592,12 +599,18 @@ function Btn({children,onClick,variant='primary',small,disabled,icon,style:sx={}
 // Icon-only action button — bigger touch target + a real fill color when
 // active, so the three per-track actions (打开/属性/保留名单) read as buttons
 // at a glance instead of being lost as small grey text links.
-function IconAction({icon,title,onClick,active,activeColor='var(--amber)',activeBg,color='var(--tx-muted)',size=15,danger}){
+function IconAction({icon,title,onClick,active,activeColor='var(--amber)',activeBg,color='var(--tx-muted)',size=15,danger,disabled}){
   const ac=danger?'var(--red)':activeColor;
   const bg=active?(activeBg||ac+'17'):'var(--bg-base)';
   const bd=active?ac:'var(--bd-default)';
   const fg=active?ac:(danger?'var(--red)':color);
-  return e('button',{onClick,title,style:{background:bg,border:`1px solid ${bd}`,borderRadius:'var(--r-md)',cursor:'pointer',color:fg,width:30,height:30,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .12s',boxShadow:'var(--sh-xs)'}},
+  return e('button',{onClick:disabled?undefined:onClick,title,disabled,style:{
+    background:bg,border:`1px solid ${bd}`,borderRadius:'var(--r-md)',
+    cursor:'pointer',
+    color:disabled?'var(--tx-faint)':fg,
+    opacity:disabled?0.4:1,
+    width:30,height:30,display:'flex',alignItems:'center',justifyContent:'center',
+    flexShrink:0,transition:'all .12s',boxShadow:'var(--sh-xs)'}},
     Icon(icon,{fontSize:size}));
 }
 function Card({children,style:sx={},id}){return e('div',{id,style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-xs)',padding:'18px 20px',...sx}},children);}
@@ -630,6 +643,39 @@ function ConfirmModal({title,message,onConfirm,onClose,danger}){
       e(Btn,{variant:'ghost',onClick:onClose},'取消'),
       e(Btn,{variant:danger?'danger':'primary',onClick:()=>{onConfirm();onClose();}},danger?'确认删除':'确认')
     ));
+}
+
+/* ── useConfirmAction: ConfirmModal wrapper with "本轮不再显示" checkbox ── */
+function useConfirmAction(){
+  const suppressedRef=useRef(new Set());
+  const[pending,setPending]=useState(null); // {actionKey,title,message,danger,onConfirm}
+
+  function confirmAction(actionKey,{title,message,danger},onConfirm){
+    if(suppressedRef.current.has(actionKey)){
+      onConfirm();
+      return;
+    }
+    setPending({actionKey,title,message,danger,onConfirm});
+  }
+
+  const confirmDialog=pending&&e(Modal,{title:pending.title,onClose:()=>setPending(null)},
+    e('div',{style:{fontSize:13,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:16}},pending.message),
+    e('label',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:16,cursor:'pointer',fontSize:12,color:'var(--tx-muted)'}},
+      e('input',{type:'checkbox',
+        onChange:ev=>{
+          if(ev.target.checked)suppressedRef.current.add(pending.actionKey);
+          else suppressedRef.current.delete(pending.actionKey);
+        }
+      }),
+      '本轮不再显示'
+    ),
+    e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+      e(Btn,{variant:'ghost',onClick:()=>setPending(null)},'取消'),
+      e(Btn,{variant:pending.danger?'danger':'primary',onClick:()=>{pending.onConfirm();setPending(null);}},pending.danger?'确认删除':'确认')
+    )
+  );
+
+  return{confirmAction,confirmDialog};
 }
 
 
@@ -1742,14 +1788,10 @@ function DimensionTable({tracks}){
 
 function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept}){
   const keep=!!track._keepWinner;
-
-  const wl=!!track.in_retention_list||(track._pickTags||[]).includes('manual_keep');
-  // Manual only: kept purely by retention_list, not by smart cascade
-  const isManualOnly=keep&&track._winReason==='手动保留';
   const isCur=player?.current?.id===track.id;
   const[coverErr,setCoverErr]=useState(false);
-  const bd=wl&&isManualOnly?'var(--bd-default)':keep?'var(--green-bd)':'var(--red-bd)';
-  const bg=wl&&isManualOnly?'var(--bg-muted)':keep?'var(--green-bg)':'var(--red-bg)';
+  const bd=keep?'var(--green-bd)':'var(--red-bd)';
+  const bg=keep?'var(--green-bg)':'var(--red-bg)';
 
   const coverSrc=`/api/files/${track.id}/cover`;
 
@@ -1808,7 +1850,7 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept
             cursor:canToggle?'pointer':'default',flexShrink:0,marginLeft:2,
             opacity:(!canToggle)?.4:1},
         }, keep
-          ? Icon(isManualOnly?'shield-check':'check',{fontSize:15,color:'#fff'})
+          ? Icon('check',{fontSize:15,color:'#fff'})
           : Icon('toggle-left',{fontSize:15,color:'var(--tx-secondary)'}))
       )
     )
@@ -1948,7 +1990,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
   const allTags=useMemo(()=>{
     const s=new Set();
-    groups.forEach(g=>(g.group_tags||'').split(',').filter(Boolean).forEach(t=>s.add(t)));
+    groups.forEach(g=>(g.group_tags||'').split(',').filter(Boolean).forEach(t=>s.add(t.trim())));
     return [...s];
   },[groups]);
 
@@ -1971,7 +2013,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     let list=groups;
     if(tagFilter.size){
       list=list.filter(g=>{
-        const tags=new Set((g.group_tags||'').split(',').filter(Boolean));
+        const tags=new Set((g.group_tags||'').split(',').filter(Boolean).map(t=>t.trim()));
         return[...tagFilter].every(t=>tags.has(t));
       });
     }
@@ -2170,7 +2212,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
         e('div',null,
           visibleGroups.slice(0,displayCount).map(g=>{
           const isSel=g.id===selId;
-          const tags=(g.group_tags||'').split(',').filter(Boolean).slice(0,2);
+          const tags=(g.group_tags||'').split(',').filter(Boolean).map(t=>t.trim()).slice(0,2);
           const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.title:null)||`组 #${g.id}`;
           const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.artist:null)||'';
           return e('div',{key:g.id,ref:el=>{if(el)groupRefs.current[g.id]=el;else delete groupRefs.current[g.id];},className:g.id===flashGroupId?'locate-flash':undefined,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
@@ -2215,7 +2257,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
                   (()=>{const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
               ),
               e('div',{style:{display:'flex',gap:5,flexWrap:'wrap',marginTop:6}},
-                ...(detail.group_tags||'').split(',').filter(Boolean).map(t=>e(GroupTag,{key:t,tag:t}))
+                ...(detail.group_tags||'').split(',').filter(Boolean).map(t=>t.trim()).map(t=>e(GroupTag,{key:t,tag:t}))
               )
             ),
 
@@ -2260,12 +2302,27 @@ const SETTINGS_SECTIONS=[
 ];
 // DEFAULT_Q, DEFAULT_PICK, mergePickOrder are served by /rules-meta.js (source: lib/rules.js)
 
-function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
+function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates}){
   const[rows,setRows]=useState(null);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
   const[purgeConfirm,setPurgeConfirm]=useState(null); // {fileId,title}
-  function load(){api.get('/api/snapshots').then(r=>{if(r.ok)setRows(r.data||[]);});}
+  const[inGroupMap,setInGroupMap]=useState({}); // {[fileId]: groupId|null}
+  const{confirmAction,confirmDialog}=useConfirmAction();
+  function load(){
+    api.get('/api/snapshots').then(r=>{
+      if(r.ok){
+        const data=r.data||[];
+        setRows(data);
+        const ids=data.filter(r=>r.file_id).map(r=>r.file_id);
+        if(ids.length){
+          api.post('/api/files/in-groups',{ids}).then(r2=>{
+            if(r2.ok)setInGroupMap(r2.data||{});
+          });
+        }
+      }
+    });
+  }
   useEffect(()=>{load();},[]);
   useEffect(()=>{if(writeHistoryKey>0)load();},[writeHistoryKey]);
 
@@ -2312,6 +2369,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
 
   return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
+    confirmDialog,
     purgeConfirm&&e(ConfirmModal,{
       title:'彻底删除写入历史',
       message:e('span',null,'确定要彻底删除「',e('b',null,purgeConfirm.title||purgeConfirm.fileId),'」的写入历史吗？删除后将无法再撤销，文件当前的标签保持不变。'),
@@ -2361,7 +2419,18 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
                         e('td',{style:{padding:'4px 8px'}},
                           e('div',{style:{display:'flex',gap:3,alignItems:'center'}},
                             onLocateFile&&e(IconAction,{icon:'music-locate',title:'在音乐库中查看',onClick:()=>onLocateFile(r.file_id)}),
-                            e(IconAction,{icon:'arrow-back-up',title:'撤销至原始状态',onClick:()=>revert(r.file_id)}),
+                            e(IconAction,{
+                              icon:'group-locate',
+                              title:inGroupMap[r.file_id]?'在重复组中查看':'该文件不在任何重复组中',
+                              onClick:inGroupMap[r.file_id]?()=>onLocateInDuplicates&&onLocateInDuplicates(inGroupMap[r.file_id]):undefined,
+                              disabled:!inGroupMap[r.file_id]
+                            }),
+                            e(IconAction,{icon:'arrow-back-up',title:'撤销至原始状态',
+                              onClick:()=>confirmAction('write-history-revert',{
+                                title:'撤销至原始状态',
+                                message:e('span',null,'确定要将「',e('b',null,title||'未知文件'),'」撤销至首次写入前的原始标签状态吗？此操作将覆盖当前所有标签。'),
+                                danger:false,
+                              },()=>revert(r.file_id))}),
                             e(IconAction,{icon:'trash',title:'彻底删除此条历史',danger:true,onClick:()=>setPurgeConfirm({fileId:r.file_id,title})})
                           )
                         )
@@ -2375,12 +2444,28 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate}){
 }
 
 
-function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
+function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onLocateInDuplicates}){
   const[rows,setRows]=useState([]);
   const[loading,setLoading]=useState(true);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
-  function load(){setLoading(true);api.get('/api/retention-list').then(r=>{if(r.ok)setRows(r.data||[]);}).finally(()=>setLoading(false));}
+  const[inGroupMap,setInGroupMap]=useState({}); // {[fileId]: groupId|null}
+  const{confirmAction,confirmDialog}=useConfirmAction();
+  function load(){
+    setLoading(true);
+    api.get('/api/retention-list').then(r=>{
+      if(r.ok){
+        const data=r.data||[];
+        setRows(data);
+        if(data.length){
+          const ids=data.map(f=>f.id);
+          api.post('/api/files/in-groups',{ids}).then(r2=>{
+            if(r2.ok)setInGroupMap(r2.data||{});
+          });
+        }
+      }
+    }).finally(()=>setLoading(false));
+  }
   useEffect(()=>{load();},[]);
   useEffect(()=>{if(retentionListKey>0)load();},[retentionListKey]);
   async function remove(id){await api.del(`/api/retention-list/${id}`);setToast({msg:'已从保留名单移除',type:'success'});load();}
@@ -2409,6 +2494,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
 
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
+    confirmDialog,
     e(SH,{title:`保留名单（${rows.length} 个文件）`,sub:'名单中的文件参与重复检测，但受保护不被删除'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
@@ -2438,7 +2524,18 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
                       e('td',{style:{padding:'4px 8px'}},
                         e('div',{style:{display:'flex',gap:3,alignItems:'center'}},
                           onLocateFile&&e(IconAction,{icon:'music-locate',title:'在音乐库中查看',onClick:()=>onLocateFile(f.id)}),
-                          e(IconAction,{icon:'shield-x',title:'移除保留名单',danger:true,onClick:()=>remove(f.id)})
+                          e(IconAction,{
+                            icon:'group-locate',
+                            title:inGroupMap[f.id]?'在重复组中查看':'该文件不在任何重复组中',
+                            onClick:inGroupMap[f.id]?()=>onLocateInDuplicates&&onLocateInDuplicates(inGroupMap[f.id]):undefined,
+                            disabled:!inGroupMap[f.id]
+                          }),
+                          e(IconAction,{icon:'shield-x',title:'移除保留名单',danger:true,
+                            onClick:()=>confirmAction('retention-remove',{
+                              title:'移除保留名单',
+                              message:e('span',null,'确定要将「',e('b',null,f.title||'未知文件'),'」从保留名单中移除吗？移除后该文件将在重复处理时不再受保护。'),
+                              danger:true,
+                            },()=>remove(f.id))})
                         )
                       )
                     );
@@ -2450,7 +2547,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate}){
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onLocate,mainScrollRef}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -2762,8 +2859,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
         ))
       ),
 
-      e(RetentionListSection,{player,retentionListKey,onLocateFile,onLocate}),
-      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate})
+      e(RetentionListSection,{player,retentionListKey,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup}),
+      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup})
     )
   );
 }
@@ -2923,6 +3020,11 @@ function App(){
     setView('library');
     setTimeout(()=>locateInLibraryRef.current?.(fileId), 150);
   };
+  const navigateToDuplicateGroup=useCallback((groupId)=>{
+    if(!groupId)return;
+    setView('duplicates');
+    setTimeout(()=>locateInDuplicatesRef.current?.(groupId),150);
+  },[]);
   const mainScrollRef=useRef(null); // ref to the <main> scroll container, shared with LibraryView
   // Called when user clicks the info panel in PlayerBar — jumps back to
   // whichever list the currently-playing track was played from (音乐库、
@@ -2977,7 +3079,7 @@ function App(){
         e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>setWriteHistoryKey(k=>k+1)})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onLocateFile:navigateToFile,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
