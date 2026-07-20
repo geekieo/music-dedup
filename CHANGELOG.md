@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.1] — 2026-07-21
+
+### Added
+
+- **"在重复组中查看"按钮**：保留名单和最近写入表格新增 `group-locate` 图标按钮，点击跳转到对应重复组；文件不在任何重复组时按钮置灰。底层依赖新增的 `/api/files/in-groups` 批量接口
+- **确认弹窗 hook (`useConfirmAction`)**：封装 ConfirmModal + "本轮不再显示"复选框，通过 `suppressedRef` 记忆用户选择，会话内不再重复弹出
+- **IconAction 支持 `disabled`**：置灰、降低透明度、移除点击事件
+
+### Changed
+
+- **手动保留卡片统一为绿色**：`TrackRow` 移除 `isManualOnly` / `shield-check` 特殊样式，手动保留与智能保留使用相同的绿色边框和背景
+- **搜索组件统一**：`SearchInput` 组件 + `filterBySearch` 函数抽取为共享模块，替换曲库/重复组/保留名单/最近写入四个搜索框的重复代码
+- **搜索容错增强**：`normalizeForSearch` 对输入和匹配字段均做 NFKD 分解 → 去除变音符 → 小写 → 仅保留 Unicode 字母数字 → 压缩空白，实现重音不敏感、符号不敏感、空白不敏感的模糊搜索
+- **标签拆分增加 trim**：`group_tags` 字符串 split 后统一 `.trim()`，修复多余空白导致标签匹配失败的问题
+- **移除保留名单 / 撤销写入均需弹窗确认**，含"本轮不再显示"复选框
+
+### Removed
+
+- **"文件属性"弹窗下方的刮削数据卡片**（MB/AcoustID 双源区块），以及 `scraped` 状态和 `/api/files/:id/scraped` API 调用
+
+### Fixed
+
+- **保留标签文案修正**：`ctime_best` 从"入库更新"改为"入库更晚"（入库时间越新越优先）
+
 ## [1.14.0] — 2026-07-19
 
 ### Added
