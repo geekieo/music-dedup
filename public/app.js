@@ -177,6 +177,7 @@ const ICONS={
   edit:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
   pencil:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
   'arrow-back-up':{els:[['path',{d:'M9 13l-4-4 4-4'}],['path',{d:'M5 9h9a5 5 0 010 10h-2'}]]},
+  'arrows-exchange':{els:[['path',{d:'M20 7H8'}],['path',{d:'M12 4l-4 3 4 3'}],['path',{d:'M4 17h12'}],['path',{d:'M12 14l4 3-4 3'}]]},
   books:{els:[['path',{d:'M5 4a1 1 0 011-1h3a1 1 0 011 1v16a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M11 6h3a1 1 0 011 1v13a1 1 0 01-1 1h-3'}],['path',{d:'M17.3 5.2l2.4.7a1 1 0 01.7 1.2l-3.6 13a1 1 0 01-1.2.7l-1.9-.5'}]]},
   'shield-x':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9.5 9.5l5 5'}],['path',{d:'M14.5 9.5l-5 5'}]]},
   'toggle-left':{els:[['path',{d:'M4 12a6 6 0 016-6h4a6 6 0 010 12H10a6 6 0 01-6-6z'}],['circle',{cx:9.5,cy:12,r:2.6,fill:'currentColor'}]]},
@@ -745,7 +746,7 @@ function autoSelectFields(file, scraped) {
     return null; // both exact or both fuzzy → conflict
   }
 
-  for (const { key } of WRITE_FIELDS) {
+  for (const { key, displayOnly } of SCRAPE_ALL_FIELDS) {
     // ── Per-source state for coloring ──────────────────────────────────
     for (const srcKey of ['mb', 'acoustid']) {
       const s = scraped[srcKey];
@@ -761,7 +762,9 @@ function autoSelectFields(file, scraped) {
       }
     }
 
-    // ── Auto-select logic ──────────────────────────────────────────────
+    // ── Auto-select logic (skip display-only fields) ────────────────────
+    if (displayOnly) continue;
+
     const mbHas = hasData(mb, key), aidHas = hasData(aid, key);
     if (!mbHas && !aidHas) { sel[key] = false; continue; }
 
@@ -783,6 +786,12 @@ const WRITE_FIELDS = [
   { key:'album_year',   label:'年份'   },
   { key:'track_number', label:'曲目号' },
   { key:'genre',        label:'流派'   },
+];
+
+// All fields that scraping downloads — includes duration which is display-only
+const SCRAPE_ALL_FIELDS = [
+  ...WRITE_FIELDS,
+  { key:'duration',     label:'时长',   displayOnly:true },
 ];
 
 function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
@@ -854,33 +863,43 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const canWrite=hasScraped&&selCount>0;
   const tier=scraped?.scrape_tier;
 
-  // Per-source scrape match info (now includes all 6 fields: title/artist/album/year/track/genre)
-  const mbMatch = (() => {
-    if (!liveTags || !scraped?.mb?.title) return null;
-    const t = {
-      title: liveTags.title, artist: liveTags.artist, album: liveTags.album,
-      album_year: liveTags.album_year, track_number: liveTags.track_number, genre: liveTags.genre,
-      scrape_title: scraped.mb.title, scrape_artist: scraped.mb.artist, scrape_album: scraped.mb.album,
-      scrape_album_year: scraped.mb.album_year, scrape_track_number: scraped.mb.track_number, scrape_genre: scraped.mb.genre,
-    };
-    try { return computeScrapeMatch(t); } catch { return null; }
-  })();
-  const aidMatch = (() => {
-    if (!liveTags || !scraped?.acoustid?.title) return null;
-    const t = {
-      title: liveTags.title, artist: liveTags.artist, album: liveTags.album,
-      album_year: liveTags.album_year, track_number: liveTags.track_number, genre: liveTags.genre,
-      scrape_title: scraped.acoustid.title, scrape_artist: scraped.acoustid.artist, scrape_album: scraped.acoustid.album,
-      scrape_album_year: scraped.acoustid.album_year, scrape_track_number: scraped.acoustid.track_number, scrape_genre: scraped.acoustid.genre,
-    };
-    try { return computeScrapeMatch(t); } catch { return null; }
-  })();
-
   // Per-source tier labels for column headers
   const mbTier = scraped?.mb?.scrape_tier;
   const aidTier = scraped?.acoustid?.scrape_tier;
   const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'yellow' ? '（模糊）' : mbTier === 'red' ? '（模糊）' : '';
   const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'yellow' ? '（模糊）' : aidTier === 'red' ? '（模糊）' : '';
+
+  // ── Per-source statistics ──────────────────────────────────────────────
+  function srcStats(src) {
+    if (!src) return null;
+    const avail = [], match = [];
+    for (const { key } of SCRAPE_ALL_FIELDS) {
+      const sv = src[key];
+      if (sv != null && sv !== 0 && sv !== '') {
+        avail.push(key);
+        const fv = key === 'duration' ? (fileInfo?.duration || 0) : liveTags?.[key];
+        if (fv != null && fv !== 0 && fv !== '') {
+          if (key === 'duration') {
+            if (Math.abs(parseFloat(fv) - parseFloat(sv)) <= 3) match.push(key);
+          } else if (normCmp(String(fv)) === normCmp(String(sv))) {
+            match.push(key);
+          }
+        }
+      }
+    }
+    return { avail: avail.length, match: match.length, total: SCRAPE_ALL_FIELDS.length };
+  }
+  const mbStats = srcStats(scraped?.mb);
+  const aidStats = srcStats(scraped?.acoustid);
+
+  // Duration comparison state (display-only, not a tag so not in liveTags)
+  function durationState(src, fileDur, scrapedDur) {
+    if (!scrapedDur && scrapedDur !== 0) return null;
+    const fd = parseFloat(fileDur) || 0, sd = parseFloat(scrapedDur) || 0;
+    if (fd <= 0 || sd <= 0) return sd > 0 ? 'recommend' : null;
+    if (Math.abs(fd - sd) <= 3) return 'match';
+    return 'judge';
+  }
 
   // Cell state → background color
   const STATE_BG = { match: '#F0FDF4', recommend: '#EFF6FF', judge: '#FFFBEB' };
@@ -888,6 +907,14 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   function fmtVal(v) {
     if (v == null || v === 0 || v === '') return '';
     return String(v);
+  }
+  function fmtDur(sec) {
+    if (sec == null || sec === 0 || sec === '') return '';
+    const s = parseFloat(sec) || 0;
+    if (s <= 0) return '';
+    const m = Math.floor(s / 60);
+    const secs = Math.floor(s % 60);
+    return `${m}:${String(secs).padStart(2,'0')}`;
   }
 
   return e(Modal,{title:`刮削操作`,onClose,width:760},
@@ -918,8 +945,8 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         const colTemplate = `58px 1fr${showMb ? ' 1fr' : ''}${showAid ? ' 1fr' : ''}`;
         const nCols = 2 + (showMb?1:0) + (showAid?1:0);
         const headers = ['字段','文件属性'];
-        if (showMb) headers.push(`MB 刮削${mbBasisLabel}${mbMatch ? ` · ${mbMatch.n}/6` : ''}`);
-        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}${aidMatch ? ` · ${aidMatch.n}/6` : ''}`);
+        if (showMb) headers.push(`MB 刮削${mbBasisLabel}${mbStats ? ` · ${mbStats.match}/${mbStats.avail}` : ''}`);
+        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}${aidStats ? ` · ${aidStats.match}/${aidStats.avail}` : ''}`);
         // Helper: toggle source (click again to deselect)
         const toggleSrc = (key, src) => setSel(p=>({...p,[key]:p[key]===src?false:src}));
         return e('div',{style:{marginBottom:14}},
@@ -927,10 +954,11 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
             // Header row
             ...headers.map((h,i)=>e('div',{key:h,style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:i<nCols-1?'0.5px solid var(--bd-subtle)':'none'}},h)),
             // Data rows — each MB/AcoustID cell has a radio, click toggles selection
-            ...WRITE_FIELDS.map(({key,label})=>{
-              const fv = fmtVal(liveTags?.[key]);
+            ...SCRAPE_ALL_FIELDS.map(({key,label,displayOnly})=>{
+              const fv = key === 'duration' ? fmtDur(fileInfo?.duration) : fmtVal(liveTags?.[key]);
               const conflict = conflicts[key];
               const curSrc = sel[key];
+              const isDisplayOnly = !!displayOnly;
               const cells = [
                 e('div',{key:key+'l',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-faint)',background:'var(--bg-subtle)'}},label),
                 e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:(showMb||showAid)?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9}},
@@ -938,44 +966,60 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                 ),
               ];
               if (showMb) {
-                const mbVal = fmtVal(scraped?.mb?.[key]);
-                const mbState = states?.mb?.[key];
+                const mbVal = key === 'duration' ? fmtDur(scraped?.mb?.[key]) : fmtVal(scraped?.mb?.[key]);
+                const mbState = key === 'duration' ? durationState('mb', fileInfo?.duration, scraped?.mb?.duration) : states?.mb?.[key];
                 const isSelected = curSrc === 'mb';
                 const hasAidConflict = conflict && scraped?.acoustid?.[key] != null;
-                cells.push(e('label',{key:key+'m',
-                  onClick:()=>mbState&&toggleSrc(key,'mb'),
-                  style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
-                    background:mbState?STATE_BG[mbState]:'transparent',
-                    border:'1px solid transparent',
-                    cursor:mbState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
-                  }},
-                  mbState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
-                  e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
-                    mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
-                    isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
-                    hasAidConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                cells.push(isDisplayOnly
+                  ? e('div',{key:key+'m',
+                    style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
+                      background:mbState?STATE_BG[mbState]:'transparent',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap',
+                      color:mbState?'var(--tx-primary)':'var(--tx-faint)'}},
+                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,flex:1}},
+                      mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
                   )
-                ));
+                  : e('label',{key:key+'m',
+                    onClick:()=>mbState&&toggleSrc(key,'mb'),
+                    style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
+                      background:mbState?STATE_BG[mbState]:'transparent',
+                      border:'1px solid transparent',
+                      cursor:mbState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                    }},
+                    mbState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                      mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
+                      isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
+                      hasAidConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                    )
+                  ));
               }
               if (showAid) {
-                const aidVal = fmtVal(scraped?.acoustid?.[key]);
-                const aidState = states?.acoustid?.[key];
+                const aidVal = key === 'duration' ? fmtDur(scraped?.acoustid?.[key]) : fmtVal(scraped?.acoustid?.[key]);
+                const aidState = key === 'duration' ? durationState('acoustid', fileInfo?.duration, scraped?.acoustid?.duration) : states?.acoustid?.[key];
                 const isSelected = curSrc === 'acoustid';
                 const hasMbConflict = conflict && scraped?.mb?.[key] != null;
-                cells.push(e('label',{key:key+'a',
-                  onClick:()=>aidState&&toggleSrc(key,'acoustid'),
-                  style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
-                    background:aidState?STATE_BG[aidState]:'transparent',
-                    border:'1px solid transparent',
-                    cursor:aidState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
-                  }},
-                  aidState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
-                  e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
-                    aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
-                    isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
-                    hasMbConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                cells.push(isDisplayOnly
+                  ? e('div',{key:key+'a',
+                    style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
+                      background:aidState?STATE_BG[aidState]:'transparent',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap',
+                      color:aidState?'var(--tx-primary)':'var(--tx-faint)'}},
+                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,flex:1}},
+                      aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
                   )
-                ));
+                  : e('label',{key:key+'a',
+                    onClick:()=>aidState&&toggleSrc(key,'acoustid'),
+                    style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
+                      background:aidState?STATE_BG[aidState]:'transparent',
+                      border:'1px solid transparent',
+                      cursor:aidState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                    }},
+                    aidState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                      aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
+                      isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
+                      hasMbConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                    )
+                  ));
               }
               return cells;
             }).flat()
@@ -985,7 +1029,24 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#F0FDF4',border:'0.5px solid var(--bd-subtle)'}}),'绿=一致'),
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#EFF6FF',border:'0.5px solid var(--bd-subtle)'}}),'蓝=推荐写入（精确·空白）'),
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#FFFBEB',border:'0.5px solid var(--bd-subtle)'}}),'黄=需自行判断'),
-            e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('alert-circle',{fontSize:10,color:'#D97706'}),'=两来源冲突')
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('alert-circle',{fontSize:10,color:'#D97706'}),'=两来源冲突'),
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{color:'var(--tx-muted)',fontStyle:'italic'}}),'时长仅对比，不写入')
+          ),
+          // MB identifiers info
+          (scraped?.mb?.mb_recording_id || scraped?.acoustid?.mb_recording_id) && e('div',{style:{marginTop:8,fontSize:10,color:'var(--tx-faint)',display:'flex',flexDirection:'column',gap:2}},
+            scraped?.mb?.mb_recording_id && e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+              e('span',{style:{fontWeight:500,flexShrink:0}},'MB Recording:'),
+              e('code',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-secondary)',
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, scraped.mb.mb_recording_id),
+              scraped?.mb?.mb_release_id && e('span',null,'/'),
+              scraped?.mb?.mb_release_id && e('code',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-secondary)',
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, scraped.mb.mb_release_id)
+            ),
+            scraped?.acoustid?.mb_recording_id && e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+              e('span',{style:{fontWeight:500,flexShrink:0}},'AcoustID Recording:'),
+              e('code',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-secondary)',
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, scraped.acoustid.mb_recording_id)
+            )
           )
         );
       })(),
@@ -1698,113 +1759,106 @@ function ScannerView({scan}){
 
 // RTYPE_LABEL, DIMENSION_COLUMNS are served by /rules-meta.js (source: lib/rules.js)
 
-/* ── CrossFillDialog — cross-fill fields between tracks within a duplicate group ── */
-function CrossFillDialog({tracks, onClose, onUpdated}){
-  const [sourceByField, setSourceByField] = useState({});
-  const [targetsByField, setTargetsByField] = useState({});
+/* ── 组内属性同步 — sync fields from sibling tracks (ScrapeDialog-style UI) ── */
+function CrossFillDialog({tracks, currentId, onClose, onUpdated}){
+  const [sel, setSel] = useState({});      // per-field selected source track id
+  const [recommend, setRecommend] = useState({});
+  const [conflicts, setConflicts] = useState({});
+  const [states, setStates] = useState({});
   const [writing, setWriting] = useState(false);
   const [writeResult, setWriteResult] = useState(null);
   const [confirmWrite, setConfirmWrite] = useState(false);
 
-  // Initialize: first track with a non-empty value becomes default source per field
+  const current = tracks.find(t => t.id === currentId);
+  const sources = tracks.filter(t => t.id !== currentId);
+  const srcById = {};
+  for (const t of tracks) srcById[t.id] = t;
+
+  // Auto-compute field selection (same logic as autoSelectFields for ScrapeDialog)
   useEffect(() => {
-    const src = {}, tgt = {};
-    for (const { key } of WRITE_FIELDS) {
-      const source = tracks.find(t => {
-        const v = t[key];
-        return v != null && v !== 0 && v !== '';
-      });
-      if (source) {
-        src[key] = source.id;
-        tgt[key] = new Set();
-        for (const t of tracks) {
-          if (t.id === source.id) continue;
-          const sv = source[key], tv = t[key];
-          const tvEmpty = tv == null || tv === 0 || tv === '';
-          if (!tvEmpty && normCmp(String(tv)) === normCmp(String(sv))) {
-            // match — no checkbox needed
-          } else if (tvEmpty) {
-            // recommend — auto-check
-            tgt[key].add(t.id);
-          }
-          // judge — don't auto-check
+    if (!current || !sources.length) return;
+    const srcStates = {};
+    for (const s of sources) srcStates[s.id] = {};
+    const newSel = {}, newRec = {}, newCfl = {};
+
+    function hasData(obj, key) { const v = obj?.[key]; return v != null && v !== 0 && v !== ''; }
+
+    for (const { key, displayOnly } of SCRAPE_ALL_FIELDS) {
+      // Per-source state for coloring
+      for (const s of sources) {
+        if (!hasData(s, key)) { srcStates[s.id][key] = null; continue; }
+        const fv = current[key], sv = s[key];
+        const fvEmpty = fv == null || fv === 0 || fv === '';
+        if (!fvEmpty && normCmp(String(fv)) === normCmp(String(sv))) {
+          srcStates[s.id][key] = 'match';
+        } else if (fvEmpty) {
+          srcStates[s.id][key] = 'recommend';
+        } else {
+          srcStates[s.id][key] = 'judge';
         }
       }
-    }
-    setSourceByField(src);
-    setTargetsByField(tgt);
-  }, [tracks]);
 
-  // Recompute targets for a field when source changes
-  function updateSource(key, newSrcId) {
-    setSourceByField(p => ({ ...p, [key]: newSrcId }));
-    const newSrc = tracks.find(t => t.id === newSrcId);
-    if (!newSrc) return;
-    const newTgts = new Set();
-    for (const t of tracks) {
-      if (t.id === newSrcId) continue;
-      const sv = newSrc[key], tv = t[key];
-      const tvEmpty = tv == null || tv === 0 || tv === '';
-      if (!tvEmpty && normCmp(String(tv)) === normCmp(String(sv))) {
-        // match — don't add
-      } else if (tvEmpty) {
-        newTgts.add(t.id);
+      if (displayOnly) continue;
+
+      // ── Source affinity scoring ──────────────────────────────────────
+      // For each source, count how many WRITE_FIELDS match the target.
+      // Higher affinity → preferred when multiple sources have data for a field.
+      // This naturally handles cases like a duplicate group containing tracks
+      // from two different albums — the source sharing more fields with the
+      // target is more likely to be the "correct" one to borrow from.
+      function sourceAffinity(src) {
+        let score = 0;
+        for (const { key: fk } of WRITE_FIELDS) {
+          const sv = src[fk], tv = current[fk];
+          if (sv == null || sv === 0 || sv === '') continue;
+          if (tv != null && tv !== 0 && tv !== '' && normCmp(String(tv)) === normCmp(String(sv))) score += 2;
+        }
+        return score;
       }
-      // judge — don't auto-add
+
+      // Auto-select: among sources with data for this field, pick the one
+      // with the highest affinity to the target. Auto-check if recommend.
+      let bestSrc = null, bestAff = -1;
+      for (const s of sources) {
+        if (!hasData(s, key)) continue;
+        const aff = sourceAffinity(s);
+        if (aff > bestAff) { bestAff = aff; bestSrc = s; }
+      }
+      if (!bestSrc) { newSel[key] = false; continue; }
+      const st = srcStates[bestSrc.id][key];
+      if (st === 'recommend') { newSel[key] = bestSrc.id; newRec[key] = true; }
+      else { newSel[key] = false; }
     }
-    setTargetsByField(p => ({ ...p, [key]: newTgts }));
-  }
 
-  function toggleTarget(key, trackId) {
-    setTargetsByField(p => {
-      const cur = new Set(p[key] || []);
-      if (cur.has(trackId)) cur.delete(trackId);
-      else cur.add(trackId);
-      return { ...p, [key]: cur };
-    });
-  }
+    setStates(srcStates);
+    setSel(newSel);
+    setRecommend(newRec);
+    setConflicts(newCfl);
+  }, [tracks, currentId]);
 
-  function cellState(sourceVal, targetVal) {
-    const tvEmpty = targetVal == null || targetVal === 0 || targetVal === '';
-    if (!tvEmpty && normCmp(String(targetVal)) === normCmp(String(sourceVal))) return 'match';
-    if (tvEmpty) return 'recommend';
-    return 'judge';
+  function toggleSrc(key, srcId) {
+    setSel(p => ({ ...p, [key]: p[key] === srcId ? false : srcId }));
   }
 
   async function doWrite(){
     setConfirmWrite(false); setWriting(true); setWriteResult(null);
-    // Merge: same fileId across multiple fields → single write call
-    const byFile = {};
+    const fields = {};
     for (const { key } of WRITE_FIELDS) {
-      const srcId = sourceByField[key];
+      const srcId = sel[key];
       if (!srcId) continue;
-      const src = tracks.find(t => t.id === srcId);
-      if (!src) continue;
-      const tgts = targetsByField[key] || new Set();
-      for (const tid of tgts) {
-        if (!byFile[tid]) byFile[tid] = {};
-        byFile[tid][key] = src[key];
-      }
+      const src = srcById[srcId];
+      if (!src || !hasData(src, key)) continue;
+      fields[key] = src[key];
     }
-    let ok = true, firstErr = null;
-    for (const [fid, fields] of Object.entries(byFile)) {
-      if (!Object.keys(fields).length) continue;
-      const r = await api.post(`/api/files/${fid}/write-tags`, { fields });
-      if (!r.ok) { ok = false; firstErr = r.error || '写入失败'; }
-    }
-    setWriting(false);
-    if (ok) {
-      setWriteResult({ ok: true });
-      onUpdated?.();
-    } else {
-      setWriteResult({ ok: false, error: firstErr });
-    }
+    const r = await api.post(`/api/files/${currentId}/write-tags`, { fields });
+    setWriting(false); setWriteResult(r);
+    if (r.ok) { onUpdated?.(); }
   }
 
-  const totalTargets = Object.values(targetsByField).reduce((s, set) => s + (set?.size || 0), 0);
-  const canWrite = totalTargets > 0;
-  const trackById = {};
-  for (const t of tracks) trackById[t.id] = t;
+  function hasData(obj, key) { const v = obj?.[key]; return v != null && v !== 0 && v !== ''; }
+
+  const selCount = Object.values(sel).filter(Boolean).length;
+  const canWrite = selCount > 0 && !!current;
 
   const STATE_BG = { match: '#F0FDF4', recommend: '#EFF6FF', judge: '#FFFBEB' };
 
@@ -1812,132 +1866,150 @@ function CrossFillDialog({tracks, onClose, onUpdated}){
     if (v == null || v === 0 || v === '') return '';
     return String(v);
   }
+  function fmtDur(sec) {
+    if (sec == null || sec === 0 || sec === '') return '';
+    const s = parseFloat(sec) || 0;
+    if (s <= 0) return '';
+    const m = Math.floor(s / 60);
+    const secs = Math.floor(s % 60);
+    return `${m}:${String(secs).padStart(2, '0')}`;
+  }
 
-  return e(Modal,{title:'字段借用',onClose,width:Math.min(900, 140 + tracks.length * 160)},
-    e('div',{style:{marginBottom:12,fontSize:11,color:'var(--tx-faint)'}},
-      '选择一个曲目在某字段的值作为来源（琥珀色高亮），再勾选需要写入该值的目标曲目。'
-    ),
+  // Duration comparison state for field-borrowing — compare formatted M:SS
+  function durationState(fileDur, srcDur) {
+    const fa = fmtDur(fileDur), fb = fmtDur(srcDur);
+    if (!fa || !fb) return null;
+    return fa === fb ? 'match' : 'judge';
+  }
 
-    // Grid: rows=fields, cols=track header + one column per track
-    e('div',{style:{overflowX:'auto',marginBottom:12}},
-      e('table',{style:{borderCollapse:'collapse',fontSize:10,width:'100%'}},
-        e('thead',null,
-          e('tr',null,
-            e('th',{style:{padding:'5px 8px',textAlign:'left',color:'var(--tx-faint)',fontWeight:500,borderBottom:'0.5px solid var(--bd-default)',width:56}},''),
-            ...tracks.map(t => e('th',{key:t.id,style:{padding:'5px 8px',textAlign:'left',color:'var(--tx-secondary)',fontWeight:500,borderBottom:'0.5px solid var(--bd-default)',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
-              e(InstantTooltip,{tip:t.path,light:true},t.title||'—')
-            ))
-          )
-        ),
-        e('tbody',null,
-          WRITE_FIELDS.map(({key,label}) => {
-            const srcId = sourceByField[key];
-            const tgts = targetsByField[key] || new Set();
-            return e('tr',{key},
-              e('td',{style:{padding:'5px 8px',color:'var(--tx-faint)',fontWeight:500,borderBottom:'0.5px solid var(--bd-subtle)',background:'var(--bg-subtle)'}},label),
-              ...tracks.map(t => {
-                const isSource = t.id === srcId;
-                const val = fmtVal(t[key]);
-                if (isSource) {
-                  return e('td',{key:t.id,style:{padding:'4px 6px',borderBottom:'0.5px solid var(--bd-subtle)',
-                    background:'var(--amber-bg)',border:'1.5px solid var(--amber)',
-                    fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',position:'relative'}},
-                    e('span',{style:{position:'absolute',top:1,right:2}},Icon('pin',{fontSize:9,color:'var(--amber)'})),
-                    val||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
-                  );
-                }
-                // Non-source cell: clickable to become source, or with checkbox for target
-                const srcTrack = srcId ? trackById[srcId] : null;
-                const state = srcTrack ? cellState(srcTrack[key], t[key]) : null;
-                const isTarget = tgts.has(t.id);
-                const showCb = state === 'recommend' || state === 'judge';
-                return e('td',{key:t.id,
-                  onClick:() => { if (srcTrack) updateSource(key, t.id); },
-                  style:{padding:'4px 6px',borderBottom:'0.5px solid var(--bd-subtle)',
-                    background:state?STATE_BG[state]:'transparent',
-                    fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',
-                    cursor:srcTrack?'pointer':'default',position:'relative'}
-                },
-                  e('div',{style:{display:'flex',alignItems:'center',gap:4}},
-                    showCb&&e('input',{type:'checkbox',
-                      checked:isTarget,
-                      onChange:() => toggleTarget(key, t.id),
-                      onClick:ev => ev.stopPropagation(),
-                      style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0}}),
-                    e('span',{style:{flex:1}},val||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')),
-                    !showCb&&state==='match'&&val&&e('span',{style:{fontSize:9,color:'var(--green)'}},Icon('check',{fontSize:10}))
+  // Source basis: compare title/artist/album with target — all 3 match → 精确
+  function sourceBasis(src) {
+    const fields = ['title', 'artist', 'album'];
+    const allMatch = fields.every(f =>
+      hasData(current, f) && hasData(src, f) && normCmp(String(current[f])) === normCmp(String(src[f]))
+    );
+    return allMatch ? '（精确）' : '（模糊）';
+  }
+
+  const nCols = 2 + sources.length;
+  const colTemplate = `58px 1fr${sources.map(() => ' 1fr').join('')}`;
+
+  return e(Modal,{title:'组内属性同步',onClose,width:Math.min(900, 200 + sources.length * 160)},
+    !current && e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},'未找到目标文件'),
+
+    current && e('div',null,
+
+      // Filename + status bar
+      e('div',{style:{marginBottom:12,padding:'8px 12px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+        Icon('file-music',{fontSize:13,color:'var(--tx-faint)',flexShrink:0}),
+        e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},current.title||current.path),
+        e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:'var(--amber-bg)',color:'var(--amber)',border:'0.5px solid var(--amber)',whiteSpace:'nowrap'}},
+          `同步目标 · ${sources.length} 个来源`)
+      ),
+
+      // ── Comparison table (same style as ScrapeDialog) ──
+      e('div',{style:{marginBottom:14}},
+        e('div',{style:{display:'grid',gridTemplateColumns:colTemplate,fontSize:10,borderRadius:'var(--r-md)',overflow:'hidden',border:'0.5px solid var(--bd-default)'}},
+          // Header row
+          e('div',{style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:'0.5px solid var(--bd-subtle)'}},'字段'),
+          e('div',{style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:sources.length>0?'0.5px solid var(--bd-subtle)':'none'}},'文件属性'),
+          ...sources.map((s,i) => e('div',{key:s.id,
+            style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+              borderRight:i<sources.length-1?'0.5px solid var(--bd-subtle)':'none'}},
+            e(InstantTooltip,{tip:s.path,light:true},(s.title||'—') + sourceBasis(s))
+          )),
+          // Data rows
+          ...SCRAPE_ALL_FIELDS.map(({key,label,displayOnly}) => {
+            const fv = key === 'duration' ? fmtDur(current.duration) : fmtVal(current[key]);
+            const curSrc = sel[key];
+            const isDisplayOnly = !!displayOnly;
+            const cells = [
+              e('div',{key:key+'l',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-faint)',background:'var(--bg-subtle)'}},label),
+              e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:sources.length>0?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9}},
+                fv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
+              ),
+            ];
+            for (const s of sources) {
+              const sVal = key === 'duration' ? fmtDur(s.duration) : fmtVal(s[key]);
+              const sState = key === 'duration' ? durationState(current.duration, s.duration) : states[s.id]?.[key];
+              const isSelected = curSrc === s.id;
+              cells.push(isDisplayOnly
+                ? e('div',{key:s.id,
+                  style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
+                    background:sState?STATE_BG[sState]:'transparent',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap',
+                    color:sState?'var(--tx-primary)':'var(--tx-faint)'}},
+                  e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,flex:1}},
+                    sVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
+                )
+                : e('label',{key:s.id,
+                  onClick:()=>sState&&toggleSrc(key,s.id),
+                  style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
+                    background:sState?STATE_BG[sState]:'transparent',
+                    border:'1px solid transparent',
+                    cursor:sState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                  }},
+                  sState&&e('input',{type:'radio',name:'cf_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                  e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                    sVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
+                    isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐')
                   )
-                );
-              })
-            );
-          })
-        )
-      )
-    ),
-
-    // Legend
-    e('div',{style:{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap',marginBottom:14,fontSize:10,color:'var(--tx-faint)'}},
-      e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#F0FDF4',border:'0.5px solid var(--bd-subtle)'}}),'绿=一致（无需写入）'),
-      e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#EFF6FF',border:'0.5px solid var(--bd-subtle)'}}),'蓝=推荐写入（空白）'),
-      e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#FFFBEB',border:'0.5px solid var(--bd-subtle)'}}),'黄=需自行判断（冲突）'),
-      e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('pin',{fontSize:9,color:'var(--amber)'}),'=来源')
-    ),
-
-    // Write result
-    writeResult&&e('div',{style:{marginBottom:10,padding:'8px 12px',borderRadius:'var(--r-md)',
-      background:writeResult.ok?'var(--green-bg)':'var(--red-bg)',
-      border:`0.5px solid ${writeResult.ok?'var(--green-bd)':'var(--red-bd)'}`,fontSize:11}},
-      writeResult.ok
-        ? e('span',{style:{color:'var(--green)'}},'✓ 写入成功')
-        : e('span',{style:{color:'var(--red)'}},Icon('alert-circle',{marginRight:4,fontSize:12}),'失败: '+writeResult.error)
-    ),
-
-    // Footer — same style as ScrapeDialog
-    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap',borderTop:'0.5px solid var(--bd-default)',paddingTop:14}},
-      e('div',{style:{fontSize:10,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5}},
-        Icon('shield-check',{fontSize:12,color:'var(--green)'}),'写入前自动备份原始标签，可随时撤销'),
-      e(Btn,{disabled:!canWrite||writing,
-        icon:writing?'loader':'pencil',
-        onClick:()=>setConfirmWrite(true)},
-        writing?'写入中...':canWrite?`写入 ${totalTargets} 个字段`:'选择来源和目标字段')
-    ),
-
-    // Confirm dialog
-    confirmWrite&&e('div',{style:{position:'fixed',inset:0,zIndex:1100,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'},
-      onClick:ev=>ev.target===ev.currentTarget&&setConfirmWrite(false)},
-      e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:500,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.2)'}},
-        e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认字段借用'),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:12}},
-          '将把以下字段值写入目标文件：'),
-        e('div',{style:{maxHeight:200,overflowY:'auto',marginBottom:12}},
-          ...WRITE_FIELDS.filter(({key}) => {
-            const tgts = targetsByField[key];
-            return tgts && tgts.size > 0;
-          }).map(({key,label}) => {
-            const srcId = sourceByField[key];
-            const src = srcId ? trackById[srcId] : null;
-            const tgts = targetsByField[key] || new Set();
-            return e('div',{key,style:{fontSize:11,padding:'4px 8px',background:'var(--bg-subtle)',borderRadius:'var(--r-sm)',marginBottom:4}},
-              e('div',{style:{fontWeight:500,color:'var(--tx-primary)',marginBottom:2}},label),
-              e('div',{style:{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}},
-                e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--amber)',fontSize:10}},String(src?.[key]||'')),
-                e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'→ 写入'),
-                ...[...tgts].map(tid => {
-                  const t = trackById[tid];
-                  return e('span',{key:tid,style:{fontSize:9,color:'var(--tx-secondary)'}},t?.title||`#${tid}`);
-                })
-              )
-            );
-          })
+                  ));
+            }
+            return cells;
+          }).flat()
         ),
-        e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginBottom:16,display:'flex',alignItems:'center',gap:5}},
-          Icon('shield-check',{fontSize:11,color:'var(--green)'}),'写入前将自动备份原始标签，支持撤销'),
-        e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
-          e(Btn,{variant:'ghost',onClick:()=>setConfirmWrite(false)},'返回'),
-          e(Btn,{onClick:doWrite},'确认写入')
+        // Legend row
+        e('div',{style:{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap',marginTop:8,fontSize:10,color:'var(--tx-faint)'}},
+          e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#F0FDF4',border:'0.5px solid var(--bd-subtle)'}}),'绿=一致'),
+          e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#EFF6FF',border:'0.5px solid var(--bd-subtle)'}}),'蓝=推荐写入（空白）'),
+          e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#FFFBEB',border:'0.5px solid var(--bd-subtle)'}}),'黄=需自行判断'),
+          e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{color:'var(--tx-muted)',fontStyle:'italic'}}),'时长仅对比，不写入')
+        )
+      ),
+
+      // Write result
+      writeResult&&e('div',{style:{marginBottom:10,padding:'8px 12px',borderRadius:'var(--r-md)',
+        background:writeResult.ok?'var(--green-bg)':'var(--red-bg)',
+        border:`0.5px solid ${writeResult.ok?'var(--green-bd)':'var(--red-bd)'}`,fontSize:11}},
+        writeResult.ok
+          ? e('span',{style:{color:'var(--green)'}},'✓ 写入成功')
+          : e('span',{style:{color:'var(--red)'}},Icon('alert-circle',{marginRight:4,fontSize:12}),'失败: '+writeResult.error)
+      ),
+
+      // Footer
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap',borderTop:'0.5px solid var(--bd-default)',paddingTop:14}},
+        e('div',{style:{fontSize:10,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5}},
+          Icon('shield-check',{fontSize:12,color:'var(--green)'}),'写入前自动备份原始标签，可随时撤销'),
+        e(Btn,{disabled:!canWrite||writing,
+          icon:writing?'loader':'pencil',
+          onClick:()=>setConfirmWrite(true)},
+          writing?'写入中...':canWrite?`写入 ${selCount} 个字段`:'选择字段后写入')
+      ),
+
+      // Confirm dialog
+      confirmWrite&&e('div',{style:{position:'fixed',inset:0,zIndex:1100,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'},
+        onClick:ev=>ev.target===ev.currentTarget&&setConfirmWrite(false)},
+        e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:440,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.2)'}},
+          e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认组内属性同步'),
+          e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:12}},
+            `将把以下字段值写入 ${current.title||current.path}：`),
+          WRITE_FIELDS.filter(({key})=>sel[key]&&srcById[sel[key]]?.[key]!=null&&srcById[sel[key]][key]!==0&&srcById[sel[key]][key]!=='').map(({key,label})=>
+            e('div',{key,style:{fontSize:11,padding:'4px 8px',background:'var(--bg-subtle)',borderRadius:'var(--r-sm)',marginBottom:4,display:'flex',gap:8}},
+              e('span',{style:{color:'var(--tx-faint)',width:42,flexShrink:0}},label+':'),
+              e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--amber)'}},String(srcById[sel[key]][key])),
+              e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},srcById[sel[key]].title||'#'+sel[key])
+            )
+          ),
+          e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:10,marginBottom:16,display:'flex',alignItems:'center',gap:5}},
+            Icon('shield-check',{fontSize:11,color:'var(--green)'}),'写入前将自动备份原始标签，支持撤销'),
+          e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+            e(Btn,{variant:'ghost',onClick:()=>setConfirmWrite(false)},'返回'),
+            e(Btn,{onClick:doWrite},'确认写入')
+          )
         )
       )
-    )
+
+    ) // end current
   );
 }
 
@@ -2059,7 +2131,7 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,onCrossFill,player,
       // ── RIGHT: keep toggle ───────────────────────────────────────────
       e('div',{style:{display:'flex',alignItems:'center',gap:4,flexShrink:0}},
         e(IconAction,{icon:'cloud-download',title:'刮削操作',onClick:onScrape}),
-        onCrossFill&&e(IconAction,{icon:'arrows-exchange',title:'字段借用',onClick:onCrossFill}),
+        onCrossFill&&e(IconAction,{icon:'arrows-exchange',title:'组内属性同步',onClick:onCrossFill}),
         e(IconAction,{icon:'folder-open',title:'打开所在目录',onClick:()=>api.post(`/api/files/${track.id}/reveal`)}),
         e(IconAction,{icon:'info-circle',title:'文件属性',onClick:onProps}),
         e('button',{
@@ -2292,7 +2364,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
       onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
       onTagsWritten:()=>{}}),
-    crossFillTracks&&e(CrossFillDialog,{tracks:crossFillTracks,
+    crossFillTracks&&e(CrossFillDialog,{tracks:crossFillTracks.tracks, currentId:crossFillTracks.currentId,
       onClose:()=>setCrossFillTracks(null),
       onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}}}),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
@@ -2496,7 +2568,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
               canToggle:!detail.resolved,
               onProps:()=>setPropsId(t.id),
               onScrape:()=>setScrapeId(t.id),
-              onCrossFill:()=>setCrossFillTracks(detail.tracks||[]),
+              onCrossFill:()=>setCrossFillTracks({tracks:detail.tracks||[], currentId:t.id}),
             })),
 
 
