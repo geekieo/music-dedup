@@ -23,7 +23,7 @@ function normalizeForSearch(s){
   if(!s)return'';
   // NFKD decomposes accented chars (é→e+́), strip combining marks, lowercase,
   // keep only Unicode letters/numbers/whitespace, collapse runs of whitespace.
-  return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+  return s.normalize('NFKD').replace(/\p{M}/gu,'').toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
 }
 
@@ -1429,7 +1429,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 
       // Search + format filter
       e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}},
-        e(SearchInput,{value:search,onChange:onSearch,placeholder:'搜索标题、艺术家、专辑...',minWidth:200}),
+        e(SearchInput,{value:search,onChange:onSearch,minWidth:200}),
         e('select',{value:fmt,onChange:ev=>{setFmt(ev.target.value);},
           style:{fontSize:12,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
             color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:104}},
@@ -2017,9 +2017,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
         return[...tagFilter].every(t=>tags.has(t));
       });
     }
-    const q=search.trim().toLowerCase();
-    if(q){
-      list=filterBySearch(list,search,['keep_title','keep_artist']);
+    if(search.trim()){
+      list=filterBySearch(list,search,['keep_title','keep_artist','keep_album','paths']);
     }
     return list;
   },[groups,tagFilter,search]);
@@ -2151,7 +2150,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
         e('select',{value:sort,onChange:ev=>setSort(ev.target.value),style:{fontSize:12,padding:'5px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
           e('option',{value:'savings'},'按可释放空间'),e('option',{value:'sim'},'按相似度'),e('option',{value:'files'},'按文件数')
         ),
-        e(SearchInput,{value:search,onChange:setSearch,placeholder:'搜索标题、艺术家...'}),
+        e(SearchInput,{value:search,onChange:setSearch}),
       ),
       filter==='pending'&&visiblePending.length>0&&e('div',{style:{display:'flex',gap:8,alignItems:'center'}},
         e('span',{style:{fontSize:11,color:'var(--tx-faint)'}},`${visiblePending.length} 组 · ${fmtBytes(savings)}`),
@@ -2362,7 +2361,9 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
 
   const filtered=filterBySearch(rows||[],search,[
     r=>(r.file_title||r.cur_title||''),
-    r=>(r.file_artist||r.cur_artist||'')
+    r=>(r.file_artist||r.cur_artist||''),
+    r=>(r.cur_album||''),
+    r=>(r.file_path||'')
   ]);
 
   const COLS=['播放','标题','艺术家','修改字段','修改时间','剩余天数','操作'];
@@ -2388,7 +2389,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
             e('span',{style:{fontSize:11}},'在刮削列写入字段后，原始标签将被快照保存于此')
           )
         : e('div',null,
-            e(SearchInput,{value:search,onChange:setSearch,placeholder:'搜索标题、艺术家...',style:{marginBottom:8}}),
+            e(SearchInput,{value:search,onChange:setSearch,style:{marginBottom:8}}),
             e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
               e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
                 e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
@@ -2490,7 +2491,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
     });
   },[onLocate]);
 
-  const filtered=filterBySearch(rows,search,['title','artist','album']);
+  const filtered=filterBySearch(rows,search,['title','artist','album','path']);
 
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
@@ -2502,7 +2503,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
           Icon('shield-check',{fontSize:28,display:'block',margin:'0 auto 8px'}),
           '保留名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入保留名单'))
       : e('div',null,
-          e(SearchInput,{value:search,onChange:setSearch,placeholder:'搜索标题、艺术家、专辑...',style:{marginBottom:8}}),
+          e(SearchInput,{value:search,onChange:setSearch,style:{marginBottom:8}}),
           e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
             e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
