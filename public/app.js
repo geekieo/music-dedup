@@ -710,111 +710,70 @@ function InstantTooltip({tip,children,style={},light=false}){
 }
 
 /* ── auto-select logic for ScrapeDialog (dual-source) ────────────────────
-   Conservative per-field logic mirrors the old single-source MB rules.
-   - Title/Artist: NEVER auto-select (high-visibility, always manual confirm)
-   - Album: auto-select ONLY when file's album is blank
-   - Year: auto-select when blank, OR when an exact-match source has a
-     different (likely more correct) value
-   - Track/Genre: auto-select ONLY when blank
-   Source-level match_basis is NEVER shown per-field — it's a recording-level
-   attribute, not a per-field verification.
+   Returns per-source per-field states (match/recommend/judge) plus
+   auto-selected fields. Follows the same tier semantics as lib/tier.js:
+     match    — scraped value equals file value (green, no write needed)
+     recommend — file field empty + source is exact match (blue, auto-check)
+     judge    — file field non-empty conflict, or source is fuzzy (yellow)
 */
 function autoSelectFields(file, scraped) {
-  if (!scraped || (!scraped.mb?.title && !scraped.acoustid?.title)) return { selected:{}, recommend:{}, reasons:{}, conflicts:{} };
-  const sel = {}, rec = {}, rsn = {}, cfl = {};
-  const JUNK = [/热歌/,/慢摇/,/合辑/,/精选\d/,/^\d+首/,/网络/];
+  if (!scraped || (!scraped.mb?.title && !scraped.acoustid?.title)) {
+    return { states: {}, selected: {}, recommend: {}, conflicts: {} };
+  }
+  const states = { mb: {}, acoustid: {} };
+  const sel = {}, rec = {}, cfl = {};
   const mb = scraped.mb, aid = scraped.acoustid;
-  const mbExact = mb?.scrape_tier === 'green' || mb?.scrape_tier === 'blue';
-  const aidExact = aid?.scrape_tier === 'green' || aid?.scrape_tier === 'blue';
 
-  function hasData(src, key) { const v=src?.[key]; return v!=null && v!==0 && v!==''; }
+  function hasData(src, key) { const v = src?.[key]; return v != null && v !== 0 && v !== ''; }
+  function srcIsExact(s) { return s?.scrape_tier === 'green' || s?.scrape_tier === 'blue'; }
 
-  // Pick best source for a field when both have data. Returns null on conflict.
+  // Pick best source when both have data. Returns null on conflict
+  // (only when both sources are exact and disagree, or both are fuzzy and
+  // disagree — a single exact source wins over a fuzzy one).
   function pickSrc(key) {
-    const hm=hasData(mb,key), ha=hasData(aid,key);
-    if (!hm&&!ha) return null;
+    const hm = hasData(mb, key), ha = hasData(aid, key);
+    if (!hm && !ha) return null;
     if (!hm) return 'acoustid';
-    if (!ha) return 'musicbrainz';
-    if (normCmp(String(mb[key]))===normCmp(String(aid[key]))) return aidExact?'acoustid':mbExact?'musicbrainz':'acoustid';
-    return null; // disagree
-  }
-
-  // ── Title — NEVER auto-check ──────────────────────────────────────────
-  sel.title = false;
-  if (!hasData(mb,'title')&&!hasData(aid,'title')) rsn.title='刮削无数据';
-  else if (!file.title) rsn.title='文件属性为空，但标题不建议自动写入，请手动确认';
-  else rsn.title='与文件属性不同，请手动确认';
-
-  // ── Artist — NEVER auto-check ─────────────────────────────────────────
-  sel.artist = false;
-  if (!hasData(mb,'artist')&&!hasData(aid,'artist')) rsn.artist='刮削无数据';
-  else if (!file.artist) rsn.artist='文件属性为空，但艺术家不建议自动写入，请手动确认';
-  else rsn.artist='与文件属性不同，请手动确认';
-
-  // ── Album — auto-check ONLY when blank ────────────────────────────────
-  const albumJunk = JUNK.some(p=>p.test(file.album||''));
-  if (!hasData(mb,'album')&&!hasData(aid,'album')) { sel.album=false; rsn.album='刮削无数据'; }
-  else if (!file.album) {
-    const s=pickSrc('album'); sel.album=s||false; if(s)rec.album=true;
-    rsn.album=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
-    if(!s) cfl.album=true;
-  } else if (scraped.scrape_tier==='green') {
-    sel.album=false; rsn.album='仅繁简写法不同，与文件属性一致';
-  } else if (albumJunk&&(mbExact||aidExact)) {
-    sel.album=false; rec.album=true; rsn.album='当前专辑名疑似非正规，建议手动确认后覆写';
-  } else {
-    sel.album=false;
-    if (hasData(mb,'album')&&hasData(aid,'album')&&normCmp(String(mb.album))!==normCmp(String(aid.album))) {
-      cfl.album=true; rsn.album='⚠ 两个来源数据不一致，且文件已有专辑信息，请手动确认';
-    } else rsn.album='与文件属性不同，请手动确认';
-  }
-
-  // ── Year — auto-check when blank, OR when exact source has diff value ─
-  if (!hasData(mb,'album_year')&&!hasData(aid,'album_year')) { sel.album_year=false; rsn.album_year='刮削无数据'; }
-  else if (!file.album_year) {
-    const s=pickSrc('album_year'); sel.album_year=s||false; if(s)rec.album_year=true;
-    rsn.album_year=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
-    if(!s) cfl.album_year=true;
-  } else {
-    const s=pickSrc('album_year');
-    if (s&&(s==='acoustid'?aidExact:mbExact)) {
-      const sv=s==='acoustid'?aid.album_year:mb.album_year;
-      if (sv!==file.album_year) { sel.album_year=s; rec.album_year=true; rsn.album_year=`精确匹配，建议覆写（当前: ${file.album_year}）`; }
-      else { sel.album_year=false; rsn.album_year='与文件属性一致'; }
-    } else if (!s) {
-      sel.album_year=false; cfl.album_year=true; rsn.album_year='⚠ 两个来源数据不一致，请手动选择';
-    } else {
-      sel.album_year=false; rsn.album_year=`模糊匹配（当前: ${file.album_year}），请手动确认`;
+    if (!ha) return 'mb';
+    if (normCmp(String(mb[key])) === normCmp(String(aid[key]))) {
+      return srcIsExact(aid) ? 'acoustid' : srcIsExact(mb) ? 'mb' : 'acoustid';
     }
+    // Disagree: only conflict when both have the same exact/fuzzy status
+    const mbExact = srcIsExact(mb), aidExact = srcIsExact(aid);
+    if (mbExact && !aidExact) return 'mb';
+    if (aidExact && !mbExact) return 'acoustid';
+    return null; // both exact or both fuzzy → conflict
   }
 
-  // ── Track — auto-check ONLY when blank ────────────────────────────────
-  if (!hasData(mb,'track_number')&&!hasData(aid,'track_number')) { sel.track_number=false; rsn.track_number='刮削无数据'; }
-  else if (!file.track_number) {
-    const s=pickSrc('track_number'); sel.track_number=s||false; if(s)rec.track_number=true;
-    rsn.track_number=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
-    if(!s) cfl.track_number=true;
-  } else {
-    sel.track_number=false;
-    if (hasData(mb,'track_number')&&hasData(aid,'track_number')&&mb.track_number!==aid.track_number) {
-      cfl.track_number=true; rsn.track_number=`⚠ 两个来源曲目号不一致（${mb.track_number} vs ${aid.track_number}），请手动确认`;
-    } else rsn.track_number='与文件属性一致';
+  for (const { key } of WRITE_FIELDS) {
+    // ── Per-source state for coloring ──────────────────────────────────
+    for (const srcKey of ['mb', 'acoustid']) {
+      const s = scraped[srcKey];
+      if (!s || !hasData(s, key)) { states[srcKey][key] = null; continue; }
+      const fv = file[key], sv = s[key];
+      const fvEmpty = fv == null || fv === 0 || fv === '';
+      if (!fvEmpty && normCmp(String(fv)) === normCmp(String(sv))) {
+        states[srcKey][key] = 'match';
+      } else if (fvEmpty && srcIsExact(s)) {
+        states[srcKey][key] = 'recommend';
+      } else {
+        states[srcKey][key] = 'judge';
+      }
+    }
+
+    // ── Auto-select logic ──────────────────────────────────────────────
+    const mbHas = hasData(mb, key), aidHas = hasData(aid, key);
+    if (!mbHas && !aidHas) { sel[key] = false; continue; }
+
+    const s = pickSrc(key);
+    if (!s) { sel[key] = false; cfl[key] = true; continue; }
+
+    const bestState = states[s][key];
+    if (bestState === 'recommend') { sel[key] = s; rec[key] = true; }
+    else { sel[key] = false; }
   }
 
-  // ── Genre — auto-check ONLY when blank ────────────────────────────────
-  if (!hasData(mb,'genre')&&!hasData(aid,'genre')) { sel.genre=false; rsn.genre='刮削无数据'; }
-  else if (!file.genre) {
-    const s=pickSrc('genre'); sel.genre=s||false; if(s)rec.genre=true;
-    rsn.genre=s?'文件属性为空，建议写入':'⚠ 两个来源数据不一致，请手动选择';
-    if(!s) cfl.genre=true;
-  } else {
-    sel.genre=false;
-    if (hasData(mb,'genre')&&hasData(aid,'genre')&&normCmp(String(mb.genre))!==normCmp(String(aid.genre))) {
-      cfl.genre=true; rsn.genre='⚠ 两个来源数据不一致，且文件已有流派信息，请手动确认';
-    } else rsn.genre='与文件属性一致';
-  }
-
-  return { selected:sel, recommend:rec, reasons:rsn, conflicts:cfl };
+  return { states, selected: sel, recommend: rec, conflicts: cfl };
 }
 
 const WRITE_FIELDS = [
@@ -835,8 +794,8 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const[confirmWrite,setConfirmWrite]=useState(false);
   const[sel,setSel]=useState({});
   const[recommend,setRecommend]=useState({});
-  const[reasons,setReasons]=useState({});
   const[conflicts,setConflicts]=useState({});
+  const[states,setStates]=useState({});
   const[fileInfo,setFileInfo]=useState(null); // for filename + format
 
   function reload(){
@@ -854,8 +813,8 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   // Auto-compute field selection when live tags or scraped data change
   useEffect(()=>{
     if(liveTags&&scraped){
-      const{selected,recommend:rec,reasons:r,conflicts:c}=autoSelectFields(liveTags,scraped);
-      setSel(selected); setRecommend(rec); setReasons(r); setConflicts(c||{});
+      const{states:st,selected:s,recommend:rec,conflicts:c}=autoSelectFields(liveTags,scraped);
+      setStates(st); setSel(s); setRecommend(rec); setConflicts(c||{});
     }
   },[liveTags?.title,scraped?.mb?.file_id,scraped?.acoustid?.file_id]);
 
@@ -867,7 +826,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   }
   async function doCancelScrape(){
     await api.del(`/api/files/${fileId}/scraped`);
-    setScraped(null); setSel({}); setRecommend({}); setReasons({});
+    setScraped(null); setSel({}); setRecommend({}); setStates({}); setConflicts({});
     onUpdated&&onUpdated();
   }
   async function doWrite(){
@@ -894,21 +853,41 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const selCount=Object.values(sel).filter(Boolean).length;
   const canWrite=hasScraped&&selCount>0;
   const tier=scraped?.scrape_tier;
-  // Source-level match labels based on per-source scrape_tier (considers
-  // title+artist+album matching, not just the recording-level match_basis).
+
+  // Per-source scrape match info (now includes all 6 fields: title/artist/album/year/track/genre)
+  const mbMatch = (() => {
+    if (!liveTags || !scraped?.mb?.title) return null;
+    const t = {
+      title: liveTags.title, artist: liveTags.artist, album: liveTags.album,
+      album_year: liveTags.album_year, track_number: liveTags.track_number, genre: liveTags.genre,
+      scrape_title: scraped.mb.title, scrape_artist: scraped.mb.artist, scrape_album: scraped.mb.album,
+      scrape_album_year: scraped.mb.album_year, scrape_track_number: scraped.mb.track_number, scrape_genre: scraped.mb.genre,
+    };
+    try { return computeScrapeMatch(t); } catch { return null; }
+  })();
+  const aidMatch = (() => {
+    if (!liveTags || !scraped?.acoustid?.title) return null;
+    const t = {
+      title: liveTags.title, artist: liveTags.artist, album: liveTags.album,
+      album_year: liveTags.album_year, track_number: liveTags.track_number, genre: liveTags.genre,
+      scrape_title: scraped.acoustid.title, scrape_artist: scraped.acoustid.artist, scrape_album: scraped.acoustid.album,
+      scrape_album_year: scraped.acoustid.album_year, scrape_track_number: scraped.acoustid.track_number, scrape_genre: scraped.acoustid.genre,
+    };
+    try { return computeScrapeMatch(t); } catch { return null; }
+  })();
+
+  // Per-source tier labels for column headers
   const mbTier = scraped?.mb?.scrape_tier;
   const aidTier = scraped?.acoustid?.scrape_tier;
-  const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'yellow' ? '（模糊）' : '';
-  const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'yellow' ? '（模糊）' : '';
+  const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'yellow' ? '（模糊）' : mbTier === 'red' ? '（模糊）' : '';
+  const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'yellow' ? '（模糊）' : aidTier === 'red' ? '（模糊）' : '';
 
-  // Diff color for a field vs a specific source
-  function diffStyle(key, src){
-    const fv=String(liveTags?.[key]||'').trim();
-    const sv=String(scraped?.[src]?.[key]||'').trim();
-    if(!sv)              return {background:'transparent'};
-    if(!fv)              return {background:'#EFF6FF'};
-    if(normCmp(fv)===normCmp(sv)) return {background:'#F0FDF4'};
-    return {background:'#FFFBEB'};
+  // Cell state → background color
+  const STATE_BG = { match: '#F0FDF4', recommend: '#EFF6FF', judge: '#FFFBEB' };
+
+  function fmtVal(v) {
+    if (v == null || v === 0 || v === '') return '';
+    return String(v);
   }
 
   return e(Modal,{title:`刮削操作`,onClose,width:760},
@@ -920,10 +899,8 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       e('div',{style:{marginBottom:12,padding:'8px 12px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
         Icon('file-music',{fontSize:13,color:'var(--tx-faint)',flexShrink:0}),
         e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},filename),
-        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:TIER_COLOR[tier||'yellow']+'22',color:TIER_COLOR[tier||'yellow'],border:'0.5px solid '+TIER_COLOR[tier||'yellow'],whiteSpace:'nowrap'}},
-          TIER_LABEL[tier]||'已刮削'),
-        scraped?.mb?.title&&e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'MB'),
-        scraped?.acoustid?.title&&e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'AcoustID')
+        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:(TIER_COLOR[tier||'yellow']||'#EAB308')+'22',color:TIER_COLOR[tier||'yellow']||'#EAB308',border:'0.5px solid '+(TIER_COLOR[tier||'yellow']||'#EAB308'),whiteSpace:'nowrap'}},
+          TIER_LABEL[tier]||'已刮削')
       ),
 
       // Action buttons row
@@ -934,110 +911,107 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
           onClick:doCancelScrape},'取消刮削'),
       ),
 
-      // ── Comparison table (dynamic columns: Field | File | MB? | AcoustID?) ──
+      // ── Comparison table (cells contain radio buttons for source selection) ──
       hasScraped&&(()=>{
         const showMb = !!(scraped?.mb?.title);
         const showAid = !!(scraped?.acoustid?.title);
-        const colTemplate = `62px 1fr${showMb ? ' 1fr' : ''}${showAid ? ' 1fr' : ''}`;
+        const colTemplate = `58px 1fr${showMb ? ' 1fr' : ''}${showAid ? ' 1fr' : ''}`;
         const nCols = 2 + (showMb?1:0) + (showAid?1:0);
-        // Build header labels
         const headers = ['字段','文件属性'];
-        if (showMb) headers.push(`MB 刮削${mbBasisLabel}`);
-        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}`);
+        if (showMb) headers.push(`MB 刮削${mbBasisLabel}${mbMatch ? ` · ${mbMatch.n}/6` : ''}`);
+        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}${aidMatch ? ` · ${aidMatch.n}/6` : ''}`);
+        // Helper: toggle source (click again to deselect)
+        const toggleSrc = (key, src) => setSel(p=>({...p,[key]:p[key]===src?false:src}));
         return e('div',{style:{marginBottom:14}},
           e('div',{style:{display:'grid',gridTemplateColumns:colTemplate,fontSize:10,borderRadius:'var(--r-md)',overflow:'hidden',border:'0.5px solid var(--bd-default)'}},
-            // Header
+            // Header row
             ...headers.map((h,i)=>e('div',{key:h,style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:i<nCols-1?'0.5px solid var(--bd-subtle)':'none'}},h)),
-            // Rows — conditionally include MB/AcoustID cells
+            // Data rows — each MB/AcoustID cell has a radio, click toggles selection
             ...WRITE_FIELDS.map(({key,label})=>{
-              const fv = (liveTags?.[key] || 0) > 0 ? String(liveTags[key]) : (liveTags?.[key] && liveTags[key] !== 0 ? String(liveTags[key]) : '');
+              const fv = fmtVal(liveTags?.[key]);
               const conflict = conflicts[key];
-              const cellBg = conflict ? {background:'#FFFBEB'} : {};
+              const curSrc = sel[key];
               const cells = [
                 e('div',{key:key+'l',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-faint)',background:'var(--bg-subtle)'}},label),
-                e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:(showMb||showAid)?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9,...cellBg}},fv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')),
+                e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:(showMb||showAid)?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9}},
+                  fv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
+                ),
               ];
               if (showMb) {
-                const mbVal = (scraped?.mb?.[key] || 0) > 0 ? String(scraped.mb[key]) : (scraped?.mb?.[key] && scraped.mb[key] !== 0 ? String(scraped.mb[key]) : '');
-                cells.push(e('div',{key:key+'m',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9,...diffStyle(key,'mb'),...cellBg}},
-                  mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
+                const mbVal = fmtVal(scraped?.mb?.[key]);
+                const mbState = states?.mb?.[key];
+                const isSelected = curSrc === 'mb';
+                const hasAidConflict = conflict && scraped?.acoustid?.[key] != null;
+                cells.push(e('label',{key:key+'m',
+                  onClick:()=>mbState&&toggleSrc(key,'mb'),
+                  style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
+                    background:mbState?STATE_BG[mbState]:'transparent',
+                    border:'1px solid transparent',
+                    cursor:mbState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                  }},
+                  mbState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                  e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                    mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
+                    isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
+                    hasAidConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                  )
                 ));
               }
               if (showAid) {
-                const aidVal = (scraped?.acoustid?.[key] || 0) > 0 ? String(scraped.acoustid[key]) : (scraped?.acoustid?.[key] && scraped.acoustid[key] !== 0 ? String(scraped.acoustid[key]) : '');
-                cells.push(e('div',{key:key+'a',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9,...diffStyle(key,'acoustid'),...cellBg}},
-                  aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
-                  conflict&&e('span',{title:'MB 与 AcoustID 数据不一致，请手动选择',style:{cursor:'help',marginLeft:2}},Icon('alert-circle',{fontSize:10,color:'#D97706'}))
+                const aidVal = fmtVal(scraped?.acoustid?.[key]);
+                const aidState = states?.acoustid?.[key];
+                const isSelected = curSrc === 'acoustid';
+                const hasMbConflict = conflict && scraped?.mb?.[key] != null;
+                cells.push(e('label',{key:key+'a',
+                  onClick:()=>aidState&&toggleSrc(key,'acoustid'),
+                  style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
+                    background:aidState?STATE_BG[aidState]:'transparent',
+                    border:'1px solid transparent',
+                    cursor:aidState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                  }},
+                  aidState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                  e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                    aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
+                    isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
+                    hasMbConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                  )
                 ));
               }
               return cells;
             }).flat()
+          ),
+          // Legend row
+          e('div',{style:{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap',marginTop:8,fontSize:10,color:'var(--tx-faint)'}},
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#F0FDF4',border:'0.5px solid var(--bd-subtle)'}}),'绿=一致'),
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#EFF6FF',border:'0.5px solid var(--bd-subtle)'}}),'蓝=推荐写入（精确·空白）'),
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#FFFBEB',border:'0.5px solid var(--bd-subtle)'}}),'黄=需自行判断'),
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('alert-circle',{fontSize:10,color:'#D97706'}),'=两来源冲突')
           )
         );
       })(),
 
-      // ── Write to file section ─────────────────────────────────────────
-      hasScraped&&e('div',{style:{borderTop:'0.5px solid var(--bd-default)',paddingTop:14}},
-        e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10}},
-          Icon('pencil',{fontSize:13,color:'var(--tx-secondary)'}),'写入文件'
-        ),
+      // Write result
+      writeResult&&e('div',{style:{marginTop:10,padding:'8px 12px',borderRadius:'var(--r-md)',
+        background:writeResult.ok?'var(--green-bg)':'var(--red-bg)',
+        border:`0.5px solid ${writeResult.ok?'var(--green-bd)':'var(--red-bd)'}`,fontSize:11}},
+        writeResult.ok
+          ?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}},
+            e('span',{style:{color:'var(--green)'}},'✓ 写入成功'),
+            e('button',{onClick:()=>doRevert(writeResult.snapshotId),
+              style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-sm)',padding:'2px 10px',fontSize:11,cursor:'pointer',color:'var(--tx-secondary)'}},
+              '撤销此次写入'))
+          :e('span',{style:{color:'var(--red)'}},
+            Icon('alert-circle',{marginRight:4,fontSize:12}),'失败: '+writeResult.error)
+      ),
 
-        // Field radio-buttons: choose source per field
-        WRITE_FIELDS.map(({key,label})=>{
-          const hasMb = scraped?.mb?.[key] != null && scraped.mb[key] !== 0 && scraped.mb[key] !== '';
-          const hasAid = scraped?.acoustid?.[key] != null && scraped.acoustid[key] !== 0 && scraped.acoustid[key] !== '';
-          const disabled = !hasMb && !hasAid;
-          const rec = recommend[key];
-          const curSrc = sel[key];
-          return e('div',{key,style:{display:'flex',alignItems:'flex-start',gap:8,padding:'5px 0',opacity:disabled?.4:1}},
-            e('div',{style:{flex:1,minWidth:0}},
-              e('div',{style:{fontSize:12,fontWeight:rec?600:400,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,marginBottom:2}},
-                label,
-                rec&&e('span',{style:{fontSize:10,color:'var(--amber)',fontWeight:400}},'推荐')
-              ),
-              e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginBottom:3}},reasons[key]||''),
-              // Source selector
-              !disabled&&e('div',{style:{display:'flex',gap:12,fontSize:10}},
-                hasMb&&e('label',{style:{display:'flex',alignItems:'center',gap:3,cursor:'pointer',color:curSrc==='musicbrainz'?'var(--amber)':'var(--tx-muted)'}},
-                  e('input',{type:'radio',name:'src_'+key,checked:curSrc==='musicbrainz',
-                    onChange:()=>setSel(p=>({...p,[key]:'musicbrainz'})),
-                    style:{accentColor:'var(--amber)'}}),
-                  'MB'
-                ),
-                hasAid&&e('label',{style:{display:'flex',alignItems:'center',gap:3,cursor:'pointer',color:curSrc==='acoustid'?'var(--amber)':'var(--tx-muted)'}},
-                  e('input',{type:'radio',name:'src_'+key,checked:curSrc==='acoustid',
-                    onChange:()=>setSel(p=>({...p,[key]:'acoustid'})),
-                    style:{accentColor:'var(--amber)'}}),
-                  'AcoustID'
-                )
-              )
-            )
-          );
-        }),
-
-        // Write result
-        writeResult&&e('div',{style:{marginTop:10,padding:'8px 12px',borderRadius:'var(--r-md)',
-          background:writeResult.ok?'var(--green-bg)':'var(--red-bg)',
-          border:`0.5px solid ${writeResult.ok?'var(--green-bd)':'var(--red-bd)'}`,fontSize:11}},
-          writeResult.ok
-            ?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}},
-              e('span',{style:{color:'var(--green)'}},'✓ 写入成功'),
-              e('button',{onClick:()=>doRevert(writeResult.snapshotId),
-                style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-sm)',padding:'2px 10px',fontSize:11,cursor:'pointer',color:'var(--tx-secondary)'}},
-                '撤销此次写入'))
-            :e('span',{style:{color:'var(--red)'}},
-              Icon('alert-circle',{marginRight:4,fontSize:12}),'失败: '+writeResult.error)
-        ),
-
-        // Safety notice + write button
-        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:12,flexWrap:'wrap'}},
-          e('div',{style:{fontSize:10,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5}},
-            Icon('shield-check',{fontSize:12,color:'var(--green)'}),'写入前自动备份原始标签，可随时撤销'),
-          e(Btn,{disabled:!canWrite||writing||scraping,
-            icon:writing?'loader':'pencil',
-            onClick:()=>setConfirmWrite(true)},
-            writing?'写入中...':canWrite?`写入 ${selCount} 个字段`:'选择字段后写入')
-        )
+      // Footer: safety notice + write button
+      hasScraped&&e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginTop:12,flexWrap:'wrap',borderTop:'0.5px solid var(--bd-default)',paddingTop:14}},
+        e('div',{style:{fontSize:10,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5}},
+          Icon('shield-check',{fontSize:12,color:'var(--green)'}),'写入前自动备份原始标签，可随时撤销'),
+        e(Btn,{disabled:!canWrite||writing||scraping,
+          icon:writing?'loader':'pencil',
+          onClick:()=>setConfirmWrite(true)},
+          writing?'写入中...':canWrite?`写入 ${selCount} 个字段`:'选择字段后写入')
       ),
 
       // Write confirm dialog (inline)
@@ -1448,6 +1422,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
           e('option',{value:'green'},TIER_LABEL.green),
           e('option',{value:'blue'},TIER_LABEL.blue),
           e('option',{value:'yellow'},TIER_LABEL.yellow),
+          e('option',{value:'red'},TIER_LABEL.red),
           e('option',{value:'none'},'未刮削')
         ),
         e('span',{style:{fontSize:11,color:'var(--tx-faint)',whiteSpace:'nowrap'}},`显示 ${rows.length} / ${total.toLocaleString()} 首`)
@@ -1506,11 +1481,16 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                 e('td',{style:{padding:'4px 6px',textAlign:'center'}},
                   (()=>{
                     const tier=f.scrape_tier;
-                    if(!tier)return null;
                     const sources=[];
                     if(f.aid_title||f.mb_title){
                       if(f.aid_title){ sources.push('AcoustID'); }
                       if(f.mb_title){ sources.push('MusicBrainz'); }
+                    }
+                    if(!tier){
+                      // Unscraped — gray placeholder icon, pure display
+                      return e(InstantTooltip,{tip:'未刮削'},
+                        Icon('cloud',{fontSize:15,color:'var(--tx-faint)'})
+                      );
                     }
                     const tipLines=[
                       `刮削 · ${sources.join(' + ')||'未知'} · ${TIER_LABEL[tier]||tier}`,
@@ -1524,9 +1504,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                       f.mb_album_year>0&&`[MusicBrainz] 年份: ${f.mb_album_year}`,
                     ].filter(Boolean).join('\n');
                     return e(InstantTooltip,{tip:tipLines},
-                      e('button',{onClick:()=>setScrapeTarget(f.id),style:{background:'none',border:'none',cursor:'pointer',display:'inline-flex',padding:2}},
-                        Icon('cloud-check',{fontSize:15,color:TIER_COLOR[tier]})
-                      )
+                      Icon('cloud-check',{fontSize:15,color:TIER_COLOR[tier]})
                     );
                   })()
                 ),
@@ -1720,6 +1698,249 @@ function ScannerView({scan}){
 
 // RTYPE_LABEL, DIMENSION_COLUMNS are served by /rules-meta.js (source: lib/rules.js)
 
+/* ── CrossFillDialog — cross-fill fields between tracks within a duplicate group ── */
+function CrossFillDialog({tracks, onClose, onUpdated}){
+  const [sourceByField, setSourceByField] = useState({});
+  const [targetsByField, setTargetsByField] = useState({});
+  const [writing, setWriting] = useState(false);
+  const [writeResult, setWriteResult] = useState(null);
+  const [confirmWrite, setConfirmWrite] = useState(false);
+
+  // Initialize: first track with a non-empty value becomes default source per field
+  useEffect(() => {
+    const src = {}, tgt = {};
+    for (const { key } of WRITE_FIELDS) {
+      const source = tracks.find(t => {
+        const v = t[key];
+        return v != null && v !== 0 && v !== '';
+      });
+      if (source) {
+        src[key] = source.id;
+        tgt[key] = new Set();
+        for (const t of tracks) {
+          if (t.id === source.id) continue;
+          const sv = source[key], tv = t[key];
+          const tvEmpty = tv == null || tv === 0 || tv === '';
+          if (!tvEmpty && normCmp(String(tv)) === normCmp(String(sv))) {
+            // match — no checkbox needed
+          } else if (tvEmpty) {
+            // recommend — auto-check
+            tgt[key].add(t.id);
+          }
+          // judge — don't auto-check
+        }
+      }
+    }
+    setSourceByField(src);
+    setTargetsByField(tgt);
+  }, [tracks]);
+
+  // Recompute targets for a field when source changes
+  function updateSource(key, newSrcId) {
+    setSourceByField(p => ({ ...p, [key]: newSrcId }));
+    const newSrc = tracks.find(t => t.id === newSrcId);
+    if (!newSrc) return;
+    const newTgts = new Set();
+    for (const t of tracks) {
+      if (t.id === newSrcId) continue;
+      const sv = newSrc[key], tv = t[key];
+      const tvEmpty = tv == null || tv === 0 || tv === '';
+      if (!tvEmpty && normCmp(String(tv)) === normCmp(String(sv))) {
+        // match — don't add
+      } else if (tvEmpty) {
+        newTgts.add(t.id);
+      }
+      // judge — don't auto-add
+    }
+    setTargetsByField(p => ({ ...p, [key]: newTgts }));
+  }
+
+  function toggleTarget(key, trackId) {
+    setTargetsByField(p => {
+      const cur = new Set(p[key] || []);
+      if (cur.has(trackId)) cur.delete(trackId);
+      else cur.add(trackId);
+      return { ...p, [key]: cur };
+    });
+  }
+
+  function cellState(sourceVal, targetVal) {
+    const tvEmpty = targetVal == null || targetVal === 0 || targetVal === '';
+    if (!tvEmpty && normCmp(String(targetVal)) === normCmp(String(sourceVal))) return 'match';
+    if (tvEmpty) return 'recommend';
+    return 'judge';
+  }
+
+  async function doWrite(){
+    setConfirmWrite(false); setWriting(true); setWriteResult(null);
+    // Merge: same fileId across multiple fields → single write call
+    const byFile = {};
+    for (const { key } of WRITE_FIELDS) {
+      const srcId = sourceByField[key];
+      if (!srcId) continue;
+      const src = tracks.find(t => t.id === srcId);
+      if (!src) continue;
+      const tgts = targetsByField[key] || new Set();
+      for (const tid of tgts) {
+        if (!byFile[tid]) byFile[tid] = {};
+        byFile[tid][key] = src[key];
+      }
+    }
+    let ok = true, firstErr = null;
+    for (const [fid, fields] of Object.entries(byFile)) {
+      if (!Object.keys(fields).length) continue;
+      const r = await api.post(`/api/files/${fid}/write-tags`, { fields });
+      if (!r.ok) { ok = false; firstErr = r.error || '写入失败'; }
+    }
+    setWriting(false);
+    if (ok) {
+      setWriteResult({ ok: true });
+      onUpdated?.();
+    } else {
+      setWriteResult({ ok: false, error: firstErr });
+    }
+  }
+
+  const totalTargets = Object.values(targetsByField).reduce((s, set) => s + (set?.size || 0), 0);
+  const canWrite = totalTargets > 0;
+  const trackById = {};
+  for (const t of tracks) trackById[t.id] = t;
+
+  const STATE_BG = { match: '#F0FDF4', recommend: '#EFF6FF', judge: '#FFFBEB' };
+
+  function fmtVal(v) {
+    if (v == null || v === 0 || v === '') return '';
+    return String(v);
+  }
+
+  return e(Modal,{title:'字段借用',onClose,width:Math.min(900, 140 + tracks.length * 160)},
+    e('div',{style:{marginBottom:12,fontSize:11,color:'var(--tx-faint)'}},
+      '选择一个曲目在某字段的值作为来源（琥珀色高亮），再勾选需要写入该值的目标曲目。'
+    ),
+
+    // Grid: rows=fields, cols=track header + one column per track
+    e('div',{style:{overflowX:'auto',marginBottom:12}},
+      e('table',{style:{borderCollapse:'collapse',fontSize:10,width:'100%'}},
+        e('thead',null,
+          e('tr',null,
+            e('th',{style:{padding:'5px 8px',textAlign:'left',color:'var(--tx-faint)',fontWeight:500,borderBottom:'0.5px solid var(--bd-default)',width:56}},''),
+            ...tracks.map(t => e('th',{key:t.id,style:{padding:'5px 8px',textAlign:'left',color:'var(--tx-secondary)',fontWeight:500,borderBottom:'0.5px solid var(--bd-default)',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
+              e(InstantTooltip,{tip:t.path,light:true},t.title||'—')
+            ))
+          )
+        ),
+        e('tbody',null,
+          WRITE_FIELDS.map(({key,label}) => {
+            const srcId = sourceByField[key];
+            const tgts = targetsByField[key] || new Set();
+            return e('tr',{key},
+              e('td',{style:{padding:'5px 8px',color:'var(--tx-faint)',fontWeight:500,borderBottom:'0.5px solid var(--bd-subtle)',background:'var(--bg-subtle)'}},label),
+              ...tracks.map(t => {
+                const isSource = t.id === srcId;
+                const val = fmtVal(t[key]);
+                if (isSource) {
+                  return e('td',{key:t.id,style:{padding:'4px 6px',borderBottom:'0.5px solid var(--bd-subtle)',
+                    background:'var(--amber-bg)',border:'1.5px solid var(--amber)',
+                    fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',position:'relative'}},
+                    e('span',{style:{position:'absolute',top:1,right:2}},Icon('pin',{fontSize:9,color:'var(--amber)'})),
+                    val||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
+                  );
+                }
+                // Non-source cell: clickable to become source, or with checkbox for target
+                const srcTrack = srcId ? trackById[srcId] : null;
+                const state = srcTrack ? cellState(srcTrack[key], t[key]) : null;
+                const isTarget = tgts.has(t.id);
+                const showCb = state === 'recommend' || state === 'judge';
+                return e('td',{key:t.id,
+                  onClick:() => { if (srcTrack) updateSource(key, t.id); },
+                  style:{padding:'4px 6px',borderBottom:'0.5px solid var(--bd-subtle)',
+                    background:state?STATE_BG[state]:'transparent',
+                    fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',
+                    cursor:srcTrack?'pointer':'default',position:'relative'}
+                },
+                  e('div',{style:{display:'flex',alignItems:'center',gap:4}},
+                    showCb&&e('input',{type:'checkbox',
+                      checked:isTarget,
+                      onChange:() => toggleTarget(key, t.id),
+                      onClick:ev => ev.stopPropagation(),
+                      style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0}}),
+                    e('span',{style:{flex:1}},val||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')),
+                    !showCb&&state==='match'&&val&&e('span',{style:{fontSize:9,color:'var(--green)'}},Icon('check',{fontSize:10}))
+                  )
+                );
+              })
+            );
+          })
+        )
+      )
+    ),
+
+    // Legend
+    e('div',{style:{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap',marginBottom:14,fontSize:10,color:'var(--tx-faint)'}},
+      e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#F0FDF4',border:'0.5px solid var(--bd-subtle)'}}),'绿=一致（无需写入）'),
+      e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#EFF6FF',border:'0.5px solid var(--bd-subtle)'}}),'蓝=推荐写入（空白）'),
+      e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#FFFBEB',border:'0.5px solid var(--bd-subtle)'}}),'黄=需自行判断（冲突）'),
+      e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('pin',{fontSize:9,color:'var(--amber)'}),'=来源')
+    ),
+
+    // Write result
+    writeResult&&e('div',{style:{marginBottom:10,padding:'8px 12px',borderRadius:'var(--r-md)',
+      background:writeResult.ok?'var(--green-bg)':'var(--red-bg)',
+      border:`0.5px solid ${writeResult.ok?'var(--green-bd)':'var(--red-bd)'}`,fontSize:11}},
+      writeResult.ok
+        ? e('span',{style:{color:'var(--green)'}},'✓ 写入成功')
+        : e('span',{style:{color:'var(--red)'}},Icon('alert-circle',{marginRight:4,fontSize:12}),'失败: '+writeResult.error)
+    ),
+
+    // Footer — same style as ScrapeDialog
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap',borderTop:'0.5px solid var(--bd-default)',paddingTop:14}},
+      e('div',{style:{fontSize:10,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5}},
+        Icon('shield-check',{fontSize:12,color:'var(--green)'}),'写入前自动备份原始标签，可随时撤销'),
+      e(Btn,{disabled:!canWrite||writing,
+        icon:writing?'loader':'pencil',
+        onClick:()=>setConfirmWrite(true)},
+        writing?'写入中...':canWrite?`写入 ${totalTargets} 个字段`:'选择来源和目标字段')
+    ),
+
+    // Confirm dialog
+    confirmWrite&&e('div',{style:{position:'fixed',inset:0,zIndex:1100,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'},
+      onClick:ev=>ev.target===ev.currentTarget&&setConfirmWrite(false)},
+      e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:500,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.2)'}},
+        e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认字段借用'),
+        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:12}},
+          '将把以下字段值写入目标文件：'),
+        e('div',{style:{maxHeight:200,overflowY:'auto',marginBottom:12}},
+          ...WRITE_FIELDS.filter(({key}) => {
+            const tgts = targetsByField[key];
+            return tgts && tgts.size > 0;
+          }).map(({key,label}) => {
+            const srcId = sourceByField[key];
+            const src = srcId ? trackById[srcId] : null;
+            const tgts = targetsByField[key] || new Set();
+            return e('div',{key,style:{fontSize:11,padding:'4px 8px',background:'var(--bg-subtle)',borderRadius:'var(--r-sm)',marginBottom:4}},
+              e('div',{style:{fontWeight:500,color:'var(--tx-primary)',marginBottom:2}},label),
+              e('div',{style:{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}},
+                e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--amber)',fontSize:10}},String(src?.[key]||'')),
+                e('span',{style:{fontSize:9,color:'var(--tx-faint)'}},'→ 写入'),
+                ...[...tgts].map(tid => {
+                  const t = trackById[tid];
+                  return e('span',{key:tid,style:{fontSize:9,color:'var(--tx-secondary)'}},t?.title||`#${tid}`);
+                })
+              )
+            );
+          })
+        ),
+        e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginBottom:16,display:'flex',alignItems:'center',gap:5}},
+          Icon('shield-check',{fontSize:11,color:'var(--green)'}),'写入前将自动备份原始标签，支持撤销'),
+        e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
+          e(Btn,{variant:'ghost',onClick:()=>setConfirmWrite(false)},'返回'),
+          e(Btn,{onClick:doWrite},'确认写入')
+        )
+      )
+    )
+  );
+}
+
 function DimensionTable({tracks}){
   const[showInfo,setShowInfo]=useState(false);
   if(!tracks||tracks.length<2)return null;
@@ -1786,7 +2007,7 @@ function DimensionTable({tracks}){
   );
 }
 
-function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept}){
+function TrackRow({track,onToggle,canToggle,onProps,onScrape,onCrossFill,player,queue,isKept}){
   const keep=!!track._keepWinner;
   const isCur=player?.current?.id===track.id;
   const[coverErr,setCoverErr]=useState(false);
@@ -1838,6 +2059,7 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,player,queue,isKept
       // ── RIGHT: keep toggle ───────────────────────────────────────────
       e('div',{style:{display:'flex',alignItems:'center',gap:4,flexShrink:0}},
         e(IconAction,{icon:'cloud-download',title:'刮削操作',onClick:onScrape}),
+        onCrossFill&&e(IconAction,{icon:'arrows-exchange',title:'字段借用',onClick:onCrossFill}),
         e(IconAction,{icon:'folder-open',title:'打开所在目录',onClick:()=>api.post(`/api/files/${track.id}/reveal`)}),
         e(IconAction,{icon:'info-circle',title:'文件属性',onClick:onProps}),
         e('button',{
@@ -1939,6 +2161,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
   const[purgeConfirm,setPurgeConfirm]=useState(null); // {id, count} for per-group permanent delete
   const[propsId,setPropsId]=useState(null);
   const[scrapeId,setScrapeId]=useState(null);
+  const[crossFillTracks,setCrossFillTracks]=useState(null);
   const prevScanDoneKey=useRef(0);
 
   function loadList(){
@@ -2069,6 +2292,9 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
       onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
       onTagsWritten:()=>{}}),
+    crossFillTracks&&e(CrossFillDialog,{tracks:crossFillTracks,
+      onClose:()=>setCrossFillTracks(null),
+      onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}}}),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640,description:'可多选，多选为同时满足关系；同一行内的标签互斥，只会出现其一。'},
       e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
@@ -2270,6 +2496,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
               canToggle:!detail.resolved,
               onProps:()=>setPropsId(t.id),
               onScrape:()=>setScrapeId(t.id),
+              onCrossFill:()=>setCrossFillTracks(detail.tracks||[]),
             })),
 
 

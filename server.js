@@ -23,7 +23,7 @@ import { tagTracks, GROUP_TAG_LABELS, GROUP_TAG_DESCRIPTIONS, GROUP_TAG_COLORS,
   PICK_TAG_LABEL, PICK_TAG_COLOR, DEFAULT_PICK_TAG_ORDER,
   MATCHING_METHOD_KEYS, CHARACTERISTIC_TAGS_ARRAY, MATCH_METHOD_TAGS_ARRAY,
   RTYPE_LABEL, DIMENSION_DEFS, DIMENSION_INFO, mergePickOrder, EXCLUSIVE_TAG_GROUPS,
-  DEFAULT_TIER_ORDER, TIER_COLOR, TIER_LABEL } from './lib/rules.js';
+  DEFAULT_TIER_ORDER, TIER_COLOR, TIER_LABEL, computeScrapeMatch } from './lib/rules.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +137,7 @@ app.get('/rules-meta.js', (_,res)=>{
     `const DEFAULT_Q=${JSON.stringify(DEFAULT_TIER_ORDER)};`,
     `const TIER_COLOR=${JSON.stringify(TIER_COLOR)};`,
     `const TIER_LABEL=${JSON.stringify(TIER_LABEL)};`,
+    `const computeScrapeMatch=${computeScrapeMatch.toString()};`,
   ].join('\n'));
 });
 
@@ -301,7 +302,8 @@ app.post('/api/files/:id/scrape-single', async(req,res)=>{
       if (!tiers.length) return null;
       if (tiers.includes('blue')) return 'blue';
       if (tiers.includes('green')) return 'green';
-      return 'yellow';
+      if (tiers.includes('yellow')) return 'yellow';
+      return 'red';
     })();
     res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
   }catch(e){ res.status(500).json({ok:false,error:e.message}); }
@@ -324,14 +326,14 @@ app.get('/api/files/:id/scraped', (req,res)=>{
   // Compute tier for each source independently, plus overall best tier
   const mb  = dual.mb  ? { ...dual.mb,  scrape_tier: f ? computeScrapeTier(f, dual.mb, ignoreScript) : null } : null;
   const aid = dual.acoustid ? { ...dual.acoustid, scrape_tier: f ? computeScrapeTier(f, dual.acoustid, ignoreScript) : null } : null;
-  // Overall tier: either source exact (green/blue) → overall exact, blue takes
-  // priority (有可写入字段), then green, then red only if both are fuzzy/null.
+  // Overall tier: blue > green > yellow > red. Null if no tiers at all.
   const overallTier = (() => {
     const tiers = [mb?.scrape_tier, aid?.scrape_tier].filter(Boolean);
     if (!tiers.length) return null;
     if (tiers.includes('blue')) return 'blue';
     if (tiers.includes('green')) return 'green';
-    return 'yellow';
+    if (tiers.includes('yellow')) return 'yellow';
+    return 'red';
   })();
   res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
 });
