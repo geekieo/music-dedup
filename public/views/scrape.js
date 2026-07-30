@@ -14,27 +14,35 @@ const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「�
 function InstantTooltip({tip,children,style={},light=false}){
   const[show,setShow]=useState(false);
   const[pos,setPos]=useState({x:0,y:0});
+  const[portal,setPortal]=useState(null); // DOM element to portal into, or null for inline
   const isStr=typeof tip==='string';
+  const tooltipStyle=light?{position:'absolute',left:pos.x,top:pos.y,
+    background:'#fff',color:'#1F2937',fontSize:11,fontFamily:'var(--font-sans)',
+    padding:'3px 10px',borderRadius:4,whiteSpace:'nowrap',zIndex:9999,pointerEvents:'none',
+    transform:portal?'translate(-100%,-100%)':'translateX(-50%)',boxShadow:'0 2px 12px rgba(0,0,0,.12)',border:'0.5px solid var(--bd-default)',lineHeight:1.4}
+    :{position:'absolute',left:pos.x,top:pos.y,
+    background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:isStr?'var(--font-mono)':'var(--font-sans)',
+    padding:isStr?'4px 8px':'6px 10px',borderRadius:6,whiteSpace:isStr?'pre':'normal',zIndex:9999,pointerEvents:'none',
+    transform:portal?'translate(-100%,-100%)':'translateX(-50%)',boxShadow:'0 2px 8px rgba(0,0,0,.3)',lineHeight:1.5};
   return e('span',{style:{position:'relative',display:'inline-flex',...style},
     onMouseEnter:ev=>{
-      const badgeR=ev.currentTarget.getBoundingClientRect();
+      const r=ev.currentTarget.getBoundingClientRect();
       const modal=document.getElementById('modal-inner');
-      const modalR=modal?modal.getBoundingClientRect():{left:0,top:0};
-      setPos({x:badgeR.right-modalR.left,y:badgeR.top-modalR.top-6});
+      if(modal){
+        const m=modal.getBoundingClientRect();
+        setPos({x:r.right-m.left,y:r.top-m.top-6});
+        setPortal(modal);
+      }else{
+        setPos({x:ev.clientX-r.left,y:-28});
+        setPortal(null);
+      }
       setShow(true);
     },
     onMouseLeave:()=>setShow(false)},
     children,
-    show&&tip&&ReactDOM.createPortal(
-      e('div',{style:light?{position:'absolute',left:pos.x,top:pos.y,
-        background:'#fff',color:'#1F2937',fontSize:11,fontFamily:'var(--font-sans)',
-        padding:'3px 10px',borderRadius:4,whiteSpace:'nowrap',zIndex:9999,pointerEvents:'none',
-        transform:'translate(-100%,-100%)',boxShadow:'0 2px 12px rgba(0,0,0,.12)',border:'0.5px solid var(--bd-default)',lineHeight:1.4}
-        :{position:'absolute',left:pos.x,top:pos.y,
-        background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:isStr?'var(--font-mono)':'var(--font-sans)',
-        padding:isStr?'4px 8px':'6px 10px',borderRadius:6,whiteSpace:isStr?'pre':'normal',zIndex:9999,pointerEvents:'none',
-        transform:'translate(-100%,-100%)',boxShadow:'0 2px 8px rgba(0,0,0,.3)',lineHeight:1.5}},tip),
-      document.getElementById('modal-inner'))
+    show&&tip&&(portal
+      ? ReactDOM.createPortal(e('div',{style:tooltipStyle},tip), portal)
+      : e('div',{style:tooltipStyle},tip))
   );
 }
 
