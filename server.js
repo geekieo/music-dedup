@@ -586,11 +586,17 @@ function purgeGroupFiles(db, g) {
     }
     purgeIds.push(t.id);
   }
-  // Remove purged tracks from group_tracks; if file has no other group refs, remove from files
+  // Remove purged tracks from group_tracks; if file has no other group refs, remove from files and all related tables
   for(const fid of purgeIds){
     db.run('DELETE FROM group_tracks WHERE group_id=? AND file_id=?',[g.id,fid]);
     const refs=db.get('SELECT COUNT(*) n FROM group_tracks WHERE file_id=?',[fid]);
-    if(!refs||refs.n===0) db.run('DELETE FROM files WHERE id=?',[fid]);
+    if(!refs||refs.n===0){
+      db.run('DELETE FROM files WHERE id=?',[fid]);
+      db.run('DELETE FROM write_history WHERE file_id=?',[fid]);
+      db.run('DELETE FROM tag_snapshots WHERE file_id=?',[fid]);
+      db.run('DELETE FROM scraped_meta WHERE file_id=?',[fid]);
+      db.run('DELETE FROM retention_list WHERE file_id=?',[fid]);
+    }
   }
   // If <2 tracks remain, group is no longer a duplicate → remove entirely
   const remaining=db.all('SELECT file_id FROM group_tracks WHERE group_id=?',[g.id]);
