@@ -13,7 +13,8 @@
 // RTYPE_LABEL, DIMENSION_COLUMNS are served by /rules-meta.js (source: lib/rules.js)
 
 /* ── 组内属性同步 — sync fields from sibling tracks (ScrapeDialog-style UI) ── */
-function CrossFillDialog({tracks, currentId, onClose, onUpdated}){
+function CrossFillDialog({groupId, currentId, onClose, onUpdated, onTagsWritten}){
+  const [tracks, setTracks] = useState(null); // loaded from API
   const [sel, setSel] = useState({});      // per-field selected source track id
   const [recommend, setRecommend] = useState({});
   const [conflicts, setConflicts] = useState({});
@@ -22,10 +23,17 @@ function CrossFillDialog({tracks, currentId, onClose, onUpdated}){
   const [writeResult, setWriteResult] = useState(null);
   const [confirmWrite, setConfirmWrite] = useState(false);
 
-  const current = tracks.find(t => t.id === currentId);
-  const sources = tracks.filter(t => t.id !== currentId);
+  function load(){
+    api.get('/api/duplicates/'+groupId).then(r=>{
+      if(r.ok) setTracks(r.data.tracks||[]);
+    });
+  }
+  useEffect(()=>{load();},[groupId]);
+
+  const current = tracks?.find(t => t.id === currentId);
+  const sources = (tracks||[]).filter(t => t.id !== currentId);
   const srcById = {};
-  for (const t of tracks) srcById[t.id] = t;
+  for (const t of (tracks||[])) srcById[t.id] = t;
 
   // Auto-compute field selection (same logic as autoSelectFields for ScrapeDialog)
   useEffect(() => {
@@ -105,7 +113,10 @@ function CrossFillDialog({tracks, currentId, onClose, onUpdated}){
     }
     const r = await api.post(`/api/files/${currentId}/write-tags`, { fields });
     setWriting(false); setWriteResult(r);
-    if (r.ok) { onUpdated?.(); }
+    if (r.ok) {
+      load();
+      onUpdated?.(); onTagsWritten?.();
+    }
   }
 
   function hasData(obj, key) { const v = obj?.[key]; return v != null && v !== 0 && v !== ''; }
@@ -419,7 +430,7 @@ function buildLegendRows(tagArray){
   return rows;
 }
 
-const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,onLocate,onRetentionChange,onTagsWritten}){
+const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,libraryKey,onLocate,onRetentionChange,onTagsWritten}){
   const[filter,setFilter]=useState('pending');
   const[sort,setSort]=useState('savings');
   const[groups,setGroups]=useState([]);
@@ -530,6 +541,14 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
       setDetail(null);
     }
   },[scanDoneKey]);
+  // Soft-refresh: data changed (write/revert from another page), refresh list
+  // and detail without clearing selection.
+  useEffect(()=>{
+    if(libraryKey>0&&selId){
+      loadList();
+      api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});
+    }
+  },[libraryKey]);
   useEffect(()=>{
     if(!selId)return;
     setDetailLoading(true);
@@ -617,9 +636,10 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
       onUpdated:()=>{loadList();if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
       onTagsWritten:onTagsWritten}),
-    crossFillTracks&&e(CrossFillDialog,{tracks:crossFillTracks.tracks, currentId:crossFillTracks.currentId,
+    crossFillTracks&&e(CrossFillDialog,{groupId:crossFillTracks.groupId, currentId:crossFillTracks.currentId,
       onClose:()=>setCrossFillTracks(null),
-      onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}}}),
+      onUpdated:()=>{loadList();if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
+      onTagsWritten:onTagsWritten}),
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     showTagLegend&&e(Modal,{title:'重复组标签说明',onClose:()=>setShowTagLegend(false),width:640,description:'可多选，多选为同时满足关系；同一行内的标签互斥，只会出现其一。'},
       e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.8,marginBottom:16}},
@@ -823,7 +843,7 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
               canToggle:!detail.resolved,
               onProps:()=>setPropsId(t.id),
               onScrape:()=>setScrapeId(t.id),
-              onCrossFill:()=>setCrossFillTracks({tracks:detail.tracks||[], currentId:t.id}),
+              onCrossFill:()=>setCrossFillTracks({groupId:detail.id, currentId:t.id}),
             })),
 
 

@@ -20,7 +20,7 @@ const SETTINGS_SECTIONS=[
 ];
 // DEFAULT_Q, DEFAULT_PICK, mergePickOrder are served by /rules-meta.js (source: lib/rules.js)
 
-function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates}){
+function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates,onTagsWritten}){
   const[rows,setRows]=useState(null);
   const[toast,setToast]=useState(null);
   const[search,setSearch]=useState('');
@@ -68,7 +68,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
 
   async function revert(fileId){
     const r=await api.post(`/api/snapshots/${fileId}/revert`);
-    if(r.ok){setToast({msg:'已撤销至首次写入前的原始状态',type:'success'});load();}
+    if(r.ok){setToast({msg:'已撤销至首次写入前的原始状态',type:'success'});load();onTagsWritten?.();}
     else setToast({msg:'撤销失败: '+(r.error||''),type:'error'});
   }
   async function doPurge(){
@@ -267,7 +267,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -580,7 +580,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
       ),
 
       e(RetentionListSection,{player,retentionListKey,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup}),
-      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup})
+      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup,onTagsWritten})
     )
   );
 }
