@@ -23,7 +23,7 @@ import { tagTracks, GROUP_TAG_LABELS, GROUP_TAG_DESCRIPTIONS, GROUP_TAG_COLORS,
   PICK_TAG_LABEL, PICK_TAG_COLOR, DEFAULT_PICK_TAG_ORDER,
   MATCHING_METHOD_KEYS, CHARACTERISTIC_TAGS_ARRAY, MATCH_METHOD_TAGS_ARRAY,
   RTYPE_LABEL, DIMENSION_DEFS, DIMENSION_INFO, mergePickOrder, EXCLUSIVE_TAG_GROUPS,
-  DEFAULT_TIER_ORDER, TIER_COLOR, TIER_LABEL, computeScrapeMatch } from './lib/rules.js';
+  DEFAULT_TIER_ORDER, TIER_COLOR, TIER_LABEL, TIER_DESC, computeScrapeMatch } from './lib/rules.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +137,7 @@ app.get('/rules-meta.js', (_,res)=>{
     `const DEFAULT_Q=${JSON.stringify(DEFAULT_TIER_ORDER)};`,
     `const TIER_COLOR=${JSON.stringify(TIER_COLOR)};`,
     `const TIER_LABEL=${JSON.stringify(TIER_LABEL)};`,
+    `const TIER_DESC=${JSON.stringify(TIER_DESC)};`,
     `const computeScrapeMatch=${computeScrapeMatch.toString()};`,
   ].join('\n'));
 });

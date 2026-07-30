@@ -16,17 +16,25 @@ function InstantTooltip({tip,children,style={},light=false}){
   const[pos,setPos]=useState({x:0,y:0});
   const isStr=typeof tip==='string';
   return e('span',{style:{position:'relative',display:'inline-flex',...style},
-    onMouseEnter:ev=>{const r=ev.currentTarget.getBoundingClientRect();setPos({x:ev.clientX-r.left,y:-28});setShow(true);},
+    onMouseEnter:ev=>{
+      const badgeR=ev.currentTarget.getBoundingClientRect();
+      const modal=document.getElementById('modal-inner');
+      const modalR=modal?modal.getBoundingClientRect():{left:0,top:0};
+      setPos({x:badgeR.right-modalR.left,y:badgeR.top-modalR.top-6});
+      setShow(true);
+    },
     onMouseLeave:()=>setShow(false)},
     children,
-    show&&tip&&e('div',{style:light?{position:'absolute',left:pos.x,top:pos.y,
-      background:'#fff',color:'#1F2937',fontSize:11,fontFamily:'var(--font-sans)',
-      padding:'3px 10px',borderRadius:4,whiteSpace:'nowrap',zIndex:9999,pointerEvents:'none',
-      transform:'translateX(-50%)',boxShadow:'0 2px 12px rgba(0,0,0,.12)',border:'0.5px solid var(--bd-default)',lineHeight:1.4}
-      :{position:'absolute',left:pos.x,top:pos.y,
-      background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:isStr?'var(--font-mono)':'var(--font-sans)',
-      padding:isStr?'4px 8px':'6px 10px',borderRadius:6,whiteSpace:isStr?'pre':'normal',zIndex:9999,pointerEvents:'none',
-      transform:'translateX(-50%)',boxShadow:'0 2px 8px rgba(0,0,0,.3)',lineHeight:1.5}},tip)
+    show&&tip&&ReactDOM.createPortal(
+      e('div',{style:light?{position:'absolute',left:pos.x,top:pos.y,
+        background:'#fff',color:'#1F2937',fontSize:11,fontFamily:'var(--font-sans)',
+        padding:'3px 10px',borderRadius:4,whiteSpace:'nowrap',zIndex:9999,pointerEvents:'none',
+        transform:'translate(-100%,-100%)',boxShadow:'0 2px 12px rgba(0,0,0,.12)',border:'0.5px solid var(--bd-default)',lineHeight:1.4}
+        :{position:'absolute',left:pos.x,top:pos.y,
+        background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:isStr?'var(--font-mono)':'var(--font-sans)',
+        padding:isStr?'4px 8px':'6px 10px',borderRadius:6,whiteSpace:isStr?'pre':'normal',zIndex:9999,pointerEvents:'none',
+        transform:'translate(-100%,-100%)',boxShadow:'0 2px 8px rgba(0,0,0,.3)',lineHeight:1.5}},tip),
+      document.getElementById('modal-inner'))
   );
 }
 
@@ -268,11 +276,9 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const canWrite=hasScraped&&selCount>0;
   const tier=scraped?.scrape_tier;
 
-  // Per-source tier labels for column headers
+  // Per-source tiers (for colored dot indicator — same source as library scrape filter).
   const mbTier = scraped?.mb?.scrape_tier;
   const aidTier = scraped?.acoustid?.scrape_tier;
-  const mbBasisLabel = mbTier === 'green' || mbTier === 'blue' ? '（精确）' : mbTier === 'yellow' ? '（模糊）' : mbTier === 'red' ? '（模糊）' : '';
-  const aidBasisLabel = aidTier === 'green' || aidTier === 'blue' ? '（精确）' : aidTier === 'yellow' ? '（模糊）' : aidTier === 'red' ? '（模糊）' : '';
 
   // ── Per-source statistics ──────────────────────────────────────────────
   function srcStats(src) {
@@ -331,8 +337,10 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       e('div',{style:{marginBottom:12,padding:'8px 12px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
         Icon('file-music',{fontSize:13,color:'var(--tx-faint)',flexShrink:0}),
         e('span',{style:{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},filename),
-        hasScraped&&e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:(TIER_COLOR[tier||'yellow']||'#EAB308')+'22',color:TIER_COLOR[tier||'yellow']||'#EAB308',border:'0.5px solid '+(TIER_COLOR[tier||'yellow']||'#EAB308'),whiteSpace:'nowrap'}},
-          TIER_LABEL[tier]||'已刮削')
+        hasScraped&&e(InstantTooltip,{tip:tier?TIER_DESC[tier]:null,light:true},
+          e('span',{style:{fontSize:10,padding:'2px 8px',borderRadius:99,background:(TIER_COLOR[tier||'yellow']||'#EAB308')+'22',color:TIER_COLOR[tier||'yellow']||'#EAB308',border:'0.5px solid '+(TIER_COLOR[tier||'yellow']||'#EAB308'),whiteSpace:'nowrap'}},
+            TIER_LABEL[tier]||'已刮削')
+        )
       ),
 
       // Action buttons row
@@ -476,15 +484,32 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         const showAid = !!(scraped?.acoustid?.title);
         const colTemplate = `58px 1fr${showMb ? ' 1fr' : ''}${showAid ? ' 1fr' : ''}`;
         const nCols = 2 + (showMb?1:0) + (showAid?1:0);
-        const headers = ['字段','文件属性'];
-        if (showMb) headers.push(`MB 刮削${mbBasisLabel}${mbStats ? ` · ${mbStats.match}/${mbStats.total}` : ''}`);
-        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}${aidStats ? ` · ${aidStats.match}/${aidStats.total}` : ''}`);
+        const headers = [
+          { key: 'field', el: '字段' },
+          { key: 'file',  el: '文件属性' },
+        ];
+        if (showMb) headers.push({
+          key: 'mb',
+          el: e('span',{style:{whiteSpace:'nowrap'},title:mbTier?TIER_DESC[mbTier]:undefined},
+            mbTier
+              ? Icon('cloud-check',{fontSize:13,color:TIER_COLOR[mbTier],verticalAlign:'text-bottom'})
+              : Icon('cloud',{fontSize:13,color:'var(--tx-faint)',verticalAlign:'text-bottom'}),
+            ` MB 刮削${mbStats ? ` · ${mbStats.match}/${mbStats.total} 项吻合` : ''}`)
+        });
+        if (showAid) headers.push({
+          key: 'aid',
+          el: e('span',{style:{whiteSpace:'nowrap'},title:aidTier?TIER_DESC[aidTier]:undefined},
+            aidTier
+              ? Icon('cloud-check',{fontSize:13,color:TIER_COLOR[aidTier],verticalAlign:'text-bottom'})
+              : Icon('cloud',{fontSize:13,color:'var(--tx-faint)',verticalAlign:'text-bottom'}),
+            ` AcoustID 刮削${aidStats ? ` · ${aidStats.match}/${aidStats.total} 项吻合` : ''}`)
+        });
         // Helper: toggle source (click again to deselect)
         const toggleSrc = (key, src) => setSel(p=>({...p,[key]:p[key]===src?false:src}));
         return e('div',{style:{marginBottom:14}},
           e('div',{style:{display:'grid',gridTemplateColumns:colTemplate,fontSize:10,borderRadius:'var(--r-md)',overflow:'hidden',border:'0.5px solid var(--bd-default)'}},
             // Header row
-            ...headers.map((h,i)=>e('div',{key:h,style:{padding:'6px 8px',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:i<nCols-1?'0.5px solid var(--bd-subtle)':'none'}},h)),
+            ...headers.map((h,i)=>e('div',{key:h.key,style:{padding:'6px 8px',display:'flex',alignItems:'center',background:'var(--bg-subtle)',fontWeight:600,color:'var(--tx-secondary)',borderBottom:'0.5px solid var(--bd-default)',borderRight:i<nCols-1?'0.5px solid var(--bd-subtle)':'none'}},h.el)),
             // Data rows — each MB/AcoustID cell has a radio, click toggles selection
             ...SCRAPE_ALL_FIELDS.map(({key,label,displayOnly})=>{
               const fv = key === 'duration' ? fmtDur(fileInfo?.duration) : fmtVal(liveTags?.[key]);

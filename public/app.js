@@ -626,7 +626,7 @@ function Toast({msg,type='info',onClose}){
 }
 function Modal({title,children,onClose,width=520,description}){
   return e('div',{style:{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.25)',display:'flex',alignItems:'center',justifyContent:'center',padding:20},onClick:ev=>ev.target===ev.currentTarget&&onClose()},
-    e('div',{className:'fade',style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-xl)',boxShadow:'0 20px 60px rgba(0,0,0,.15)',width:'100%',maxWidth:width,maxHeight:'85vh',display:'flex',flexDirection:'column'}},
+    e('div',{id:'modal-inner',className:'fade',style:{position:'relative',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-xl)',boxShadow:'0 20px 60px rgba(0,0,0,.15)',width:'100%',maxWidth:width,maxHeight:'85vh',display:'flex',flexDirection:'column'}},
       e('div',{style:{borderBottom:'0.5px solid var(--bd-subtle)'}},
         e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 20px'}},
           e('span',{style:{fontSize:14,fontWeight:600}},title),
@@ -634,7 +634,7 @@ function Modal({title,children,onClose,width=520,description}){
         ),
         description&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',lineHeight:1.6,padding:'0 20px 12px 20px'}},description)
       ),
-      e('div',{style:{overflowY:'auto',padding:'16px 20px',flex:1}},children)
+      e('div',{style:{overflowY:'auto',scrollbarGutter:'stable',padding:'16px 20px',flex:1}},children)
     ));
 }
 function ConfirmModal({title,message,onConfirm,onClose,danger}){
