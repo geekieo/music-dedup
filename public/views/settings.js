@@ -120,6 +120,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
                       const title=r.file_title||r.cur_title||'';
                       const artist=r.file_artist||r.cur_artist||'';
                       const fields=JSON.parse(r.modified_fields||'[]');
+                      const FIELD_LABELS={title:'标题',artist:'艺术家',album:'专辑',album_year:'年份',track_number:'曲目号',genre:'流派'};
                       const dt=new Date(r.last_written_at);
                       const dtStr=`${dt.getMonth()+1}/${dt.getDate()} ${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
                       const daysLeft=r.expires_at>0?Math.ceil((r.expires_at-Date.now())/(24*3600*1000)):30;
@@ -133,7 +134,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
                         ),
                         e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180}},title||'—'),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}},artist||'—'),
-                        e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',fontSize:11}},fields.join('、')||'—'),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',fontSize:11}},fields.map(f=>FIELD_LABELS[f]||f).join('、')||'—'),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
                         e('td',{style:{padding:'6px 10px',color:daysColor,fontFamily:'var(--font-mono)',fontSize:10,textAlign:'center',whiteSpace:'nowrap'}},`${daysLeft}天`),
                         e('td',{style:{padding:'4px 8px'}},
