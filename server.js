@@ -693,24 +693,42 @@ app.post('/api/scan/start', async(req,res)=>{
   };
   const abort=()=>scanState.abortFlag;
   const pause=waitIfPaused;
+  const laneTagKeys={basicMatch:['meta_confirmed'],fpMatch:['spectral_exact','same_recording','cp_exact','cp_similar'],scrapeMatch:['mb_confirmed','acoustid_confirmed']};
+  // force 模式下传递清除标签集，由 matcher 内部安全处理（loadExistingGroups
+  // 跳过含这些标签的组，persistClusters 快照时过滤这些标签）。旧数据在
+  // persistClusters 执行 clearGroups 之前完整保留，崩溃安全。
+  function laneOpts(lane, base){
+    if(!force)return base;
+    const tags=laneTagKeys[lane]||[];
+    return {...base,clearLaneTags:new Set(tags)};
+  }
   try{
     // 步骤1: 枚举
     if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤2: 提取属性
     if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
-    if(steps.includes('basicMatch')&&!abort()) await runBasicMatcher(db,{durationTolerance,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('basicMatch')&&!abort()){
+      prog({phase:'basicMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始基础匹配分析...'});
+      await runBasicMatcher(db,laneOpts('basicMatch',{durationTolerance,onProgress:prog,onAbort:abort,onPause:pause}));
+    }
     // 步骤4: 提取声纹
     if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:prog,onAbort:abort,onPause:pause});
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
-    if(steps.includes('fpMatch')&&!abort()) await runFpMatcher(db,{threshold,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('fpMatch')&&!abort()){
+      prog({phase:'fpMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始声纹匹配分析...'});
+      await runFpMatcher(db,laneOpts('fpMatch',{threshold,onProgress:prog,onAbort:abort,onPause:pause}));
+    }
     // 步骤7: 刮削
     if(steps.includes('scrape')&&!abort()){
       const acoustidKey=s.acoustid_key||'';
       await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
     }
     // 步骤8: 刮削匹配（recording ID 对比）
-    if(steps.includes('scrapeMatch')&&!abort()) await runScrapeMatcher(db,{onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('scrapeMatch')&&!abort()){
+      prog({phase:'scrapeMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始刮削匹配分析...'});
+      await runScrapeMatcher(db,laneOpts('scrapeMatch',{onProgress:prog,onAbort:abort,onPause:pause}));
+    }
   }catch(e){ prog({phase:'error',pct:0,level:'err',message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
 });
