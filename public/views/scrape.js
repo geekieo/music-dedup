@@ -477,8 +477,8 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         const colTemplate = `58px 1fr${showMb ? ' 1fr' : ''}${showAid ? ' 1fr' : ''}`;
         const nCols = 2 + (showMb?1:0) + (showAid?1:0);
         const headers = ['字段','文件属性'];
-        if (showMb) headers.push(`MB 刮削${mbBasisLabel}${mbStats ? ` · ${mbStats.match}/${mbStats.avail}` : ''}`);
-        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}${aidStats ? ` · ${aidStats.match}/${aidStats.avail}` : ''}`);
+        if (showMb) headers.push(`MB 刮削${mbBasisLabel}${mbStats ? ` · ${mbStats.match}/${mbStats.total}` : ''}`);
+        if (showAid) headers.push(`AcoustID 刮削${aidBasisLabel}${aidStats ? ` · ${aidStats.match}/${aidStats.total}` : ''}`);
         // Helper: toggle source (click again to deselect)
         const toggleSrc = (key, src) => setSel(p=>({...p,[key]:p[key]===src?false:src}));
         return e('div',{style:{marginBottom:14}},
