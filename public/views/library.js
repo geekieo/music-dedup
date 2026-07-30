@@ -341,29 +341,44 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                 e('td',{style:{padding:'4px 6px',textAlign:'center'}},
                   (()=>{
                     const tier=f.scrape_tier;
-                    const sources=[];
-                    if(f.aid_title||f.mb_title){
-                      if(f.aid_title){ sources.push('AcoustID'); }
-                      if(f.mb_title){ sources.push('MusicBrainz'); }
-                    }
                     if(!tier){
                       // Unscraped — gray placeholder icon, pure display
                       return e(InstantTooltip,{tip:'未刮削'},
                         Icon('cloud',{fontSize:15,color:'var(--tx-faint)'})
                       );
                     }
-                    const tipLines=[
-                      `刮削 · ${sources.join(' + ')||'未知'} · ${TIER_LABEL[tier]||tier}`,
-                      f.aid_title&&`[AcoustID] 标题: ${f.aid_title}`,
-                      f.aid_artist&&`[AcoustID] 艺术家: ${f.aid_artist}`,
-                      f.aid_album&&`[AcoustID] 专辑: ${f.aid_album}`,
-                      f.aid_album_year>0&&`[AcoustID] 年份: ${f.aid_album_year}`,
-                      f.mb_title&&`[MusicBrainz] 标题: ${f.mb_title}`,
-                      f.mb_artist&&`[MusicBrainz] 艺术家: ${f.mb_artist}`,
-                      f.mb_album&&`[MusicBrainz] 专辑: ${f.mb_album}`,
-                      f.mb_album_year>0&&`[MusicBrainz] 年份: ${f.mb_album_year}`,
-                    ].filter(Boolean).join('\n');
-                    return e(InstantTooltip,{tip:tipLines},
+                    const mbHas=f.mb_title||f.mb_artist||f.mb_album||f.mb_album_year>0;
+                    const aidHas=f.aid_title||f.aid_artist||f.aid_album||f.aid_album_year>0;
+                    const dual=mbHas&&aidHas;
+                    const fieldRow=(label,val)=>e('div',{style:{whiteSpace:'nowrap'}},
+                      e('span',{style:{color:'rgba(255,255,255,.45)'}},label+'\u2009'),
+                      val
+                    );
+                    const sourceCol=(name,has,fields,divider)=>!has?null:
+                      e('div',{style:{flex:dual?'1 1 auto':'0 0 auto',...(divider?{paddingRight:8,borderRight:'0.5px solid rgba(255,255,255,.15)'}:{})}},
+                        e('div',{style:{textAlign:'center',fontWeight:600,marginBottom:2,fontSize:9,color:'rgba(255,255,255,.45)',textTransform:'uppercase',letterSpacing:.5}},name),
+                        ...fields.filter(Boolean).map(f=>fieldRow(f[0],f[1]))
+                      );
+                    const tipContent=e('div',{style:{textAlign:'left',maxWidth:dual?520:360,lineHeight:1.6}},
+                      e('div',{style:{textAlign:'center',whiteSpace:'nowrap',marginBottom:4,paddingBottom:3,borderBottom:'0.5px solid rgba(255,255,255,.12)',fontWeight:600,fontSize:10,color:'rgba(255,255,255,.85)'}},
+                        `刮削 · ${TIER_LABEL[tier]||tier}`
+                      ),
+                      e('div',{style:{display:'flex',gap:dual?9:0,justifyContent:'center'}},
+                        sourceCol('MusicBrainz',mbHas,[
+                          f.mb_title&&['标题',f.mb_title],
+                          f.mb_artist&&['艺术家',f.mb_artist],
+                          f.mb_album&&['专辑',f.mb_album],
+                          f.mb_album_year>0&&['年份',f.mb_album_year],
+                        ],dual),
+                        sourceCol('AcoustID',aidHas,[
+                          f.aid_title&&['标题',f.aid_title],
+                          f.aid_artist&&['艺术家',f.aid_artist],
+                          f.aid_album&&['专辑',f.aid_album],
+                          f.aid_album_year>0&&['年份',f.aid_album_year],
+                        ])
+                      )
+                    );
+                    return e(InstantTooltip,{tip:tipContent},
                       Icon('cloud-check',{fontSize:15,color:TIER_COLOR[tier]})
                     );
                   })()

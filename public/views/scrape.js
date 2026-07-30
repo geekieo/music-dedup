@@ -14,6 +14,7 @@ const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「�
 function InstantTooltip({tip,children,style={},light=false}){
   const[show,setShow]=useState(false);
   const[pos,setPos]=useState({x:0,y:0});
+  const isStr=typeof tip==='string';
   return e('span',{style:{position:'relative',display:'inline-flex',...style},
     onMouseEnter:ev=>{const r=ev.currentTarget.getBoundingClientRect();setPos({x:ev.clientX-r.left,y:-28});setShow(true);},
     onMouseLeave:()=>setShow(false)},
@@ -23,8 +24,8 @@ function InstantTooltip({tip,children,style={},light=false}){
       padding:'3px 10px',borderRadius:4,whiteSpace:'nowrap',zIndex:9999,pointerEvents:'none',
       transform:'translateX(-50%)',boxShadow:'0 2px 12px rgba(0,0,0,.12)',border:'0.5px solid var(--bd-default)',lineHeight:1.4}
       :{position:'absolute',left:pos.x,top:pos.y,
-      background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:'var(--font-mono)',
-      padding:'4px 8px',borderRadius:6,whiteSpace:'pre',zIndex:9999,pointerEvents:'none',
+      background:'rgba(17,24,39,.92)',color:'#fff',fontSize:10,fontFamily:isStr?'var(--font-mono)':'var(--font-sans)',
+      padding:isStr?'4px 8px':'6px 10px',borderRadius:6,whiteSpace:isStr?'pre':'normal',zIndex:9999,pointerEvents:'none',
       transform:'translateX(-50%)',boxShadow:'0 2px 8px rgba(0,0,0,.3)',lineHeight:1.5}},tip)
   );
 }
