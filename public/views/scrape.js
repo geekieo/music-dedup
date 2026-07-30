@@ -214,7 +214,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       const{states:st,selected:s,recommend:rec,conflicts:c}=autoSelectFields(liveTags,scraped);
       setStates(st); setSel(s); setRecommend(rec); setConflicts(c||{});
     }
-  },[liveTags?.title,
+  },[liveTags,
       scraped?.mb?.mb_recording_id, scraped?.acoustid?.mb_recording_id,
     ]);
 

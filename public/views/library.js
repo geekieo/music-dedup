@@ -238,7 +238,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
 
   return e('div',{className:'fade'},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
-    scrapeTarget&&e(ScrapeDialog,{fileId:scrapeTarget,onClose:()=>setScrapeTarget(null),onUpdated:()=>{loadFresh();loadStats();onTagsWritten?.();}}),
+    scrapeTarget&&e(ScrapeDialog,{fileId:scrapeTarget,onClose:()=>setScrapeTarget(null),onUpdated:()=>{loadStats();onTagsWritten?.();}}),
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
 

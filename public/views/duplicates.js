@@ -419,7 +419,7 @@ function buildLegendRows(tagArray){
   return rows;
 }
 
-const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,onLocate,onRetentionChange}){
+const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,onLocate,onRetentionChange,onTagsWritten}){
   const[filter,setFilter]=useState('pending');
   const[sort,setSort]=useState('savings');
   const[groups,setGroups]=useState([]);
@@ -615,8 +615,8 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
   return e('div',{className:'fade'},
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
-      onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
-      onTagsWritten:()=>{}}),
+      onUpdated:()=>{loadList();if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
+      onTagsWritten:onTagsWritten}),
     crossFillTracks&&e(CrossFillDialog,{tracks:crossFillTracks.tracks, currentId:crossFillTracks.currentId,
       onClose:()=>setCrossFillTracks(null),
       onUpdated:()=>{if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}}}),
