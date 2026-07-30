@@ -11,7 +11,7 @@ import {
   getAllSettings, setSetting,
   addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds, getFileById,
   queryLibrary, queryLibraryByTier, locateFileInLibrary, libraryStats, getScrapedMeta,
-  getTagSnapshots, getWriteHistory, upsertScrapedMeta,
+  getTagSnapshots, getWriteHistory, upsertScrapedMeta, forceStripLaneTags,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.js';
@@ -729,15 +729,6 @@ app.post('/api/scan/start', async(req,res)=>{
   };
   const abort=()=>scanState.abortFlag;
   const pause=waitIfPaused;
-  const laneTagKeys={basicMatch:['meta_confirmed'],fpMatch:['spectral_exact','same_recording','cp_exact','cp_similar'],scrapeMatch:['mb_confirmed','acoustid_confirmed']};
-  // force 模式下传递清除标签集，由 matcher 内部安全处理（loadExistingGroups
-  // 跳过含这些标签的组，persistClusters 快照时过滤这些标签）。旧数据在
-  // persistClusters 执行 clearGroups 之前完整保留，崩溃安全。
-  function laneOpts(lane, base){
-    if(!force)return base;
-    const tags=laneTagKeys[lane]||[];
-    return {...base,clearLaneTags:new Set(tags)};
-  }
   const acoustidKey=s.acoustid_key||'';
   const stepWeights=estimateStepWeights(db, steps, { force, acoustidKey });
   let cumWeight=0;
@@ -764,8 +755,9 @@ app.post('/api/scan/start', async(req,res)=>{
     }
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
     if(steps.includes('basicMatch')&&!abort()){
+      if(force) forceStripLaneTags(db, ['meta_confirmed']);
       wrapProg('basicMatch')({phase:'basicMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始基础匹配分析...'});
-      await runBasicMatcher(db,laneOpts('basicMatch',{durationTolerance,onProgress:wrapProg('basicMatch'),onAbort:abort,onPause:pause}));
+      await runBasicMatcher(db,{durationTolerance,onProgress:wrapProg('basicMatch'),onAbort:abort,onPause:pause});
       advanceWeight('basicMatch');
     }
     // 步骤4: 提取声纹
@@ -775,8 +767,9 @@ app.post('/api/scan/start', async(req,res)=>{
     }
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
     if(steps.includes('fpMatch')&&!abort()){
+      if(force) forceStripLaneTags(db, ['spectral_exact','same_recording','cp_exact','cp_similar']);
       wrapProg('fpMatch')({phase:'fpMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始声纹匹配分析...'});
-      await runFpMatcher(db,laneOpts('fpMatch',{threshold,onProgress:wrapProg('fpMatch'),onAbort:abort,onPause:pause}));
+      await runFpMatcher(db,{threshold,onProgress:wrapProg('fpMatch'),onAbort:abort,onPause:pause});
       advanceWeight('fpMatch');
     }
     // 步骤7: 刮削
@@ -786,8 +779,9 @@ app.post('/api/scan/start', async(req,res)=>{
     }
     // 步骤8: 刮削匹配（recording ID 对比）
     if(steps.includes('scrapeMatch')&&!abort()){
+      if(force) forceStripLaneTags(db, ['mb_confirmed','acoustid_confirmed']);
       wrapProg('scrapeMatch')({phase:'scrapeMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始刮削匹配分析...'});
-      await runScrapeMatcher(db,laneOpts('scrapeMatch',{onProgress:wrapProg('scrapeMatch'),onAbort:abort,onPause:pause}));
+      await runScrapeMatcher(db,{onProgress:wrapProg('scrapeMatch'),onAbort:abort,onPause:pause});
       advanceWeight('scrapeMatch');
     }
   }catch(e){ prog({phase:'error',pct:0,level:'err',message:`失败: ${e.message}`}); }
