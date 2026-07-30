@@ -656,28 +656,30 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
     // Filter bar: matching-method tags (how the group was discovered)
-    e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18}},
+    e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18,justifyContent:'space-between'}},
       e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
-      filterTags.map(tag=>{
-        const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-        const active=tagFilter.has(tag);
-        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
-      }),
-      e('span',{style:{flex:1,minWidth:8}}),
+      e('span',{style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+        filterTags.map(tag=>{
+          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+          const active=tagFilter.has(tag);
+          return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
+        }),
+      ),
       e('button',{
         onClick:()=>setShowTagLegend(true),
         style:{padding:'3px 10px',borderRadius:99,fontSize:11,cursor:'pointer',border:'0.5px solid var(--bd-default)',background:'var(--bg-base)',color:'var(--tx-muted)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0},
       }, Icon('info-circle',{fontSize:12}), '标签说明'),
     ),
     // Second row: characteristic tags (what the group looks like) + clear button
-    e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征：'),
-      charTags.map(tag=>{
-        const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-        const active=tagFilter.has(tag);
-        return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
-      }),
-      e('span',{style:{flex:1,minWidth:24}}),
+    e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18,justifyContent:'space-between'}},
+      e('span',{style:{display:'flex',alignItems:'center',gap:8}},
+        e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征：'),
+        charTags.map(tag=>{
+          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+          const active=tagFilter.has(tag);
+          return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
+        }),
+      ),
       e('button',{
         onClick:()=>setTagFilter(new Set()),
         disabled:tagFilter.size===0,

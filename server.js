@@ -11,11 +11,11 @@ import {
   getAllSettings, setSetting,
   addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds, getFileById,
   queryLibrary, queryLibraryByTier, locateFileInLibrary, libraryStats, getScrapedMeta,
-  getTagSnapshots, getWriteHistory,
+  getTagSnapshots, getWriteHistory, upsertScrapedMeta,
 } from './lib/db.js';
 import { runEnumerate, runMetadata, runFingerprint } from './lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.js';
-import { runScrape, scrapeSingleFile } from './lib/scraper.js';
+import { runScrape, scrapeSingleFile, getMbCandidates, getAcoustidCandidates } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
 import { computeScrapeTier } from './lib/tier.js';
@@ -290,7 +290,7 @@ app.get('/api/files/:id/live-tags', async(req,res)=>{
 app.post('/api/files/:id/scrape-single', async(req,res)=>{
   const s = getAllSettings(db);
   try{
-    const dual = await scrapeSingleFile(db,+req.params.id,s.acoustid_key||'');
+    const dual = await scrapeSingleFile(db,+req.params.id,s.acoustid_key||'', { skipMb: req.query.skip_mb==='1' });
     if (!dual) return res.json({ok:true, data:null});
     const f = getFileById(db, +req.params.id);
     const ignoreScript = s.ignore_script_variant !== false;
@@ -306,6 +306,51 @@ app.post('/api/files/:id/scrape-single', async(req,res)=>{
       return 'red';
     })();
     res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// MB search candidates (returns all candidates with scores, no DB save)
+app.get('/api/files/:id/mb-candidates', async(req,res)=>{
+  const f = getFileById(db,+req.params.id);
+  if(!f) return res.status(404).json({ok:false,error:'Not found'});
+  try{
+    const candidates = await getMbCandidates(f);
+    res.json({ok:true, data: candidates});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// AcoustID candidates (returns all fingerprint matches with scores, no DB save)
+app.get('/api/files/:id/acoustid-candidates', async(req,res)=>{
+  const f = getFileById(db,+req.params.id);
+  if(!f) return res.status(404).json({ok:false,error:'Not found'});
+  try{
+    const s = getAllSettings(db);
+    const { candidates, error } = await getAcoustidCandidates(f, s.acoustid_key||'');
+    res.json({ok:true, data: candidates, error: error || null});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// Save a selected MB candidate as the scraped result
+app.post('/api/files/:id/select-mb', (req,res)=>{
+  const f = getFileById(db,+req.params.id);
+  if(!f) return res.status(404).json({ok:false,error:'Not found'});
+  try{
+    const { candidate } = req.body;
+    if(!candidate) return res.status(400).json({ok:false,error:'candidate required'});
+    upsertScrapedMeta(db, { ...candidate, file_id: f.id, source: 'musicbrainz', scraped_at: Date.now() });
+    res.json({ok:true});
+  }catch(e){ res.status(500).json({ok:false,error:e.message}); }
+});
+
+// Save a selected AcoustID candidate as the scraped result
+app.post('/api/files/:id/select-acoustid', (req,res)=>{
+  const f = getFileById(db,+req.params.id);
+  if(!f) return res.status(404).json({ok:false,error:'Not found'});
+  try{
+    const { candidate } = req.body;
+    if(!candidate) return res.status(400).json({ok:false,error:'candidate required'});
+    upsertScrapedMeta(db, { ...candidate, file_id: f.id, source: 'acoustid', scraped_at: Date.now() });
+    res.json({ok:true});
   }catch(e){ res.status(500).json({ok:false,error:e.message}); }
 });
 

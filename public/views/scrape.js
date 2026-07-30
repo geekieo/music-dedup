@@ -30,6 +30,53 @@ function InstantTooltip({tip,children,style={},light=false}){
   );
 }
 
+/* ── Drag-to-scroll text area ────────────────────────────────────────────
+   No scrollbar — drag horizontally with mouse to pan. Click events pass
+   through normally so row selection isn't affected. userSelect:'none'
+   prevents text selection via CSS without interfering with clicks.
+*/
+function DragScrollText({children, style={}}) {
+  const ref = useRef(null);
+  const [cursor, setCursor] = useState('auto');
+  const [overflow, setOverflow] = useState(false);
+  const drag = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const over = el.scrollWidth > el.clientWidth;
+    setOverflow(over);
+    setCursor(over ? 'grab' : 'auto');
+  }, [children]);
+
+  function onMouseDown(e) {
+    if (!overflow) return;
+    drag.current = { x: e.clientX, sl: ref.current?.scrollLeft || 0 };
+    setCursor('grabbing');
+  }
+
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (!drag.current) return;
+      const dx = e.clientX - drag.current.x;
+      if (ref.current) ref.current.scrollLeft = drag.current.sl - dx;
+    }
+    function onMouseUp() { drag.current = null; setCursor(overflow ? 'grab' : 'auto'); }
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [overflow]);
+
+  return e('span', {
+    ref,
+    onMouseDown,
+    style: { ...style, cursor, overflow: 'hidden', whiteSpace: 'nowrap', userSelect: 'none' }
+  }, children);
+}
+
 /* ── auto-select logic for ScrapeDialog (dual-source) ────────────────────
    Returns per-source per-field states (match/recommend/judge) plus
    auto-selected fields. Follows the same tier semantics as lib/tier.js:
@@ -126,6 +173,12 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const[conflicts,setConflicts]=useState({});
   const[states,setStates]=useState({});
   const[fileInfo,setFileInfo]=useState(null); // for filename + format
+  const[mbCandidates,setMbCandidates]=useState(null); // null=not fetched, []=no results
+  const[aidCandidates,setAidCandidates]=useState(null); // null=not fetched, []=no results
+  const[aidError,setAidError]=useState(null);           // reason for empty AcoustID results
+  const[confirmCancel,setConfirmCancel]=useState(false);
+  const[previewMbId,setPreviewMbId]=useState(null);      // MB candidate preview (recording id)
+  const[previewAidId,setPreviewAidId]=useState(null);    // AcoustID candidate preview (recording id)
 
   function reload(){
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setFileInfo(r.data);});
@@ -145,17 +198,49 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
       const{states:st,selected:s,recommend:rec,conflicts:c}=autoSelectFields(liveTags,scraped);
       setStates(st); setSel(s); setRecommend(rec); setConflicts(c||{});
     }
-  },[liveTags?.title,scraped?.mb?.file_id,scraped?.acoustid?.file_id]);
+  },[liveTags?.title,
+      scraped?.mb?.mb_recording_id, scraped?.acoustid?.mb_recording_id,
+    ]);
 
   async function doScrape(){
-    setScraping(true);setWriteResult(null);
-    const r=await api.post(`/api/files/${fileId}/scrape-single`);
-    setScraping(false);
-    if(r.ok){ reload(); onUpdated&&onUpdated(); }
+    setScraping(true);setWriteResult(null);setMbCandidates(null);setAidCandidates(null);setAidError(null);
+    setPreviewMbId(null);setPreviewAidId(null);
+    if(hasScraped){
+      // 重新刮削（已有数据）：只拉取候选列表，不自动保存，等用户手动选择
+      const[mbR, aidR]=await Promise.all([
+        api.get(`/api/files/${fileId}/mb-candidates`),
+        api.get(`/api/files/${fileId}/acoustid-candidates`),
+      ]);
+      setScraping(false);
+      if(mbR.ok) setMbCandidates(mbR.data||[]);
+      if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
+    } else {
+      // 首次刮削（无数据）：自动保存 AcoustID + MB 结果，与批量扫描一致
+      const[srapeR, mbR, aidR]=await Promise.all([
+        api.post(`/api/files/${fileId}/scrape-single`),
+        api.get(`/api/files/${fileId}/mb-candidates`),
+        api.get(`/api/files/${fileId}/acoustid-candidates`),
+      ]);
+      setScraping(false);
+      if(mbR.ok) setMbCandidates(mbR.data||[]);
+      if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
+      reload(); if(srapeR.ok) onUpdated&&onUpdated();
+    }
+  }
+  async function selectCandidate(candidate){
+    setPreviewMbId(null);
+    await api.post(`/api/files/${fileId}/select-mb`,{candidate});
+    reload(); onUpdated&&onUpdated();
+  }
+  async function selectAcoustidCandidate(candidate){
+    setPreviewAidId(null);
+    await api.post(`/api/files/${fileId}/select-acoustid`,{candidate});
+    reload(); onUpdated&&onUpdated();
   }
   async function doCancelScrape(){
     await api.del(`/api/files/${fileId}/scraped`);
     setScraped(null); setSel({}); setRecommend({}); setStates({}); setConflicts({});
+    setMbCandidates(null); setAidCandidates(null);
     onUpdated&&onUpdated();
   }
   async function doWrite(){
@@ -255,8 +340,135 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         e(Btn,{icon:scraping?'loader':'cloud-download',disabled:scraping||writing,
           onClick:doScrape},scraping?'刮削中...':hasScraped?'重新刮削':'开始刮削'),
         hasScraped&&e(Btn,{icon:'x',variant:'ghost',disabled:scraping||writing,
-          onClick:doCancelScrape},'取消刮削'),
+          onClick:()=>setConfirmCancel(true)},'取消刮削'),
       ),
+
+      // ── MB candidates list ──────────────────────────────────────────────
+      mbCandidates&&(()=>{
+        const n=mbCandidates.length;
+        const activeMbId=scraped?.mb?.mb_recording_id;
+        return e('div',{style:{marginBottom:14}},
+          e('div',{style:{fontSize:11,fontWeight:600,color:'var(--tx-secondary)',marginBottom:6,display:'flex',alignItems:'center',justifyContent:'space-between'}},
+            e('span',null,`MusicBrainz 搜索结果（${n} 个候选）`),
+            e('button',{onClick:()=>{setMbCandidates(null);setPreviewMbId(null);},
+              style:{fontSize:16,color:'var(--tx-faint)',background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1}},
+              '\u00d7'),
+          ),
+          n===0
+            ? e('div',{style:{padding:'8px 12px',borderRadius:'var(--r-md)',
+                background:'var(--bg-subtle)',border:'0.5px solid var(--bd-default)',fontSize:11,color:'var(--tx-faint)'}},
+                'MusicBrainz 未找到匹配结果')
+            : e('div',{style:{maxHeight:128,overflowY:'auto',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)'}},
+            mbCandidates.map((item,idx)=>{
+              const c=item.candidate;
+              const recId=c.mb_recording_id;
+              const isActive=recId&&recId===activeMbId;
+              const isPreview=recId&&recId===previewMbId&&!isActive;
+              const pct=Math.round(Math.min(1,item.score)*100);
+              const tierLabel=c.match_basis==='exact'?'精确':'模糊';
+              const tierColor=c.match_basis==='exact'?'var(--green)':'var(--amber)';
+              const parts=[c.title||'—'];
+              if(c.artist) parts.push(c.artist);
+              if(c.album) parts.push(c.album+(c.album_year?' · '+c.album_year:''));
+              if(c.track_number) parts.push('#'+c.track_number);
+              if(c.genre) parts.push(c.genre);
+              if(c.duration) parts.push(fmtDur(c.duration));
+              let rowBg='transparent';
+              if(isActive) rowBg='var(--blue-bg)';
+              else if(isPreview) rowBg='var(--amber-bg, #FFFBEB)';
+              return e('div',{key:recId||idx,
+                onClick:()=>isActive?null:setPreviewMbId(isPreview?null:recId),
+                style:{padding:'8px 10px',borderBottom:idx<n-1?'0.5px solid var(--bd-subtle)':'none',
+                  cursor:'default',background:rowBg,
+                  display:'flex',alignItems:'center',gap:6,
+                  fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-primary)',
+                }},
+                e('span',{style:{flexShrink:0,fontSize:10,fontWeight:700,color:tierColor,
+                  background:tierColor+'18',borderRadius:99,padding:'2px 8px',minWidth:36,textAlign:'center'}},
+                  tierLabel),
+                e('span',{style:{flexShrink:0,fontSize:9,color:'var(--tx-faint)',minWidth:32,textAlign:'right'}},
+                  pct+'%'),
+                e(DragScrollText,{style:{flex:1,minWidth:0}},
+                  parts.join(' · ')),
+                isActive&&e('span',{style:{flexShrink:0,fontSize:9,color:'var(--blue)',
+                  background:'var(--blue-bg)',borderRadius:3,padding:'1px 5px'}},'当前'),
+                !isActive&&e('button',{onClick:e=>{e.stopPropagation();selectCandidate(c);},
+                  style:{flexShrink:0,fontSize:9,color:'#fff',background:'var(--amber)',
+                    border:'none',borderRadius:3,padding:'2px 8px',cursor:'pointer',
+                    fontWeight:600}},
+                  '应用')
+              );
+            })
+          )
+        );
+      })(),
+
+      // ── AcoustID candidates list ─────────────────────────────────────────
+      aidCandidates&&(()=>{
+        const n=aidCandidates.length;
+        const activeAidId=scraped?.acoustid?.mb_recording_id;
+        const emptyMsg = aidError==='no-key-or-fingerprint' ? '未配置 AcoustID API Key 或未提取 CP 声纹'
+          : aidError==='no-fingerprint' ? '未提取 CP 声纹指纹'
+          : aidError==='no-duration' ? '无法获取音频时长'
+          : aidError==='rate-limited' ? 'AcoustID 请求过于频繁，请稍后重试'
+          : aidError==='invalid-key' ? 'AcoustID API Key 无效'
+          : 'AcoustID 未找到匹配结果';
+        return e('div',{style:{marginBottom:14}},
+          e('div',{style:{fontSize:11,fontWeight:600,color:'var(--tx-secondary)',marginBottom:6,display:'flex',alignItems:'center',justifyContent:'space-between'}},
+            e('span',null,`AcoustID 搜索结果（${n} 个候选，按匹配度+声纹得分排列）`),
+            e('button',{onClick:()=>{setAidCandidates(null);setPreviewAidId(null);setAidError(null);},
+              style:{fontSize:16,color:'var(--tx-faint)',background:'none',border:'none',cursor:'pointer',padding:0,lineHeight:1}},
+              '\u00d7'),
+          ),
+          n===0
+            ? e('div',{style:{padding:'8px 12px',borderRadius:'var(--r-md)',
+                background:'var(--bg-subtle)',border:'0.5px solid var(--bd-default)',fontSize:11,color:'var(--tx-faint)'}},
+                emptyMsg)
+            : e('div',{style:{maxHeight:128,overflowY:'auto',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)'}},
+            aidCandidates.map((item,idx)=>{
+              const c=item.candidate;
+              const recId=c.mb_recording_id;
+              const isActive=recId&&recId===activeAidId;
+              const isPreview=recId&&recId===previewAidId&&!isActive;
+              const pct=Math.round(item.score*100);
+              const mt=item.matchTier??0;
+              const tierColor=mt===3?'var(--green)':mt>=1?'var(--amber)':'var(--red)';
+              const tierLabel=mt===3?'精确':mt+'/3';
+              const parts=[c.title||'—'];
+              if(c.artist) parts.push(c.artist);
+              if(c.album) parts.push(c.album+(c.album_year?' · '+c.album_year:''));
+              if(c.track_number) parts.push('#'+c.track_number);
+              if(c.genre) parts.push(c.genre);
+              if(c.duration) parts.push(fmtDur(c.duration));
+              let rowBg='transparent';
+              if(isActive) rowBg='var(--blue-bg)';
+              else if(isPreview) rowBg='var(--amber-bg, #FFFBEB)';
+              return e('div',{key:recId||idx,
+                onClick:()=>isActive?null:setPreviewAidId(isPreview?null:recId),
+                style:{padding:'8px 10px',borderBottom:idx<n-1?'0.5px solid var(--bd-subtle)':'none',
+                  cursor:'default',background:rowBg,
+                  display:'flex',alignItems:'center',gap:6,
+                  fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-primary)',
+                }},
+                e('span',{style:{flexShrink:0,fontSize:10,fontWeight:700,color:tierColor,
+                  background:tierColor+'18',borderRadius:99,padding:'2px 8px',minWidth:36,textAlign:'center'}},
+                  tierLabel),
+                e('span',{style:{flexShrink:0,fontSize:9,color:'var(--tx-faint)',minWidth:32,textAlign:'right'}},
+                  pct+'%'),
+                e(DragScrollText,{style:{flex:1,minWidth:0}},
+                  parts.join(' · ')),
+                isActive&&e('span',{style:{flexShrink:0,fontSize:9,color:'var(--blue)',
+                  background:'var(--blue-bg)',borderRadius:3,padding:'1px 5px'}},'当前'),
+                !isActive&&e('button',{onClick:e=>{e.stopPropagation();selectAcoustidCandidate(c);},
+                  style:{flexShrink:0,fontSize:9,color:'#fff',background:'var(--amber)',
+                    border:'none',borderRadius:3,padding:'2px 8px',cursor:'pointer',
+                    fontWeight:600}},
+                  '应用')
+              );
+            })
+          )
+        );
+      })(),
 
       // ── Comparison table (cells contain radio buttons for source selection) ──
       hasScraped&&(()=>{
@@ -299,13 +511,13 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                       mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
                   )
                   : e('label',{key:key+'m',
-                    onClick:()=>mbState&&toggleSrc(key,'mb'),
                     style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
                       background:mbState?STATE_BG[mbState]:'transparent',
-                      border:'1px solid transparent',
                       cursor:mbState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
                     }},
-                    mbState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                    mbState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,
+                      onClick:()=>toggleSrc(key,'mb'),
+                      style:{cursor:'pointer',accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
                     e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
                       mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
                       isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
@@ -327,13 +539,13 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                       aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
                   )
                   : e('label',{key:key+'a',
-                    onClick:()=>aidState&&toggleSrc(key,'acoustid'),
                     style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
                       background:aidState?STATE_BG[aidState]:'transparent',
-                      border:'1px solid transparent',
                       cursor:aidState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
                     }},
-                    aidState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,onChange:()=>{},style:{accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
+                    aidState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,
+                      onClick:()=>toggleSrc(key,'acoustid'),
+                      style:{cursor:'pointer',accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
                     e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
                       aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
                       isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
@@ -416,7 +628,16 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
             e(Btn,{onClick:doWrite},'确认写入')
           )
         )
-      )
+      ),
+
+      // Cancel scrape confirmation dialog
+      confirmCancel&&e(ConfirmModal,{
+        title:'取消刮削',
+        message:'确认清除该文件的所有刮削数据？此操作不可撤销。',
+        onConfirm:()=>{setConfirmCancel(false);doCancelScrape();},
+        onClose:()=>setConfirmCancel(false),
+        danger:true,
+      })
 
     ) // end !loading
   );
