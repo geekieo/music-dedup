@@ -18,7 +18,7 @@ import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from './lib/matcher.j
 import { runScrape, scrapeSingleFile, getMbCandidates, getAcoustidCandidates } from './lib/scraper.js';
 import { renameFile, readTagsFromFile, writeTagsWithSnapshot, revertFromWriteHistory, getExiftoolStatus } from './lib/tagger.js';
 import { detectFpcalc, resetDetection as resetFpcalcDetection } from './lib/chromaprint-bridge.js';
-import { computeScrapeTier } from './lib/tier.js';
+import { computeScrapeTier, mergeDualScrapeShape } from './lib/tier.js';
 import { tagTracks, GROUP_TAG_LABELS, GROUP_TAG_DESCRIPTIONS, GROUP_TAG_COLORS,
   PICK_TAG_LABEL, PICK_TAG_COLOR, DEFAULT_PICK_TAG_ORDER,
   MATCHING_METHOD_KEYS, CHARACTERISTIC_TAGS_ARRAY, MATCH_METHOD_TAGS_ARRAY,
@@ -299,12 +299,17 @@ app.post('/api/files/:id/scrape-single', async(req,res)=>{
     const mb  = dual.mb  ? { ...dual.mb,  scrape_tier: f ? computeScrapeTier(f, dual.mb, ignoreScript) : null } : null;
     const aid = dual.acoustid ? { ...dual.acoustid, scrape_tier: f ? computeScrapeTier(f, dual.acoustid, ignoreScript) : null } : null;
     const overallTier = (() => {
-      const tiers = [mb?.scrape_tier, aid?.scrape_tier].filter(Boolean);
-      if (!tiers.length) return null;
-      if (tiers.includes('blue')) return 'blue';
-      if (tiers.includes('green')) return 'green';
-      if (tiers.includes('yellow')) return 'yellow';
-      return 'red';
+      if (!dual.mb && !dual.acoustid) return null;
+      if (!f) return null;
+      const toShape = (row) => row ? {
+        title: row.title, artist: row.artist, album: row.album,
+        album_year: row.album_year || 0, track_number: row.track_number || 0,
+        genre: (row.genre && !/^\d+\.\d+$/.test(String(row.genre))) ? row.genre : null,
+        match_basis: row.match_basis, source: row.source,
+      } : null;
+      const mbShape = toShape(dual.mb);
+      const aidShape = toShape(dual.acoustid);
+      return computeScrapeTier(f, mergeDualScrapeShape(f, mbShape, aidShape, ignoreScript), ignoreScript);
     })();
     res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
   }catch(e){ res.status(500).json({ok:false,error:e.message}); }
@@ -372,14 +377,19 @@ app.get('/api/files/:id/scraped', (req,res)=>{
   // Compute tier for each source independently, plus overall best tier
   const mb  = dual.mb  ? { ...dual.mb,  scrape_tier: f ? computeScrapeTier(f, dual.mb, ignoreScript) : null } : null;
   const aid = dual.acoustid ? { ...dual.acoustid, scrape_tier: f ? computeScrapeTier(f, dual.acoustid, ignoreScript) : null } : null;
-  // Overall tier: blue > green > yellow > red. Null if no tiers at all.
+  // Overall tier: computed from merged dual-source shape, not per-source max.
   const overallTier = (() => {
-    const tiers = [mb?.scrape_tier, aid?.scrape_tier].filter(Boolean);
-    if (!tiers.length) return null;
-    if (tiers.includes('blue')) return 'blue';
-    if (tiers.includes('green')) return 'green';
-    if (tiers.includes('yellow')) return 'yellow';
-    return 'red';
+    if (!dual.mb && !dual.acoustid) return null;
+    if (!f) return null;
+    const toShape = (row) => row ? {
+      title: row.title, artist: row.artist, album: row.album,
+      album_year: row.album_year || 0, track_number: row.track_number || 0,
+      genre: (row.genre && !/^\d+\.\d+$/.test(String(row.genre))) ? row.genre : null,
+      match_basis: row.match_basis, source: row.source,
+    } : null;
+    const mbShape = toShape(dual.mb);
+    const aidShape = toShape(dual.acoustid);
+    return computeScrapeTier(f, mergeDualScrapeShape(f, mbShape, aidShape, ignoreScript), ignoreScript);
   })();
   res.json({ok:true, data:{ mb, acoustid: aid, scrape_tier: overallTier }});
 });
