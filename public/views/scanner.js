@@ -132,7 +132,16 @@ function ScannerView({scan}){
         )
       ),
       e('div',{style:{height:5,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
-        e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber)',borderRadius:99,transition:'width .3s'}}))
+        e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber)',borderRadius:99,transition:'width .3s'}})),
+      // 子进度条 — 展示长耗时步骤（刮削/声纹匹配等）内部的详细进度
+      status.subPct!=null&&status.subPct>0&&e('div',{style:{marginTop:6}},
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}},
+          e('span',{style:{fontSize:10,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}},status.subMessage||status.message||''),
+          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',marginLeft:8}},(status.subPct||0)+'%')
+        ),
+        e('div',{style:{height:3,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
+          e('div',{style:{width:(status.subPct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber-bd)',borderRadius:99,transition:'width .15s'}}))
+      )
     ),
 
     // Log — progressive, never cleared mid-session

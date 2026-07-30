@@ -666,6 +666,42 @@ app.get('/api/scan/stream', (req,res)=>{
 app.get('/api/scan/status', (_,res)=>res.json({ok:true,data:scanState}));
 
 // ── Scan start ─────────────────────────────────────────────────────────────
+
+// 根据 DB 文件数量预估各步骤耗时占比，使进度条反映真实耗时分布。
+// 各步骤的每文件相对耗时系数基于典型网络/CPU开销：
+//   - scrape（需联网请求 AcoustID ~400ms + MusicBrainz ~1100ms）最慢
+//   - fp（计算频谱声纹，CPU密集）次之
+//   - meta（读取文件标签）中等
+//   - 其余步骤（枚举/匹配/分组）较快
+function estimateStepWeights(db, steps, { force, acoustidKey }) {
+  const totalAudio = (db.get("SELECT COUNT(*) n FROM files")||{n:0}).n;
+  const withTitle = (db.get("SELECT COUNT(*) n FROM files WHERE title IS NOT NULL AND title!=''")||{n:0}).n;
+  const withFp = (db.get("SELECT COUNT(*) n FROM files WHERE fingerprint IS NOT NULL AND fingerprint!='META:'")||{n:0}).n;
+  const withChroma = (db.get("SELECT COUNT(*) n FROM files WHERE chromaprint IS NOT NULL")||{n:0}).n;
+
+  const costs = {};
+  for (const s of steps) {
+    switch (s) {
+      case 'enum':       costs[s] = totalAudio * 0.002 + 1; break;
+      case 'meta':       costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE meta_checked_at IS NULL")||{n:0}).n)) * 0.06 + 1; break;
+      case 'basicMatch': costs[s] = Math.max(1, withTitle) * 0.03 + 1; break;
+      case 'fp':         costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE fp_checked_at IS NULL OR chromaprint_checked_at IS NULL")||{n:0}).n)) * 0.18 + 1; break;
+      case 'fpMatch':    costs[s] = Math.max(1, withFp) * 0.10 + Math.max(1, withChroma) * 0.04 + 1; break;
+      case 'scrape': {
+        const mbN = force ? Math.max(1, withTitle) : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE mb_checked_at IS NULL AND title IS NOT NULL AND title!=''")||{n:0}).n);
+        const aidN = acoustidKey ? (force ? Math.max(1, withChroma) : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE acoustid_checked_at IS NULL AND chromaprint IS NOT NULL AND title IS NOT NULL AND title!=''")||{n:0}).n)) : 0;
+        costs[s] = aidN * 0.45 + mbN * 1.15 + 1; break;
+      }
+      case 'scrapeMatch': costs[s] = Math.max(1, withTitle) * 0.02 + 1; break;
+      default: costs[s] = 1;
+    }
+  }
+  const total = Object.values(costs).reduce((a,b)=>a+b, 0);
+  const w = {};
+  for (const [k,v] of Object.entries(costs)) w[k] = v/total;
+  return w;
+}
+
 app.post('/api/scan/start', async(req,res)=>{
   if(scanState.running)return res.status(409).json({ok:false,error:'已有扫描进行中'});
   const s=getAllSettings(db);
@@ -702,32 +738,57 @@ app.post('/api/scan/start', async(req,res)=>{
     const tags=laneTagKeys[lane]||[];
     return {...base,clearLaneTags:new Set(tags)};
   }
+  const acoustidKey=s.acoustid_key||'';
+  const stepWeights=estimateStepWeights(db, steps, { force, acoustidKey });
+  let cumWeight=0;
+  function wrapProg(stepName){
+    const w=stepWeights[stepName]||0;
+    const startWeight=cumWeight;
+    return evt=>{
+      const innerPct=evt.pct||0;
+      const overallPct=w>0?Math.round((startWeight+Math.min(100,innerPct)/100*w)*100):Math.round(cumWeight*100);
+      prog({...evt, pct:Math.min(100,overallPct)});
+    };
+  }
+  function advanceWeight(stepName){ cumWeight+=stepWeights[stepName]||0; }
   try{
     // 步骤1: 枚举
-    if(steps.includes('enum')&&!abort()) await runEnumerate(db,{dirs,exclude,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('enum')&&!abort()){
+      await runEnumerate(db,{dirs,exclude,onProgress:wrapProg('enum'),onAbort:abort,onPause:pause});
+      advanceWeight('enum');
+    }
     // 步骤2: 提取属性
-    if(steps.includes('meta')&&!abort()) await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('meta')&&!abort()){
+      await runMetadata(db,{threads,smartScan:force?false:smartScan,onProgress:wrapProg('meta'),onAbort:abort,onPause:pause});
+      advanceWeight('meta');
+    }
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
     if(steps.includes('basicMatch')&&!abort()){
-      prog({phase:'basicMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始基础匹配分析...'});
-      await runBasicMatcher(db,laneOpts('basicMatch',{durationTolerance,onProgress:prog,onAbort:abort,onPause:pause}));
+      wrapProg('basicMatch')({phase:'basicMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始基础匹配分析...'});
+      await runBasicMatcher(db,laneOpts('basicMatch',{durationTolerance,onProgress:wrapProg('basicMatch'),onAbort:abort,onPause:pause}));
+      advanceWeight('basicMatch');
     }
     // 步骤4: 提取声纹
-    if(steps.includes('fp')&&!abort())   await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:prog,onAbort:abort,onPause:pause});
+    if(steps.includes('fp')&&!abort()){
+      await runFingerprint(db,{threads,smartScan:force?false:smartScan,fpcalcPath:s.fpcalc_path||'',onProgress:wrapProg('fp'),onAbort:abort,onPause:pause});
+      advanceWeight('fp');
+    }
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
     if(steps.includes('fpMatch')&&!abort()){
-      prog({phase:'fpMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始声纹匹配分析...'});
-      await runFpMatcher(db,laneOpts('fpMatch',{threshold,onProgress:prog,onAbort:abort,onPause:pause}));
+      wrapProg('fpMatch')({phase:'fpMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始声纹匹配分析...'});
+      await runFpMatcher(db,laneOpts('fpMatch',{threshold,onProgress:wrapProg('fpMatch'),onAbort:abort,onPause:pause}));
+      advanceWeight('fpMatch');
     }
     // 步骤7: 刮削
     if(steps.includes('scrape')&&!abort()){
-      const acoustidKey=s.acoustid_key||'';
-      await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:prog,onAbort:abort,onPause:pause});
+      await runScrape(db,{smartScan:force?false:smartScan,retryMissed,acoustidKey,onProgress:wrapProg('scrape'),onAbort:abort,onPause:pause});
+      advanceWeight('scrape');
     }
     // 步骤8: 刮削匹配（recording ID 对比）
     if(steps.includes('scrapeMatch')&&!abort()){
-      prog({phase:'scrapeMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始刮削匹配分析...'});
-      await runScrapeMatcher(db,laneOpts('scrapeMatch',{onProgress:prog,onAbort:abort,onPause:pause}));
+      wrapProg('scrapeMatch')({phase:'scrapeMatch',pct:0,level:'info',message:force?'全量重新执行：清除本通道旧组，重新匹配后合并':'开始刮削匹配分析...'});
+      await runScrapeMatcher(db,laneOpts('scrapeMatch',{onProgress:wrapProg('scrapeMatch'),onAbort:abort,onPause:pause}));
+      advanceWeight('scrapeMatch');
     }
   }catch(e){ prog({phase:'error',pct:0,level:'err',message:`失败: ${e.message}`}); }
   finally{ scanState.running=false; scanState.paused=false; broadcast({type:'done',...scanState}); }
