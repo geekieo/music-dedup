@@ -2,7 +2,7 @@
    SCANNER VIEW — F5: simplified to 3 auto lanes (basic/fp/scrape), each
    bundles its own prerequisites (enum/meta) and always finishes with a
    global match — no more standalone "文件枚举" / "相似度匹配" buttons.
-   "强制重新执行" is collapsed behind an advanced toggle + confirm dialog.
+   "全量重新执行" is collapsed behind an advanced toggle + confirm dialog.
    `scan` (status/logs/tryStart/...) is owned by App so it survives tab
    switches — see useScanStream().
    ══════════════════════════════════════════════════════════════════════ */
@@ -39,8 +39,8 @@ function ScannerView({scan}){
 
   return e('div',{className:'fade'},
     confirm&&e(ConfirmModal,{
-      title:'确认强制重新执行',
-      message:e('span',null,'将对「',e('b',null,confirm.label),'」执行强制全量重提取，忽略智能跳过逻辑（按修改时间/是否存在判断），所有相关文件会被重新处理，耗时会明显更长。'),
+      title:'确认全量重新执行',
+      message:e('span',null,'将对「',e('b',null,confirm.label),'」执行全量重提取，忽略智能跳过逻辑（按修改时间/是否存在判断），所有相关文件会被重新处理，耗时会明显更长。'),
       onConfirm:()=>{setRunningLane(confirm.lane||'all');startStep(confirm.steps,confirm.force,confirm.label);},
       onClose:()=>setConfirm(null),
       danger:true,
@@ -65,15 +65,15 @@ function ScannerView({scan}){
               e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'执行'),
               e('button',{
                 onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
-                title:'高级：全量重新执行（忽略缓存）',
                 style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced[key]?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},
-                e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
+                e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级',
+                e(Hint,{text:'全量重新执行（忽略缓存）：忽略智能跳过逻辑，强制重处理全部相关文件。刮削通道额外支持仅重试之前未命中的文件。'})
               )
             ),
             advanced[key]&&e('div',{
               style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
-              e('button',{onClick:()=>{runLane(key,true);setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行'),
-              key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,title:'重新尝试之前刮削未命中的文件（含之前无 AcoustID Key 或未装 fpcalc 时跳过的文件），已成功匹配的文件不受影响',style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
+              e('button',{onClick:()=>{runLane(key,true);setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行'),
+              key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
             )
           )
         );
@@ -104,11 +104,13 @@ function ScannerView({scan}){
           e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
             e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
               e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'执行'),
-              e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),title:'全量重新执行（忽略缓存）',style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级')
+              e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级',
+              e(Hint,{text:'全量重新执行（忽略缓存）：忽略智能跳过逻辑，强制重处理全部相关文件。'})
+              )
             ),
             advanced.all&&e('div',{
               style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
-              e('button',{onClick:()=>{runAll(true);setAdvanced(p=>({...p,all:false}));},disabled:status.running,title:'忽略缓存，重新处理全部相关文件',style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行')
+              e('button',{onClick:()=>{runAll(true);setAdvanced(p=>({...p,all:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.5:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行')
             )
           )
         )

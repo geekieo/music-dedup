@@ -565,7 +565,7 @@ function Hint({text,size=13}){
       tabIndex:0,onFocus:open,onBlur:()=>{if(!pinned)setShow(false);},onClick:togglePin},
       Icon('info-circle',{fontSize:size})),
     show&&e('div',{className:'hint-tip fade',style:{position:'fixed',zIndex:10000,left:tipStyle.left,top:tipStyle.top,bottom:tipStyle.bottom,maxWidth:tipStyle.maxWidth,
-      background:'#fff',color:'#1F2937',fontSize:12,lineHeight:1.75,whiteSpace:'pre-line',
+      background:'#fff',color:'#1F2937',fontSize:12,lineHeight:1.75,whiteSpace:'pre-line',textAlign:'left',
       padding:'8px 12px',borderRadius:'var(--r-md)',fontWeight:400,
       boxShadow:'0 4px 20px rgba(0,0,0,.12), 0 0 0 0.5px rgba(0,0,0,.06)'}},
       text
@@ -719,7 +719,7 @@ function useScanStream(onDone){
     setLogs(p=>[...p,{msg:`━━━ ${label} [${ts}] ━━━`,ty:'sep',ts:Date.now()}]);
   }
   function startStep(steps,force=false,label,extra={}){
-    addSeparator(`${label||'扫描'} · ${force?'强制全量':extra.retryMissed?'未命中重新执行':'智能模式'}`);
+    addSeparator(`${label||'扫描'} · ${force?'全量重新执行':extra.retryMissed?'未命中重新执行':'智能模式'}`);
     api.post('/api/scan/start',{steps,force,...extra}).then(r=>{if(!r.ok)addSeparator(`⚠ 启动失败：${r.error||''}`);});
   }
   function tryStart(steps,force,label){
