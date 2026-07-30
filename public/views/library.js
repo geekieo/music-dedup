@@ -277,7 +277,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
         // style rather than a matching pair).
         e('select',{value:scrapeFilter,onChange:ev=>setScrapeFilter(ev.target.value),
           style:{fontSize:12,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
-            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:112}},
+            color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:125}},
           e('option',{value:''},'全部刮削'),
           e('option',{value:'green'},TIER_LABEL.green),
           e('option',{value:'blue'},TIER_LABEL.blue),
