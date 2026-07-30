@@ -526,7 +526,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
               const isDisplayOnly = !!displayOnly;
               const cells = [
                 e('div',{key:key+'l',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:'0.5px solid var(--bd-subtle)',color:'var(--tx-faint)',background:'var(--bg-subtle)'}},label),
-                e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:(showMb||showAid)?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',fontSize:9}},
+                e('div',{key:key+'f',style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:(showMb||showAid)?'0.5px solid var(--bd-subtle)':'none',color:'var(--tx-primary)',fontFamily:'var(--font-mono)',display:'flex',alignItems:'center'}},
                   fv||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—')
                 ),
               ];
@@ -538,22 +538,22 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                 cells.push(isDisplayOnly
                   ? e('div',{key:key+'m',
                     style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
-                      background:mbState?STATE_BG[mbState]:'transparent',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap',
+                      background:mbState?STATE_BG[mbState]:'transparent',display:'flex',alignItems:'center',gap:4,flexWrap:'wrap',
                       color:mbState?'var(--tx-primary)':'var(--tx-faint)'}},
-                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,flex:1}},
+                    e('span',{style:{fontFamily:'var(--font-mono)',flex:1}},
                       mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
                   )
                   : e('label',{key:key+'m',
                     style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',borderRight:showAid?'0.5px solid var(--bd-subtle)':'none',
                       background:mbState?STATE_BG[mbState]:'transparent',
-                      cursor:mbState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                      cursor:mbState?'pointer':'default',display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'
                     }},
                     mbState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,
                       onClick:()=>toggleSrc(key,'mb'),
                       style:{cursor:'pointer',accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
-                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                    e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--tx-primary)',flex:1}},
                       mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
-                      isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
+                      isSelected&&recommend[key]&&e('span',{style:{color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
                       hasAidConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
                     )
                   ));
@@ -566,22 +566,22 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                 cells.push(isDisplayOnly
                   ? e('div',{key:key+'a',
                     style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
-                      background:aidState?STATE_BG[aidState]:'transparent',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap',
+                      background:aidState?STATE_BG[aidState]:'transparent',display:'flex',alignItems:'center',gap:4,flexWrap:'wrap',
                       color:aidState?'var(--tx-primary)':'var(--tx-faint)'}},
-                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,flex:1}},
+                    e('span',{style:{fontFamily:'var(--font-mono)',flex:1}},
                       aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'))
                   )
                   : e('label',{key:key+'a',
                     style:{padding:'6px 8px',borderBottom:'0.5px solid var(--bd-subtle)',
                       background:aidState?STATE_BG[aidState]:'transparent',
-                      cursor:aidState?'pointer':'default',display:'flex',alignItems:'flex-start',gap:4,flexWrap:'wrap'
+                      cursor:aidState?'pointer':'default',display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'
                     }},
                     aidState&&e('input',{type:'radio',name:'src_'+key,checked:isSelected,
                       onClick:()=>toggleSrc(key,'acoustid'),
                       style:{cursor:'pointer',accentColor:'var(--amber)',width:12,height:12,flexShrink:0,marginTop:1}}),
-                    e('span',{style:{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--tx-primary)',flex:1}},
+                    e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--tx-primary)',flex:1}},
                       aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
-                      isSelected&&recommend[key]&&e('span',{style:{fontSize:9,color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
+                      isSelected&&recommend[key]&&e('span',{style:{color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
                       hasMbConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
                     )
                   ));
