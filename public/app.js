@@ -1,7 +1,7 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.14.1';
+const APP_VERSION='1.15.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 const api={

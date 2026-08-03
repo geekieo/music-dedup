@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] — 2026-08-03
+
+### Added
+
+- **刮削可写入字段从 3 项扩展为 6 项**（标题/艺术家/专辑 + 年份/曲目号/流派），时长仅对比不写入；刮削分级从 3 级扩展为 4 级，新增 `red`（模糊匹配且无可写入信息，可直接忽略）。tier 计算收敛到服务端单一事实来源（`lib/tier.js`），修复浏览器端繁简折叠漏字（如 鐘/藉）
+- **刮削比较表就地单选**：每个可写字段一个单选按钮，在 MB/AcoustID 来源间点击切换；单元格三色状态（绿=一致 / 蓝=推荐写入 / 黄=需自行判断），推荐字段标"推荐"，两源冲突显示 alert 图标
+- **组内字段借用（CrossFillDialog）**：可从重复组内其他文件借字段，按来源亲和力自动推荐与目标字段最吻合的来源
+- **重复组维度对比支持 AcoustID 精确匹配**作为刮削吻合来源
+- **搜索增强**：逻辑优化、容错前后端统一、`SearchInput` 组件统一
+- **子进度条**：长耗时步骤显示独立子进度，全局进度改为按步骤耗时加权
+
+### Changed
+
+- **刮削操作重构**：MB/AcoustID 双源候选列表（分别列出、可预览与应用），数据安全与写入逻辑统一
+- **双源合并逻辑**：年份/曲目号/流派优先取与文件现有值一致的来源，两源都不匹配才回退主源
+- **刮削列悬停弹窗重构**：双列布局（MB 左 / AcoustID 右），弹窗尺寸由内容驱动
+- **刮削统计分母固定为 7**（六可写字段 + 时长）
+- **写入/撤销字段后全链路实时刷新**：比较表匹配状态、全局统计、跨页面写入统一走 `onTagsWritten` 触发链；最近写入的修改字段改用中文名称
+- **"全量重新执行"命名统一**：按钮 title 悬停弹窗改为 Hint 说明
+- **重新执行（force）模式统一**：由 `forceStripLaneTags` 前置清理 DB，matcher 内部只做读取 + 并集
+- **代码结构**：`app.js` 拆分，视图按页面剥离为 5 个独立文件（[public/views/](public/views/)）
+
+### Fixed
+
+- **双源合并误判**：MB 有冲突字段但 AcoustID 完全吻合时，不再被整体误判为"精确匹配 · 可写入"
+- **AcoustID 时长字段**：修复刮削结果中 AcoustID 时长异常，时长对比与统计可正常读取
+- **彻底删除时同步清理所有关联表**，消除孤儿数据
+- **全量重新执行不再继承旧组**：matcher 内部安全排除对应旧组后重算并集
+
 ## [1.14.1] — 2026-07-21
 
 ### Added
@@ -268,6 +297,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SQLite 持久化
 - Express Web 服务
 
+[1.15.0]: https://github.com/geekieo/musicdedup/compare/v1.14.1...v1.15.0
 [1.12.2]: https://github.com/geekieo/musicdedup/compare/v1.12.1...HEAD
 [1.12.1]: https://github.com/geekieo/musicdedup/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/geekieo/musicdedup/compare/v1.11.1...v1.12.0
