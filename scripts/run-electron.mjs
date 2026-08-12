@@ -6,6 +6,9 @@
 // 版本、require('electron') 拿到的是 npm 包路径字符串）。
 // 这里在 spawn 子进程前彻底 delete 该变量（delete 会同步到子进程环境），保证
 // npm run electron 在任何环境下都真正启动 Electron。
+//
+// 参数：--p0 → 以 P0 验证模式启动（主进程跑回归套件 + P0 渲染页），对应 npm run p0:verify。
+// 不用命令行内嵌环境变量赋值（Windows cmd 不兼容），改为在子进程 env 里注入。
 
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
@@ -20,5 +23,9 @@ if ('ELECTRON_RUN_AS_NODE' in process.env) {
 }
 
 const args = ['electron/main.js', ...process.argv.slice(2)];
-const child = spawn(electronPath, args, { stdio: 'inherit', windowsHide: false });
+const child = spawn(electronPath, args, {
+  stdio: 'inherit',
+  windowsHide: false,
+  env: { ...process.env, ...(process.argv.includes('--p0') ? { P0_VERIFY: '1' } : {}) },
+});
 child.on('close', (code) => process.exit(code == null ? 1 : code));

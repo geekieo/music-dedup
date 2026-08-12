@@ -846,9 +846,13 @@ app.post('/api/validate-acoustid', async(req,res)=>{
 
 app.get('*', (_,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
-app.listen(PORT, HOST, ()=>{
+const server = app.listen(PORT, HOST, ()=>{
   console.log(`🎵  MusicDedup 已启动`);
   console.log(`   本地访问: http://localhost:${PORT}`);
   console.log(`   数据库:   ${process.env.DB_PATH||'data/musicdedup.db'}`);
   console.log(`   按 Ctrl+C 退出服务\n`);
 });
+
+// v2 Electron 客户端：主进程动态 import 本模块后，用 server.address().port 取随机端口。
+// 导出 app/server 供主进程复用（端口/HOST 由环境变量注入，见 electron/main.js）。
+export { app, server };
