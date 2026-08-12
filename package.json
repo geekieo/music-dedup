@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "electron": "node scripts/run-electron.mjs"
   },
   "dependencies": {
     "audio-decode": "^3.10.1",
@@ -23,5 +24,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0"
   }
 }
