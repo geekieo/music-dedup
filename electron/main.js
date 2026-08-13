@@ -95,6 +95,23 @@ function createTrayFromDataUrl(dataUrl) {
   }
 }
 
+// P4 统一图标：窗口/任务栏图标与托盘同源（渲染进程栅格化 favicon SVG 送达，不提交图片资产）
+// Windows/Linux: win.setIcon 更新任务栏+标题栏；macOS: Dock 图标走 app.dock
+function applyWindowIcon(dataUrl) {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const icon = nativeImage.createFromDataURL(dataUrl);
+    if (icon.isEmpty()) { console.log('[v2] 警告：窗口图标（dataURL）为空'); return; }
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.setIcon(icon);
+    } else {
+      mainWindow.setIcon(icon);
+    }
+  } catch (e) {
+    console.log('[v2] 设置窗口图标失败：', e.message);
+  }
+}
+
 function createClientWindow() {
   const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
@@ -286,6 +303,8 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
     registerWindowControls();
     // 托盘：渲染进程首启代码生成图标后经 tray:icon 送达（不提交图片资产）
     ipcMain.on('tray:icon', (_e, dataUrl) => { if (dataUrl) createTrayFromDataUrl(dataUrl); });
+    // 统一图标：窗口/任务栏图标同样由渲染进程栅格化 favicon SVG 后经 win:icon 送达
+    ipcMain.on('win:icon', (_e, dataUrl) => { if (dataUrl) applyWindowIcon(dataUrl); });
     await mainWindow.loadURL('musicdedup://app/index.html');
     console.log('[v2-P4] 客户端就绪（单实例锁生效，IPC 化，无 HTTP 层）');
 

@@ -29,8 +29,9 @@ contextBridge.exposeInMainWorld('bridge', {
       return () => ipcRenderer.removeListener('win:maximized', listener);
     },
   },
-  // P4 托盘：渲染进程首启代码生成图标（栅格化 favicon SVG → PNG data URL）
+  // P4 统一图标：托盘/窗口图标同源（渲染进程栅格化 favicon SVG → PNG data URL）
   readyTrayIcon: (dataUrl) => ipcRenderer.send('tray:icon', dataUrl),
+  readyWindowIcon: (dataUrl) => ipcRenderer.send('win:icon', dataUrl),
   // ── P0 回归用（只读）──
   verify: () => ipcRenderer.invoke('p0:verify'),
   samples: () => ipcRenderer.invoke('p0:samples'),

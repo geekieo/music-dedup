@@ -386,20 +386,24 @@ function App(){
     api.get('/api/settings').then(r=>{if(r.ok)setSettingsState(r.data);});
   },[]);
 
-  // P4 托盘图标代码生成：首启栅格化 favicon SVG → PNG data URL → 主进程创建托盘
-  // （不提交图片资产，源为 assets/icon.svg）
+  // P4 统一图标生成：首启栅格化 favicon SVG → PNG data URL，托盘(32px) 与窗口/任务栏
+  // 图标(256px) 同源送达主进程（不提交图片资产，源为 assets/icon.svg）
   useEffect(()=>{
-    if(!window.bridge?.readyTrayIcon)return;
+    if(!window.bridge?.readyTrayIcon && !window.bridge?.readyWindowIcon)return;
     const link=document.querySelector('link[rel=icon]');
     if(!link)return;
     const img=new Image();
-    img.onload=()=>{
+    const raster=(size,ready)=>{
       try{
         const c=document.createElement('canvas');
-        c.width=c.height=32;
-        c.getContext('2d').drawImage(img,0,0,32,32);
-        window.bridge.readyTrayIcon(c.toDataURL('image/png'));
+        c.width=c.height=size;
+        c.getContext('2d').drawImage(img,0,0,size,size);
+        ready(c.toDataURL('image/png'));
       }catch(e){}
+    };
+    img.onload=()=>{
+      if(window.bridge.readyTrayIcon)raster(32,window.bridge.readyTrayIcon);
+      if(window.bridge.readyWindowIcon)raster(256,window.bridge.readyWindowIcon);
     };
     img.onerror=()=>{};
     img.src=link.href;
