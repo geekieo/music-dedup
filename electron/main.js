@@ -8,15 +8,20 @@
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, ipcMain, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, Notification, Tray, Menu, nativeImage } = require('electron');
 import './bootstrap-env.js'; // 必须先于其它 import：lib/db.js 在模块加载时即解析 DB_PATH
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
+// Windows 通知/任务栏需要 AppUserModelId（打包后 appId 已在 build 配置）
+app.setAppUserModelId('com.geekieo.musicdedup');
+
 import { migrateLegacyData } from '../scripts/migrate-data.mjs';
 import { registerProtocol } from './protocol.js';
 import { registerApi } from './ipc/index.js';
+import { getDB } from '../lib/db/index.js';
+import { getSetting, setSetting } from '../lib/db/settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isP0Verify = process.env.P0_VERIFY === '1';
@@ -39,25 +44,119 @@ function getSampleFiles() {
   ].filter((s) => fs.existsSync(s.path));
 }
 
-// ── P2 客户端路径 ─────────────────────────────────────────────────────────
+// ── P4 客户端路径 ─────────────────────────────────────────────────────────
+const db = getDB();
 let mainWindow = null;
+let tray = null;
+// P4 关闭行为特殊化：空闲关窗=正常退出；扫描等长任务进行中关窗=最小化到托盘（不中断）。
+let scanRunning = false; // 由 scan 事件跟踪（start→true / done→false）
+let forceQuit = false;   // 托盘「退出」置位，跳过关窗拦截
 function sendScan(data) {
+  if (!data) return;
+  if (data.type === 'start') scanRunning = true;
+  else if (data.type === 'done') scanRunning = false;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
+  // P4 扫描完成系统通知（done 事件由 scan.js finally 广播，含 abortFlag）
+  if (data.type === 'done') {
+    try {
+      new Notification({
+        title: data.abortFlag ? 'MusicDedup 扫描已中止' : 'MusicDedup 扫描完成',
+        body: data.abortFlag ? '扫描已被中止。' : '全部所选步骤已完成。',
+      }).show();
+    } catch (e) { /* 通知失败不阻塞 */ }
+  }
+}
+
+function showMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+// P4 系统托盘：图标由渲染进程首启代码生成（栅格化 favicon SVG → PNG data URL →
+// 主进程 createTrayFromDataUrl），不提交图片资产；退出置 forceQuit 跳过关窗拦截。
+function createTrayFromDataUrl(dataUrl) {
+  try {
+    const icon = nativeImage.createFromDataURL(dataUrl);
+    if (icon.isEmpty()) { console.log('[v2] 警告：托盘图标（dataURL）为空'); return; }
+    if (tray) { tray.setImage(icon); return; } // 已存在则仅更新图标
+    tray = new Tray(icon);
+    tray.setToolTip('MusicDedup');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: '显示主窗口', click: showMainWindow },
+      { type: 'separator' },
+      { label: '退出', click: () => { forceQuit = true; app.quit(); } },
+    ]));
+    tray.on('double-click', showMainWindow);
+    console.log('[v2] 托盘已创建（代码生成图标）');
+  } catch (e) {
+    console.log('[v2] 托盘创建失败：', e.message);
+  }
 }
 
 function createClientWindow() {
+  const isMac = process.platform === 'darwin';
+  const isWin = process.platform === 'win32';
+  // 窗口状态记忆（存 settings 表，计划 P4）：恢复上次尺寸/位置/最大化
+  const saved = getSetting(db, 'window_state', null) || {};
   const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    width: saved.width || 1280,
+    height: saved.height || 840,
+    x: saved.x,
+    y: saved.y,
     title: 'MusicDedup',
     autoHideMenuBar: true,
+    // ── P4 无边框（路线 A · 保留原生窗口控件）────────────────────────────
+    // Windows: titleBarStyle hidden + titleBarOverlay（原生 min/max/close 悬浮，
+    //   Aero Snap 免费）；配色对齐 header（--bg-base #FFFFFF / --tx-muted #6B7280）
+    // macOS:   titleBarStyle hidden + trafficLightPosition（原生红绿灯左上避让）
+    // Linux:   frame:false + header 内自绘三键（WindowControls 组件）
+    ...(isWin ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#FFFFFF', symbolColor: '#6B7280', height: 54 } } : {}),
+    ...(isMac ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 18 } } : {}),
+    ...(!isWin && !isMac ? { frame: false } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
+  if (saved.maximized) win.maximize();
+  // 关闭/最大化时记录窗口状态（最大化存 normal bounds + 标记，恢复时还原）
+  win.on('close', (e) => {
+    const b = win.getNormalBounds();
+    setSetting(db, 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() });
+    // 扫描进行中关窗 → 最小化到托盘（不中断扫描），并通知用户去向；
+    // 托盘「退出」置 forceQuit 后走正常退出
+    if (!forceQuit && scanRunning) {
+      const wasVisible = win.isVisible();
+      e.preventDefault();
+      win.hide();
+      if (wasVisible) {
+        try {
+          new Notification({
+            title: 'MusicDedup 扫描进行中',
+            body: '已最小化到托盘，扫描继续后台运行。恢复窗口请点击托盘图标；退出请用托盘菜单。',
+          }).show();
+        } catch (err) { /* 通知失败不阻塞 */ }
+      }
+    }
+  });
+  win.on('maximize', () => win.webContents.send('win:maximized', true));
+  win.on('unmaximize', () => win.webContents.send('win:maximized', false));
   if (!app.isPackaged) {
     // dev 下把渲染进程 console 转发到主进程 stdout，便于 smoke/调试定位
     win.webContents.on('console-message', (event) => console.log(`[renderer] ${event.message}`));
   }
   return win;
+}
+
+// 窗口控制 IPC（供 Linux 自绘按钮 / 通用调用；Win/mac 走原生控件不强制使用）
+function registerWindowControls() {
+  ipcMain.handle('win:minimize', () => { if (mainWindow) mainWindow.minimize(); });
+  ipcMain.handle('win:toggle-maximize', () => {
+    if (!mainWindow) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+  ipcMain.handle('win:close', () => { if (mainWindow) mainWindow.close(); });
+  ipcMain.handle('win:is-maximized', () => (mainWindow ? mainWindow.isMaximized() : false));
 }
 
 // Smoke：真实库 + preload + ipc + lib 全链路自测（V2_SMOKE=1 时运行）
@@ -91,6 +190,22 @@ async function runSmoke(win) {
     }
     out.push({ m: 'JS', u: '/rules-meta.js globals', ok: typeof GROUP_TAG_LABELS !== 'undefined' && typeof computeScrapeMatch === 'function', err: null });
     out.push({ m: 'UI', u: 'React app rendered', ok: document.body.innerText.includes('MusicDedup') && !!document.querySelector('button'), err: null });
+    // 托盘图标代码生成验证：favicon SVG → 32px PNG data URL（首启由同一逻辑生成托盘）
+    const trayIcon = await (async () => {
+      try {
+        const link = document.querySelector('link[rel=icon]');
+        if (!link) return { m: 'TRAY', u: 'favicon', ok: false, err: 'no favicon link' };
+        const img = new Image();
+        img.src = link.href;
+        await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('svg load failed')); });
+        const c = document.createElement('canvas');
+        c.width = c.height = 32;
+        c.getContext('2d').drawImage(img, 0, 0, 32, 32);
+        const url = c.toDataURL('image/png');
+        return { m: 'TRAY', u: 'favicon→32px png', ok: url.startsWith('data:image/png') && url.length > 200, err: null };
+      } catch (e) { return { m: 'TRAY', u: 'favicon', ok: false, err: String(e) }; }
+    })();
+    out.push(trayIcon);
     out.push(await req('GET', '/api/duplicates'));
     out.push(await req('GET', '/api/scan/status'));
     out.push(await req('GET', '/api/retention-list'));
@@ -105,66 +220,85 @@ async function runSmoke(win) {
 }
 
 // ── 启动 ──────────────────────────────────────────────────────────────────
-app.whenReady().then(async () => {
-  // 数据迁移（幂等）：首启从旧 data/ 搬迁，绝不覆盖已存在库
-  const mig = migrateLegacyData({ targetDb: process.env.DB_PATH });
-  if (mig.migrated) console.log(`[v2] 已从旧 data/ 搬迁数据库 → ${mig.target}`);
-  else if (mig.reason === 'target-exists')
-    console.log(`[v2] 数据库已存在，跳过搬迁: ${process.env.DB_PATH}`);
-  else if (fs.existsSync(process.env.DB_PATH))
-    console.log(`[v2] 无旧 data/ 库，沿用已存在库: ${process.env.DB_PATH}`);
-  else console.log(`[v2] 无旧 data/ 库，使用全新库: ${process.env.DB_PATH}`);
+// 单实例锁（防重复打开 → SQLite 并发写冲突，计划 §七.2）：第二个实例直接退出，
+// 并把已存在的窗口聚焦到前台。P0/smoke 测试模式不抢锁（smoke 只读，可与客户端共存）。
+const isClientMode = !isP0Verify && !isSmoke;
+if (isClientMode && !app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  if (isClientMode) {
+    app.on('second-instance', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+    });
+  }
 
-  // 协议处理（先于任何窗口加载）
-  registerProtocol();
+  app.whenReady().then(async () => {
+    // 数据迁移（幂等）：首启从旧 data/ 搬迁，绝不覆盖已存在库
+    const mig = migrateLegacyData({ targetDb: process.env.DB_PATH });
+    if (mig.migrated) console.log(`[v2] 已从旧 data/ 搬迁数据库 → ${mig.target}`);
+    else if (mig.reason === 'target-exists')
+      console.log(`[v2] 数据库已存在，跳过搬迁: ${process.env.DB_PATH}`);
+    else if (fs.existsSync(process.env.DB_PATH))
+      console.log(`[v2] 无旧 data/ 库，沿用已存在库: ${process.env.DB_PATH}`);
+    else console.log(`[v2] 无旧 data/ 库，使用全新库: ${process.env.DB_PATH}`);
 
-  if (isP0Verify) {
-    // P0 回归套件：主进程跑验证 + P0 渲染页展示
-    const { runVerification } = await import('./p0/verify.js');
-    const cachedVerify = await runVerification();
-    for (const r of cachedVerify) {
-      console.log(`[P0] ${r.pass ? 'PASS' : 'FAIL'}  ${r.label}  —  ${r.detail}`);
+    // 协议处理（先于任何窗口加载）
+    registerProtocol();
+
+    if (isP0Verify) {
+      // P0 回归套件：主进程跑验证 + P0 渲染页展示
+      const { runVerification } = await import('./p0/verify.js');
+      const cachedVerify = await runVerification();
+      for (const r of cachedVerify) {
+        console.log(`[P0] ${r.pass ? 'PASS' : 'FAIL'}  ${r.label}  —  ${r.detail}`);
+      }
+      const passed = cachedVerify.filter((r) => r.pass).length;
+      console.log(`[P0] 验证完成：${passed}/${cachedVerify.length} 通过`);
+
+      ipcMain.handle('p0:verify', () => cachedVerify);
+      ipcMain.handle('p0:samples', () => getSampleFiles());
+      ipcMain.on('p0:stream-result', (_e, r) => {
+        console.log(`[P0] ${r && r.pass ? 'PASS' : 'FAIL'}  自定义协议流式播放  —  ${r && r.detail}`);
+        if (process.env.P0_AUTORUN) setTimeout(() => app.quit(), 800);
+      });
+
+      const win = new BrowserWindow({
+        width: 960,
+        height: 840,
+        title: 'MusicDedup v2 — P0 技术验证',
+        autoHideMenuBar: true,
+        webPreferences: {
+          preload: path.join(__dirname, 'preload.cjs'),
+          contextIsolation: true,
+          sandbox: true,
+        },
+      });
+      win.loadFile(path.join(__dirname, 'renderer.html'));
+      return;
     }
-    const passed = cachedVerify.filter((r) => r.pass).length;
-    console.log(`[P0] 验证完成：${passed}/${cachedVerify.length} 通过`);
 
-    ipcMain.handle('p0:verify', () => cachedVerify);
-    ipcMain.handle('p0:samples', () => getSampleFiles());
-    ipcMain.on('p0:stream-result', (_e, r) => {
-      console.log(`[P0] ${r && r.pass ? 'PASS' : 'FAIL'}  自定义协议流式播放  —  ${r && r.detail}`);
-      if (process.env.P0_AUTORUN) setTimeout(() => app.quit(), 800);
-    });
-
-    const win = new BrowserWindow({
-      width: 960,
-      height: 840,
-      title: 'MusicDedup v2 — P0 技术验证',
-      autoHideMenuBar: true,
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.cjs'),
-        contextIsolation: true,
-        sandbox: true,
-      },
-    });
-    win.loadFile(path.join(__dirname, 'renderer.html'));
-    return;
-  }
-
-  // 默认：P2 客户端（IPC + 自定义协议，无 HTTP）
-  mainWindow = createClientWindow();
-  registerApi({ send: sendScan });
-  await mainWindow.loadURL('musicdedup://app/index.html');
-  console.log('[v2-P2] 客户端就绪（IPC 化，无 HTTP 层）');
-
-  if (isSmoke) await runSmoke(mainWindow);
-});
-
-app.on('activate', () => {
-  if (!isP0Verify && BrowserWindow.getAllWindows().length === 0) {
+    // 默认：客户端（IPC + 自定义协议，无 HTTP）
     mainWindow = createClientWindow();
-  }
-});
+    registerApi({ send: sendScan });
+    registerWindowControls();
+    // 托盘：渲染进程首启代码生成图标后经 tray:icon 送达（不提交图片资产）
+    ipcMain.on('tray:icon', (_e, dataUrl) => { if (dataUrl) createTrayFromDataUrl(dataUrl); });
+    await mainWindow.loadURL('musicdedup://app/index.html');
+    console.log('[v2-P4] 客户端就绪（单实例锁生效，IPC 化，无 HTTP 层）');
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+    if (isSmoke) await runSmoke(mainWindow);
+  });
+
+  app.on('activate', () => {
+    if (!isP0Verify && BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createClientWindow();
+    }
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}

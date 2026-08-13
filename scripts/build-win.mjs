@@ -10,6 +10,7 @@
 // 打包配置取 package.json "build"（appId/files/asarUnpack/extraResources/win.target）。
 
 import { createRequire } from 'module';
+import { execSync } from 'child_process';
 
 const require = createRequire(import.meta.url);
 const { build, Platform } = require('electron-builder');
@@ -17,6 +18,10 @@ const { build, Platform } = require('electron-builder');
 process.env.ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/';
 process.env.ELECTRON_BUILDER_BINARIES_MIRROR =
   'https://npmmirror.com/mirrors/electron-builder-binaries/';
+
+// 构建期生成应用图标（assets/icon.ico + icons/*.png，不提交；源为 assets/icon.svg）
+console.log('[build:win] 生成图标（render-icons）…');
+execSync('node scripts/render-icons.mjs', { stdio: 'inherit' });
 
 console.log('[build:win] 目标: Windows portable（配置取 package.json "build"）');
 try {

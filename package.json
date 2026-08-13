@@ -1,6 +1,6 @@
 {
   "name": "musicdedup",
-  "version": "2.0.0-alpha.2",
+  "version": "2.0.0-beta.0",
   "description": "本地重复音乐管理工具 — 纯JS声纹识别 + 智能保留策略",
   "author": "geekieo",
   "type": "module",
@@ -12,6 +12,7 @@
     "smoke": "node scripts/run-electron.mjs --smoke",
     "p0:verify": "node scripts/run-electron.mjs --p0",
     "migrate-data": "node scripts/migrate-data.mjs",
+    "icons": "node scripts/render-icons.mjs",
     "build:win": "node scripts/build-win.mjs"
   },
   "dependencies": {
@@ -39,7 +40,8 @@
       "electron/**",
       "scripts/migrate-data.mjs",
       "lib/**",
-      "public/**"
+      "public/**",
+      "assets/**"
     ],
     "asarUnpack": [
       "node_modules/node-sqlite3-wasm/**"
@@ -52,8 +54,15 @@
     ],
     "npmRebuild": false,
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "portable"
+      ]
+    },
+    "linux": {
+      "icon": "assets/icons",
+      "target": [
+        "AppImage"
       ]
     }
   }

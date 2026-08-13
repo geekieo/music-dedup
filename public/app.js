@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2.0.0-alpha.2';
+const APP_VERSION='2.0.0-beta.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 // v2（P2）：经 preload 暴露的 window.bridge.request 走 IPC（electron/ipc/index.js
@@ -386,6 +386,25 @@ function App(){
     api.get('/api/settings').then(r=>{if(r.ok)setSettingsState(r.data);});
   },[]);
 
+  // P4 托盘图标代码生成：首启栅格化 favicon SVG → PNG data URL → 主进程创建托盘
+  // （不提交图片资产，源为 assets/icon.svg）
+  useEffect(()=>{
+    if(!window.bridge?.readyTrayIcon)return;
+    const link=document.querySelector('link[rel=icon]');
+    if(!link)return;
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const c=document.createElement('canvas');
+        c.width=c.height=32;
+        c.getContext('2d').drawImage(img,0,0,32,32);
+        window.bridge.readyTrayIcon(c.toDataURL('image/png'));
+      }catch(e){}
+    };
+    img.onerror=()=>{};
+    img.src=link.href;
+  },[]);
+
   // Stable identities — required for React.memo on LibraryView/DuplicatesView
   // to actually take effect (an inline arrow prop would defeat memo on every
   // render regardless of how stable everything else is).
@@ -500,19 +519,24 @@ function App(){
     e('audio',{ref:player.audioRef,...player.bind,style:{display:'none'}}),
 
     // Header + nav: single row, 3-column grid — brand left, nav centre, empty right.
-    e('div',{style:{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',padding:'0 24px',height:54,background:'var(--bg-base)',borderBottom:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',flexShrink:0,zIndex:10}},
-      e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start'}},
+    // P4 无边框：整行是拖拽区（-webkit-app-region:drag），交互元素 no-drag；
+    //   Windows 原生 overlay 按钮在右上、macOS 红绿灯在左上（品牌避让）、Linux 自绘三键在右列。
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',padding:'0 24px',height:54,background:'var(--bg-base)',borderBottom:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',flexShrink:0,zIndex:10,WebkitAppRegion:'drag'},
+      onDoubleClick:()=>{ if(window.bridge?.platform==='linux'&&window.bridge?.winControls) window.bridge.winControls.toggleMaximize(); }},
+      e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start',paddingLeft:window.bridge?.platform==='darwin'?72:0}},
         e(Logo,{size:28}),
         e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em'}},'MusicDedup'),
         e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION)
       ),
-      e('nav',{style:{display:'flex',gap:4,justifySelf:'center'}},
+      e('nav',{style:{display:'flex',gap:4,justifySelf:'center',WebkitAppRegion:'no-drag'}},
         TABS.map(t=>e('button',{key:t.id,onClick:()=>setView(t.id),style:{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:view===t.id?'var(--amber-bg)':'none',border:'none',outline:'none',borderRadius:'var(--r-md)',transition:'all .15s'}},
           Icon(t.icon,{fontSize:15}),t.label,
           t.badge?e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',minWidth:16,textAlign:'center'}},t.badge):null
         ))
       ),
-      e('div',{style:{justifySelf:'end'}})
+      e('div',{style:{justifySelf:'end',display:'flex',WebkitAppRegion:'no-drag'}},
+        window.bridge?.platform==='linux'?e(WindowControls):null
+      )
     ),
 
     // Main content — max-width centred column. Views are permanently mounted

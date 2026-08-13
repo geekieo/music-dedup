@@ -40,9 +40,9 @@ function estimateStepWeights(db, steps, { force, acoustidKey }) {
   for (const s of steps) {
     switch (s) {
       case 'enum':       costs[s] = totalAudio * 0.002 + 1; break;
-      case 'meta':       costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE meta_checked_at IS NULL") || { n: 0 }).n)) * 0.06 + 1; break;
+      case 'meta':       costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE meta_extracted_at IS NULL") || { n: 0 }).n)) * 0.06 + 1; break;
       case 'basicMatch': costs[s] = Math.max(1, withTitle) * 0.03 + 1; break;
-      case 'fp':         costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE fp_checked_at IS NULL OR chromaprint_checked_at IS NULL") || { n: 0 }).n)) * 0.18 + 1; break;
+      case 'fp':         costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE fp_extracted_at IS NULL OR chromaprint IS NULL") || { n: 0 }).n)) * 0.18 + 1; break;
       case 'fpMatch':    costs[s] = Math.max(1, withFp) * 0.10 + Math.max(1, withChroma) * 0.04 + 1; break;
       case 'scrape': {
         const mbN = force ? Math.max(1, withTitle) : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE mb_checked_at IS NULL AND title IS NOT NULL AND title!=''") || { n: 0 }).n);
@@ -70,7 +70,7 @@ async function runScanPipeline({ dirs, exclude, threads, threshold, durationTole
   };
   const abort = () => scanState.abortFlag;
   const pause = waitIfPaused;
-  const stepWeights = estimateStepWeights(db, steps, { force, acoustidKey });
+  let stepWeights = {}; // 延迟到 try 内计算：若抛错可走 catch→finally 广播 done，不卡 running 态
   let cumWeight = 0;
   function wrapProg(stepName) {
     const w = stepWeights[stepName] || 0;
@@ -83,6 +83,7 @@ async function runScanPipeline({ dirs, exclude, threads, threshold, durationTole
   }
   function advanceWeight(stepName) { cumWeight += stepWeights[stepName] || 0; }
   try {
+    stepWeights = estimateStepWeights(db, steps, { force, acoustidKey });
     // 步骤1: 枚举
     if (steps.includes('enum') && !abort()) {
       await runEnumerate(db, { dirs, exclude, onProgress: wrapProg('enum'), onAbort: abort, onPause: pause });

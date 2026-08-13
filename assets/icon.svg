@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- MusicDedup 统一图标 v6
+       隐喻：多方法扫描（雷达）发现重复对，保留其一。
+       - 雷达环 + 扫描扇区 = 多通道检测
+       - 标准四分音符：前方实心（居中略偏左上，保留），
+         阴影空心音符投射在右斜下方（被去重的副本）
+       底色纵向渐变（#FDE68A → #D97706） -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#D97706"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <circle cx="32" cy="32" r="22.5" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="1.5"/>
+  <path d="M32 9.5 A22.5 22.5 0 0 1 54.5 32 L32 32 Z" fill="#fff" fill-opacity="0.15"/>
+  <path d="M32 9.5 A22.5 22.5 0 0 1 54.5 32" fill="none" stroke="#fff" stroke-opacity="0.7" stroke-width="1.2"/>
+  <!-- 阴影空心音符（右斜下方投射，被去重） -->
+  <path transform="translate(19,21) scale(1.5)" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- 前方实心音符（居中略偏左上，保留） -->
+  <path transform="translate(13,15) scale(1.5)" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" fill="#fff"/>
+</svg>

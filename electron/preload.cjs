@@ -16,6 +16,21 @@ contextBridge.exposeInMainWorld('bridge', {
     ipcRenderer.on('scan:progress', listener);
     return () => ipcRenderer.removeListener('scan:progress', listener);
   },
+  // P4 无边框：平台标识 + 窗口控制（Linux 自绘按钮用；Win/mac 走原生控件）
+  platform: process.platform,
+  winControls: {
+    minimize: () => ipcRenderer.invoke('win:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('win:toggle-maximize'),
+    close: () => ipcRenderer.invoke('win:close'),
+    isMaximized: () => ipcRenderer.invoke('win:is-maximized'),
+    onMaximized: (cb) => {
+      const listener = (_event, v) => cb(v);
+      ipcRenderer.on('win:maximized', listener);
+      return () => ipcRenderer.removeListener('win:maximized', listener);
+    },
+  },
+  // P4 托盘：渲染进程首启代码生成图标（栅格化 favicon SVG → PNG data URL）
+  readyTrayIcon: (dataUrl) => ipcRenderer.send('tray:icon', dataUrl),
   // ── P0 回归用（只读）──
   verify: () => ipcRenderer.invoke('p0:verify'),
   samples: () => ipcRenderer.invoke('p0:samples'),

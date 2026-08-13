@@ -175,6 +175,10 @@ const ICONS={
   'shield-x':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9.5 9.5l5 5'}],['path',{d:'M14.5 9.5l-5 5'}]]},
   'toggle-left':{els:[['path',{d:'M4 12a6 6 0 016-6h4a6 6 0 010 12H10a6 6 0 01-6-6z'}],['circle',{cx:9.5,cy:12,r:2.6,fill:'currentColor'}]]},
   'file-music':{els:[['path',{d:'M14 3v4a1 1 0 001 1h4'}],['path',{d:'M5 4a1 1 0 011-1h7l5 5v11a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M9.5 17v-4.5l4-1v4.5'}],['circle',{cx:8.7,cy:17,r:1.2,fill:'currentColor'}],['circle',{cx:12.7,cy:15.5,r:1.2,fill:'currentColor'}]]},
+  // P4 无边框：Linux 自绘窗口控制三键（Win/mac 用原生控件，用不到）
+  'minus':{els:[['path',{d:'M5 12h14'}]]},
+  'maximize':{els:[['rect',{x:5,y:5,width:14,height:14,rx:1}]]},
+  'restore':{els:[['rect',{x:6,y:9,width:10,height:10,rx:1}],['path',{d:'M9 9V6a1 1 0 011-1h8a1 1 0 011 1v8a1 1 0 01-1 1h-3'}]]},
 };
 function Icon(name,style={},className){
   const spec=ICONS[name];
@@ -188,16 +192,20 @@ function Icon(name,style={},className){
   return e('svg',svgProps,spec.els.map(([tag,props],i)=>e(tag,{key:i,...props})));
 }
 
-/* ── Brand mark — two overlapping music notes: the front one solid, the
-   back one a hollow "ghost", reading as "duplicate → resolved to one".
-   Used for the header badge and (as a matching data-URI) the favicon. */
-const NOTE_PATH='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z';
+/* ── Brand mark（P4 重设计 v6）— 多方法音乐去重：
+   雷达环+扫描扇区 = 多通道检测；标准四分音符前方实心（居中略偏左上，保留），
+   阴影空心音符投射在右斜下方（被去重的副本）。与 assets/icon.svg 同一设计。 */
 function Logo({size=28,radius=7}={}){
-  return e('svg',{width:size,height:size,viewBox:'0 0 28 28',style:{display:'inline-block',verticalAlign:'middle',flexShrink:0,borderRadius:radius,boxShadow:'0 1px 3px rgba(217,119,6,.25)'}},
-    e('defs',null,e('linearGradient',{id:'logoGrad',x1:0,y1:0,x2:1,y2:1},e('stop',{offset:0,stopColor:'#FDE68A'}),e('stop',{offset:1,stopColor:'#D97706'}))),
-    e('rect',{width:28,height:28,rx:radius,fill:'url(#logoGrad)'}),
-    e('g',{transform:'translate(2.5,3) scale(.6)',opacity:.55},e('path',{d:NOTE_PATH,fill:'none',stroke:'#fff',strokeWidth:2.4,strokeLinejoin:'round',strokeLinecap:'round'})),
-    e('g',{transform:'translate(9.5,9.5) scale(.6)'},e('path',{d:NOTE_PATH,fill:'#fff'}))
+  // 标准四分音符（v1 同款 NOTE_PATH）
+  const NOTE_PATH='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z';
+  return e('svg',{width:size,height:size,viewBox:'0 0 64 64',style:{display:'inline-block',verticalAlign:'middle',flexShrink:0,borderRadius:radius,boxShadow:'0 1px 3px rgba(217,119,6,.25)'}},
+    e('defs',null,e('linearGradient',{id:'logoGrad',x1:0,y1:0,x2:0,y2:1},e('stop',{offset:0,stopColor:'#FDE68A'}),e('stop',{offset:1,stopColor:'#D97706'}))),
+    e('rect',{width:64,height:64,rx:radius*2,fill:'url(#logoGrad)'}),
+    e('circle',{cx:32,cy:32,r:22.5,fill:'none',stroke:'#fff',strokeOpacity:.5,strokeWidth:1.5}),
+    e('path',{d:'M32 9.5 A22.5 22.5 0 0 1 54.5 32 L32 32 Z',fill:'#fff',fillOpacity:.15}),
+    e('path',{d:'M32 9.5 A22.5 22.5 0 0 1 54.5 32',fill:'none',stroke:'#fff',strokeOpacity:.7,strokeWidth:1.2}),
+    e('path',{transform:'translate(19,21) scale(1.5)',d:NOTE_PATH,fill:'none',stroke:'#fff',strokeOpacity:.8,strokeWidth:1.5,strokeLinejoin:'round'}),
+    e('path',{transform:'translate(13,15) scale(1.5)',d:NOTE_PATH,fill:'#fff'})
   );
 }
 
@@ -378,3 +386,29 @@ function useConfirmAction(){
 }
 
 
+
+/* ── P4 无边框：Linux 自绘窗口控制三键（frame:false 无原生按钮；Win/mac 不渲染）── */
+function WindowControls() {
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!window.bridge?.winControls) return;
+    let off = null;
+    window.bridge.winControls.isMaximized().then(setMaximized).catch(() => {});
+    off = window.bridge.winControls.onMaximized(setMaximized);
+    return () => { if (off) off(); };
+  }, []);
+  if (window.bridge?.platform !== 'linux' || !window.bridge?.winControls) return null;
+  const btn = (icon, onClick, title) => e('button', {
+    onClick, title,
+    style: { width:34, height:30, display:'flex', alignItems:'center', justifyContent:'center',
+      background:'transparent', border:'none', borderRadius:'var(--r-sm)', cursor:'pointer',
+      color:'var(--tx-muted)', WebkitAppRegion:'no-drag' },
+    onMouseEnter: (ev) => { ev.currentTarget.style.background = 'var(--bg-muted)'; },
+    onMouseLeave: (ev) => { ev.currentTarget.style.background = 'transparent'; },
+  }, Icon(icon, { fontSize: 14 }));
+  return e('div', { style: { display:'flex', alignItems:'center', gap:2, WebkitAppRegion:'no-drag' } },
+    btn('minus', () => window.bridge.winControls.minimize(), '最小化'),
+    btn(maximized ? 'restore' : 'maximize', () => window.bridge.winControls.toggleMaximize(), maximized ? '还原' : '最大化'),
+    btn('x', () => window.bridge.winControls.close(), '关闭')
+  );
+}
