@@ -683,8 +683,9 @@ function PropsModal({fileId,onClose}){
   const[coverBig,setCoverBig]=useState(false);
   useEffect(()=>{
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setData(r.data);});
-    // Try loading cover art
-    fetch(`/api/files/${fileId}/cover`).then(r=>{if(r.ok)setCoverUrl(`/api/files/${fileId}/cover`);}).catch(()=>{});
+    // Try loading cover art（v2：自定义协议，同源 musicdedup://app/cover/<id>）
+    const coverSrc=`musicdedup://app/cover/${fileId}`;
+    fetch(coverSrc).then(r=>{if(r.ok)setCoverUrl(coverSrc);}).catch(()=>{});
   },[fileId]);
   if(!data)return e(Modal,{title:'文件属性',onClose},e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:24}})));
   // Two independent fingerprints: spectral (built-in, for duplicate matching)

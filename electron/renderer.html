@@ -46,7 +46,7 @@
   const setStatus = (html, cls = '') => { const el = $('#status'); el.innerHTML = html; el.className = cls; };
 
   async function boot() {
-    const [results, samples] = await Promise.all([window.api.verify(), window.api.samples()]);
+    const [results, samples] = await Promise.all([window.bridge.verify(), window.bridge.samples()]);
 
     const tbody = $('#result-table tbody');
     for (const r of results) {
@@ -62,7 +62,9 @@
     if (!target) { setStatus('没有可用的测试样本（.p0-tmp/samples 为空）', 'bad'); return; }
 
     // ── 自定义协议播放器 ──
-    const src = 'musicdedup://stream/' + encodeURIComponent(target.path);
+    // 路径用正斜杠编码：自定义 scheme 的 URL 解析器会剥离反斜杠（%5C），
+    // 主进程 handleStream 负责换回平台分隔符。
+    const src = 'musicdedup://stream/' + encodeURIComponent(target.path.replace(/\\/g, '/'));
     const area = $('#player-area');
     area.innerHTML = `<p class="sub">样本：${target.kind} — <span class="detail">${target.path}</span></p>`;
 
@@ -76,7 +78,7 @@
     const report = (pass, detail) => {
       if (reported) return;
       reported = true;
-      window.api.streamResult({ pass, detail });
+      window.bridge.streamResult({ pass, detail });
     };
 
     // 自动自测：loadedmetadata 后验证 duration 有限（= Range 生效）→ 跳中段 → 验证 seek 位置

@@ -1,14 +1,16 @@
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
-const APP_VERSION='1.15.0';
+const APP_VERSION='2.0.0-alpha.2';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
+// v2（P2）：经 preload 暴露的 window.bridge.request 走 IPC（electron/ipc/index.js
+// 路由表），不再 fetch HTTP。调用签名与 v1 的 fetch 封装保持一致，业务代码零改动。
 const api={
-  get: u=>fetch(u).then(r=>r.json()),
-  post:(u,b={})=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json()),
-  put: (u,b={})=>fetch(u,{method:'PUT', headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json()),
-  del: u=>fetch(u,{method:'DELETE'}).then(r=>r.json()),
+  get: u=>window.bridge.request('GET', u),
+  post:(u,b={})=>window.bridge.request('POST', u, b),
+  put:(u,b={})=>window.bridge.request('PUT', u, b),
+  del: u=>window.bridge.request('DELETE', u),
 };
 
 /* ── Helpers ──────────────────────────────────────────────────────────── */
@@ -242,7 +244,7 @@ function useGlobalPlayer(){
     if(!el)return;
     clearStallTimer(); // a pending watchdog from the previous track shouldn't fire against this one
     errorRetries.current=0;
-    el.src=`/api/files/${current.id}/stream`;
+    el.src=`musicdedup://stream/${current.id}`;
     setProgress(0);
     el.play().catch(()=>{});
   },[current?.id]);
@@ -696,22 +698,23 @@ function useScanStream(onDone){
   onDoneRef.current=onDone;
 
   useEffect(()=>{
-    const es=new EventSource('/api/scan/stream');
-    es.onmessage=ev=>{
-      try{
-        const d=JSON.parse(ev.data);
-        setStatus(d);
-        if(d.message){
-          setLogs(p=>{
-            if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
-            const ty=d.level||'ok';
-            return[...p.slice(-500),{msg:d.message,ty,ts:Date.now()}];
-          });
-        }
-        if(d.type==='done')onDoneRef.current?.();
-      }catch{}
-    };
-    return()=>es.close();
+    if(!window.bridge?.onScanProgress)return;
+    // v2（P2）：SSE → IPC 事件（scan:progress）。事件 payload 与 v1 SSE 的
+    // JSON 消息同构（{phase,pct,running,message,level,type}），此消费逻辑不变。
+    const off=window.bridge.onScanProgress(d=>{
+      setStatus(d);
+      if(d.message){
+        setLogs(p=>{
+          if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
+          const ty=d.level||'ok';
+          return[...p.slice(-500),{msg:d.message,ty,ts:Date.now()}];
+        });
+      }
+      if(d.type==='done')onDoneRef.current?.();
+    });
+    // 挂载时拉一次当前状态（等价 SSE 首连的 type:'state' 事件，覆盖重载场景）
+    api.get('/api/scan/status').then(r=>{if(r.ok&&r.data)setStatus(r.data);});
+    return off;
   },[]);
 
   function addSeparator(label){
@@ -819,7 +822,8 @@ function App(){
   useEffect(()=>{
     const cur=player.current;
     if(!cur||cur.cover!==undefined)return;
-    fetch(`/api/files/${cur.id}/cover`)
+    // v2（P2）：封面走自定义协议（同源 musicdedup://app/cover/<id>，避免二进制过 IPC）
+    fetch(`musicdedup://app/cover/${cur.id}`)
       .then(r=>r.ok?r.blob():null)
       .then(blob=>{ if(blob)cur.cover=URL.createObjectURL(blob); else cur.cover=null; })
       .catch(()=>{ cur.cover=null; });

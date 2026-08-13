@@ -350,7 +350,7 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,onCrossFill,player,
   const bd=keep?'var(--green-bd)':'var(--red-bd)';
   const bg=keep?'var(--green-bg)':'var(--red-bg)';
 
-  const coverSrc=`/api/files/${track.id}/cover`;
+  const coverSrc=`musicdedup://app/cover/${track.id}`;
 
   return e('div',{style:{marginBottom:8,borderRadius:'var(--r-md)',border:`1px solid ${bd}`,background:bg,overflow:'hidden'}},
     e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 12px'}},

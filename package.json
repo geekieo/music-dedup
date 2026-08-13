@@ -1,26 +1,22 @@
 {
   "name": "musicdedup",
-  "version": "2.0.0-alpha.1",
+  "version": "2.0.0-alpha.2",
   "description": "本地重复音乐管理工具 — 纯JS声纹识别 + 智能保留策略",
   "author": "geekieo",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "node scripts/run-electron.mjs",
     "release": "node scripts/release.js",
     "electron": "node scripts/run-electron.mjs",
+    "smoke": "node scripts/run-electron.mjs --smoke",
     "p0:verify": "node scripts/run-electron.mjs --p0",
     "migrate-data": "node scripts/migrate-data.mjs",
     "build:win": "node scripts/build-win.mjs"
   },
   "dependencies": {
     "audio-decode": "^3.10.1",
-    "cors": "^2.8.5",
-    "eventsource": "^4.1.0",
-    "express": "^4.18.3",
     "fast-glob": "^3.3.2",
-    "jsdom": "^29.1.1",
     "music-metadata": "^10.5.0",
     "node-id3": "^0.2.9",
     "node-sqlite3-wasm": "0.8.57",
@@ -43,8 +39,7 @@
       "electron/**",
       "scripts/migrate-data.mjs",
       "lib/**",
-      "public/**",
-      "server.js"
+      "public/**"
     ],
     "asarUnpack": [
       "node_modules/node-sqlite3-wasm/**"

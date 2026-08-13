@@ -1,100 +1,110 @@
 // electron/main.js — v2 主进程入口
 //
-// P1（当前）：把 v1 的 Express 服务（server.js）整体内嵌进主进程，监听
-//   127.0.0.1 随机端口，窗口直接加载该地址 → 双击图标即可打开的可用客户端。
-//   数据目录一律切到 userData（%APPDATA%/MusicDedup/，见 scripts/migrate-data.mjs），
-//   首启自动从旧 data/ 搬迁，保证打开即有真实曲库。
-// P0 验证路径：P0_VERIFY=1（npm run p0:verify）时跑回归套件——验证
-//   node-sqlite3-wasm / music-metadata / 标签写入 / Goertzel 在主进程可用，
-//   并展示 musicdedup:// 流式播放自测。保留为回归工具，不在默认启动里跑。
-// 后续演进：P2 把内嵌 Express 逐路由改为 IPC（main/ipc/*.js），音频流切 musicdedup://。
-
+// P2（当前）：IPC 化 —— server.js 的 Express 路由已迁到 electron/ipc/*，
+//   应用本体（静态资源 / rules-meta / cover / stream）走 musicdedup:// 协议，
+//   HTTP 层彻底移除。数据目录一律 userData（%APPDATA%/MusicDedup/）。
+// P0 验证路径：P0_VERIFY=1（npm run p0:verify）跑回归套件 + 展示页。
+// Smoke 自测：V2_SMOKE=1（npm run smoke）——真实库加载后从主进程经 IPC 打关键
+//   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { app, BrowserWindow, ipcMain, protocol } = require('electron');
+import './bootstrap-env.js'; // 必须先于其它 import：lib/db.js 在模块加载时即解析 DB_PATH
 import path from 'path';
 import fs from 'fs';
-import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 
 import { migrateLegacyData } from '../scripts/migrate-data.mjs';
+import { registerProtocol } from './protocol.js';
+import { registerApi } from './ipc/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isP0Verify = process.env.P0_VERIFY === '1';
+const isSmoke = process.env.V2_SMOKE === '1';
 
-// P0 自测需要渲染进程无手势直接 play()；真实播放器走用户手势，此开关届时移除
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-
-// ── 自定义流媒体协议 musicdedup://（P2 音频流切换用；P1 前端仍走 HTTP Range）──
-const MIME = {
-  '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4',
-  '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.aiff': 'audio/aiff', '.opus': 'audio/ogg',
-};
+// P0 自测需要渲染进程无手势直接 play()；真实播放器走用户手势
+if (isP0Verify) app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'musicdedup', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
 ]);
-
-async function handleStreamRequest(request) {
-  const url = new URL(request.url);
-  // musicdedup://stream/<encodeURIComponent(绝对路径)>
-  const filePath = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
-  if (!fs.existsSync(filePath)) return new Response('Not found', { status: 404 });
-
-  const ext = path.extname(filePath).toLowerCase();
-  const mime = MIME[ext] || 'audio/mpeg';
-  const total = fs.statSync(filePath).size;
-
-  const range = request.headers.get('Range');
-  if (range) {
-    const m = range.match(/bytes=(\d*)-(\d*)/);
-    const start = m && m[1] ? parseInt(m[1], 10) : 0;
-    const end = m && m[2] ? parseInt(m[2], 10) : total - 1;
-    const chunkSize = end - start + 1;
-    const stream = Readable.toWeb(fs.createReadStream(filePath, { start, end }));
-    return new Response(stream, {
-      status: 206,
-      headers: {
-        'Content-Range': `bytes ${start}-${end}/${total}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': String(chunkSize),
-        'Content-Type': mime,
-      },
-    });
-  }
-  const stream = Readable.toWeb(fs.createReadStream(filePath));
-  return new Response(stream, {
-    status: 200,
-    headers: { 'Content-Length': String(total), 'Accept-Ranges': 'bytes', 'Content-Type': mime },
-  });
-}
-
-// ── userData 固定为 %APPDATA%/MusicDedup（与 migrate-data 脚本一致，dev/打包统一）─
-app.setPath('userData', path.join(app.getPath('appData'), 'MusicDedup'));
 
 // ── P0 回归路径：渲染进程可用的测试样本（只读信息，播放走 musicdedup://）──────
 function getSampleFiles() {
   const base = path.join(__dirname, '..', '.p0-tmp', 'samples');
   return [
     { kind: 'FLAC', path: path.join(base, 'BarroomBallet.flac') },
-    { kind: 'M4A',  path: path.join(base, 'sample.m4a') },
-    { kind: 'MP3',  path: path.join(base, 'sample.mp3') },
+    { kind: 'M4A', path: path.join(base, 'sample.m4a') },
+    { kind: 'MP3', path: path.join(base, 'sample.mp3') },
   ].filter((s) => fs.existsSync(s.path));
 }
 
-// ── P1 客户端路径 ──────────────────────────────────────────────────────────
-let _server = null;
+// ── P2 客户端路径 ─────────────────────────────────────────────────────────
+let mainWindow = null;
+function sendScan(data) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
+}
 
-// 幂等：注入 DB_PATH/HOST/PORT 后动态 import server.js，等待监听就绪。
-// 必须动态 import——ESM 静态 import 先于 env 注入执行，而 server.js 模块顶层
-// 即会打开 DB（getDB）并 app.listen，env 必须在加载前就位。
-async function ensureServer() {
-  if (_server) return _server;
+function createClientWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 840,
+    title: 'MusicDedup',
+    autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
+  });
+  if (!app.isPackaged) {
+    // dev 下把渲染进程 console 转发到主进程 stdout，便于 smoke/调试定位
+    win.webContents.on('console-message', (event) => console.log(`[renderer] ${event.message}`));
+  }
+  return win;
+}
 
-  process.env.DB_PATH = path.join(app.getPath('userData'), 'musicdedup.db');
-  // 不传 sourceDir，用 migrate-data 的脚本相对默认（仓库 data/）——app.getAppPath()
-  // 在 `electron electron/main.js` 启动方式下解析到的不是仓库根，不可依赖；打包后
-  // 该路径在 asar 内不存在，自动 no-op。
+// Smoke：真实库 + preload + ipc + lib 全链路自测（V2_SMOKE=1 时运行）
+async function runSmoke(win) {
+  const script = `(async () => {
+    const req = (m, u, b) => window.bridge.request(m, u, b)
+      .then(x => ({ m, u, ok: !!(x && x.ok), err: (x && x.error) || null }))
+      .catch(e => ({ m, u, ok: false, err: String(e) }));
+    const out = [];
+    out.push(await req('GET', '/api/stats'));
+    out.push(await req('GET', '/api/settings'));
+    const lib = await window.bridge.request('GET', '/api/library?page=1&limit=2');
+    out.push({ m: 'GET', u: '/api/library?page=1&limit=2', ok: !!(lib && lib.ok && lib.data && lib.data.rows && lib.data.rows.length), err: (lib && lib.error) || null });
+    const fid = lib && lib.ok && lib.data && lib.data.rows && lib.data.rows.length ? lib.data.rows[0].id : null;
+    if (fid) {
+      // 用 <audio>（真实播放路径）验证 id→path 解析 + 协议 Range —— 自定义协议间
+      // fetch 被 Chromium 禁止（媒体元素豁免 CORS），不能用 fetch 测
+      const st = await new Promise((res) => {
+        const audio = document.createElement('audio');
+        const t = setTimeout(() => { audio.src = ''; res('TIMEOUT'); }, 6000);
+        audio.onloadedmetadata = () => { clearTimeout(t); res('OK'); };
+        audio.onerror = () => { clearTimeout(t); res('ERR:' + (audio.error && audio.error.code)); };
+        audio.src = 'musicdedup://stream/' + fid;
+        audio.load();
+      });
+      out.push({ m: 'AUDIO', u: 'musicdedup://stream/' + fid, ok: st === 'OK', err: st });
+    } else {
+      out.push({ m: 'AUDIO', u: 'musicdedup://stream/<id>', ok: false, err: 'no file id from library' });
+    }
+    out.push({ m: 'JS', u: '/rules-meta.js globals', ok: typeof GROUP_TAG_LABELS !== 'undefined' && typeof computeScrapeMatch === 'function', err: null });
+    out.push({ m: 'UI', u: 'React app rendered', ok: document.body.innerText.includes('MusicDedup') && !!document.querySelector('button'), err: null });
+    out.push(await req('GET', '/api/duplicates'));
+    out.push(await req('GET', '/api/scan/status'));
+    out.push(await req('GET', '/api/retention-list'));
+    return JSON.stringify(out);
+  })()`;
+  const res = await win.webContents.executeJavaScript(script);
+  const list = JSON.parse(res);
+  const failed = list.filter((r) => !r.ok);
+  for (const r of list) console.log(`[v2-smoke] ${r.ok ? 'PASS' : 'FAIL'} ${r.m} ${r.u}${r.err ? ' — ' + r.err : ''}`);
+  console.log(`[v2-smoke] ${list.length - failed.length}/${list.length} 通过`);
+  app.exit(failed.length ? 1 : 0);
+}
+
+// ── 启动 ──────────────────────────────────────────────────────────────────
+app.whenReady().then(async () => {
+  // 数据迁移（幂等）：首启从旧 data/ 搬迁，绝不覆盖已存在库
   const mig = migrateLegacyData({ targetDb: process.env.DB_PATH });
   if (mig.migrated) console.log(`[v2] 已从旧 data/ 搬迁数据库 → ${mig.target}`);
   else if (mig.reason === 'target-exists')
@@ -103,34 +113,11 @@ async function ensureServer() {
     console.log(`[v2] 无旧 data/ 库，沿用已存在库: ${process.env.DB_PATH}`);
   else console.log(`[v2] 无旧 data/ 库，使用全新库: ${process.env.DB_PATH}`);
 
-  process.env.HOST = '127.0.0.1';
-  process.env.PORT = '0';
-
-  const { server } = await import('../server.js');
-  await new Promise((r) => server.once('listening', r));
-  _server = server;
-  return server;
-}
-
-function createClientWindow() {
-  const port = _server.address().port;
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    title: 'MusicDedup',
-    autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true },
-  });
-  win.loadURL(`http://127.0.0.1:${port}`);
-  return win;
-}
-
-// ── 启动 ──────────────────────────────────────────────────────────────────
-app.whenReady().then(async () => {
-  protocol.handle('musicdedup', handleStreamRequest);
+  // 协议处理（先于任何窗口加载）
+  registerProtocol();
 
   if (isP0Verify) {
-    // P0 回归套件：主进程跑验证 + P0 渲染页展示（原 P0 壳保留）
+    // P0 回归套件：主进程跑验证 + P0 渲染页展示
     const { runVerification } = await import('./p0/verify.js');
     const cachedVerify = await runVerification();
     for (const r of cachedVerify) {
@@ -161,14 +148,19 @@ app.whenReady().then(async () => {
     return;
   }
 
-  // 默认：P1 客户端（内嵌 Express + 真实 UI）
-  await ensureServer();
-  console.log(`[v2-P1] 内嵌服务就绪: http://127.0.0.1:${_server.address().port}`);
-  createClientWindow();
+  // 默认：P2 客户端（IPC + 自定义协议，无 HTTP）
+  mainWindow = createClientWindow();
+  registerApi({ send: sendScan });
+  await mainWindow.loadURL('musicdedup://app/index.html');
+  console.log('[v2-P2] 客户端就绪（IPC 化，无 HTTP 层）');
+
+  if (isSmoke) await runSmoke(mainWindow);
 });
 
 app.on('activate', () => {
-  if (!isP0Verify && BrowserWindow.getAllWindows().length === 0) createClientWindow();
+  if (!isP0Verify && BrowserWindow.getAllWindows().length === 0) {
+    mainWindow = createClientWindow();
+  }
 });
 
 app.on('window-all-closed', () => {
