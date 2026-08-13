@@ -1,7 +1,10 @@
 // electron/ipc/scrape.js — 刮削域：scrape-single / 双源候选 / 选择落库 / scraped CRUD / exiftool / AcoustID key 校验
 // 注：scrape-single 与 scraped(GET) 原本各有一份 ~30 行 overallTier 计算（server.js 两处重复），
 // P2 迁移时抽出共享 helper overallTierOf()，行为不变（v2-arch-review 步骤 5 决策 9 顺带项）。
-import { getDB, getAllSettings, getFileById, getScrapedMeta, upsertScrapedMeta } from '../../lib/db.js';
+import { getDB } from '../../lib/db/index.js';
+import { getAllSettings } from '../../lib/db/settings.js';
+import { getFileById } from '../../lib/db/files.js';
+import { getScrapedMeta, upsertScrapedMeta } from '../../lib/db/scrape.js';
 import { getExiftoolStatus } from '../../lib/tagger.js';
 import { scrapeSingleFile, getMbCandidates, getAcoustidCandidates } from '../../lib/scraper.js';
 import { computeScrapeTier, mergeDualScrapeShape } from '../../lib/tier.js';

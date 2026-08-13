@@ -1,6 +1,7 @@
 // electron/ipc/tags.js — 标签域：write-tags / snapshots（写入历史 + 回滚）
 // 安全写回（三阶段：快照 → 写入 → 验证）逻辑在 lib/tagger.js。
-import { getDB, getTagSnapshots, getWriteHistory } from '../../lib/db.js';
+import { getDB } from '../../lib/db/index.js';
+import { getTagSnapshots, getWriteHistory } from '../../lib/db/tags.js';
 import { writeTagsWithSnapshot, revertFromWriteHistory } from '../../lib/tagger.js';
 
 const db = getDB();

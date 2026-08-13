@@ -5,7 +5,8 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { shell } = require('electron');
 
-import { getDB, getFileById } from '../../lib/db.js';
+import { getDB } from '../../lib/db/index.js';
+import { getFileById } from '../../lib/db/files.js';
 import { renameFile, readTagsFromFile } from '../../lib/tagger.js';
 import { existsSync } from 'fs';
 

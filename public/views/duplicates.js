@@ -677,13 +677,15 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
     // Filter bar: matching-method tags (how the group was discovered)
     e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18,justifyContent:'space-between'}},
-      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
-      e('span',{style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-        filterTags.map(tag=>{
-          const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
-          const active=tagFilter.has(tag);
-          return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
-        }),
+      e('span',{style:{display:'flex',alignItems:'center',gap:8}},
+        e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
+        e('span',{style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+          filterTags.map(tag=>{
+            const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
+            const active=tagFilter.has(tag);
+            return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
+          }),
+        ),
       ),
       e('button',{
         onClick:()=>setShowTagLegend(true),

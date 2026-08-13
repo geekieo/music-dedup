@@ -15,8 +15,11 @@ import path from 'path';
 import fs from 'fs';
 import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
-import { getDB, getFileById } from '../lib/db.js';
+import { getDB } from '../lib/db/index.js';
+import { getFileById } from '../lib/db/files.js';
 import * as rules from '../lib/rules.js';
+import * as rulesUi from '../lib/rules-ui.js';
+import { TIER_COLOR, TIER_LABEL, TIER_DESC } from '../lib/tier.js';
 import { parseFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,32 +35,34 @@ const STATIC_MIME = {
   '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2',
 };
 
-// /rules-meta.js 生成（自 server.js 原样移植）—— DIMENSION_DEFS.cell 是函数不能过 JSON
+// /rules-meta.js 生成（自 server.js 原样移植）—— DIMENSION_DEFS.cell 是函数不能过 JSON。
+// 展示常量（GROUP_TAG_*/PICK_TAG_COLOR/DIMENSION_*/TIER_*）来自 lib/rules-ui.js，
+// 核心函数（mergePickOrder/computeScrapeMatch/DEFAULT_*）来自 lib/rules.js。
 function rulesMetaJs() {
-  const dimItems = rules.DIMENSION_DEFS.map((d) =>
+  const dimItems = rulesUi.DIMENSION_DEFS.map((d) =>
     `{key:${JSON.stringify(d.key)},label:${JSON.stringify(d.label)},icon:${JSON.stringify(d.icon)},cell:${d.cell.toString()}}`
   ).join(',');
   return [
-    `const GROUP_TAG_LABELS=${JSON.stringify(rules.GROUP_TAG_LABELS)};`,
-    `const GROUP_TAG_DESCRIPTIONS=${JSON.stringify(rules.GROUP_TAG_DESCRIPTIONS)};`,
-    `const GROUP_TAG_COLORS=${JSON.stringify(rules.GROUP_TAG_COLORS)};`,
+    `const GROUP_TAG_LABELS=${JSON.stringify(rulesUi.GROUP_TAG_LABELS)};`,
+    `const GROUP_TAG_DESCRIPTIONS=${JSON.stringify(rulesUi.GROUP_TAG_DESCRIPTIONS)};`,
+    `const GROUP_TAG_COLORS=${JSON.stringify(rulesUi.GROUP_TAG_COLORS)};`,
     `const PICK_TAG_LABEL=${JSON.stringify(rules.PICK_TAG_LABEL)};`,
-    `const PICK_TAG_COLOR=${JSON.stringify(rules.PICK_TAG_COLOR)};`,
+    `const PICK_TAG_COLOR=${JSON.stringify(rulesUi.PICK_TAG_COLOR)};`,
     `const DEFAULT_PICK_TAG_ORDER=${JSON.stringify(rules.DEFAULT_PICK_TAG_ORDER)};`,
     `const DEFAULT_PICK=DEFAULT_PICK_TAG_ORDER;`,
     `const MATCH_METHOD_TAGS=new Set(${JSON.stringify([...rules.MATCHING_METHOD_KEYS])});`,
-    `const MATCH_METHOD_TAGS_ARRAY=${JSON.stringify(rules.MATCH_METHOD_TAGS_ARRAY)};`,
-    `const CHARACTERISTIC_TAGS=new Set(${JSON.stringify(rules.CHARACTERISTIC_TAGS_ARRAY)});`,
-    `const CHARACTERISTIC_TAGS_ARRAY=${JSON.stringify(rules.CHARACTERISTIC_TAGS_ARRAY)};`,
-    `const EXCLUSIVE_TAG_GROUPS=${JSON.stringify(rules.EXCLUSIVE_TAG_GROUPS)};`,
-    `const RTYPE_LABEL=${JSON.stringify(rules.RTYPE_LABEL)};`,
+    `const MATCH_METHOD_TAGS_ARRAY=${JSON.stringify(rulesUi.MATCH_METHOD_TAGS_ARRAY)};`,
+    `const CHARACTERISTIC_TAGS=new Set(${JSON.stringify(rulesUi.CHARACTERISTIC_TAGS_ARRAY)});`,
+    `const CHARACTERISTIC_TAGS_ARRAY=${JSON.stringify(rulesUi.CHARACTERISTIC_TAGS_ARRAY)};`,
+    `const EXCLUSIVE_TAG_GROUPS=${JSON.stringify(rulesUi.EXCLUSIVE_TAG_GROUPS)};`,
+    `const RTYPE_LABEL=${JSON.stringify(rulesUi.RTYPE_LABEL)};`,
     `const DIMENSION_COLUMNS=[${dimItems}];`,
-    `const DIMENSION_INFO=${JSON.stringify(rules.DIMENSION_INFO)};`,
+    `const DIMENSION_INFO=${JSON.stringify(rulesUi.DIMENSION_INFO)};`,
     `const mergePickOrder=${rules.mergePickOrder.toString()};`,
     `const DEFAULT_Q=${JSON.stringify(rules.DEFAULT_TIER_ORDER)};`,
-    `const TIER_COLOR=${JSON.stringify(rules.TIER_COLOR)};`,
-    `const TIER_LABEL=${JSON.stringify(rules.TIER_LABEL)};`,
-    `const TIER_DESC=${JSON.stringify(rules.TIER_DESC)};`,
+    `const TIER_COLOR=${JSON.stringify(TIER_COLOR)};`,
+    `const TIER_LABEL=${JSON.stringify(TIER_LABEL)};`,
+    `const TIER_DESC=${JSON.stringify(TIER_DESC)};`,
     `const computeScrapeMatch=${rules.computeScrapeMatch.toString()};`,
   ].join('\n');
 }

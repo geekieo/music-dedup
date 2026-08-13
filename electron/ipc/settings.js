@@ -6,7 +6,8 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { dialog } = require('electron');
 
-import { getDB, getAllSettings, setSetting } from '../../lib/db.js';
+import { getDB } from '../../lib/db/index.js';
+import { getAllSettings, setSetting } from '../../lib/db/settings.js';
 import { detectFpcalc, resetDetection } from '../../lib/chromaprint-bridge.js';
 
 const db = getDB();

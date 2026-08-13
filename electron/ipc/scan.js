@@ -3,7 +3,9 @@
 // SSE 广播替换为 IPC 事件：broadcast() 通过 setSend() 注入的 webContents 发送
 // 'scan:progress'（v2-arch-review 步骤 5 决策 4）。Electron 依赖注入使本模块可测。
 // scan/start 保持 v1 语义：handler 立即返回 {ok:true}，8 步流水线异步执行，绝不 await。
-import { getDB, getAllSettings, forceStripLaneTags } from '../../lib/db.js';
+import { getDB } from '../../lib/db/index.js';
+import { getAllSettings } from '../../lib/db/settings.js';
+import { forceStripLaneTags } from '../../lib/db/groups.js';
 import { runEnumerate, runMetadata, runFingerprint } from '../../lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from '../../lib/matcher.js';
 import { runScrape } from '../../lib/scraper.js';

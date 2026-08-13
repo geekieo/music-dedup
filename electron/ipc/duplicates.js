@@ -1,8 +1,11 @@
 // electron/ipc/duplicates.js — 重复组域：列表/详情 / resolve / unresolve / purge / trash / keep / retention-list
 // 共享 helper（trashFile / computeKeepSet / purgeGroupFiles / LRC_EXTS）原在 server.js，
 // 唯一消费者都在本域，随迁移单点归属（v2-arch-review 步骤 5 决策 5）。
-import { getDB, getAllSettings, getGroups, getGroupDetail, resolveGroup,
-  addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds, getFileById } from '../../lib/db.js';
+import { getDB } from '../../lib/db/index.js';
+import { getAllSettings } from '../../lib/db/settings.js';
+import { getFileById } from '../../lib/db/files.js';
+import { getGroups, getGroupDetail, resolveGroup } from '../../lib/db/groups.js';
+import { addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds } from '../../lib/db/retention.js';
 import { tagTracks } from '../../lib/rules.js';
 import path from 'path';
 import { existsSync, renameSync, unlinkSync } from 'fs';

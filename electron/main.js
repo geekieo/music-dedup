@@ -71,6 +71,8 @@ async function runSmoke(win) {
     out.push(await req('GET', '/api/settings'));
     const lib = await window.bridge.request('GET', '/api/library?page=1&limit=2');
     out.push({ m: 'GET', u: '/api/library?page=1&limit=2', ok: !!(lib && lib.ok && lib.data && lib.data.rows && lib.data.rows.length), err: (lib && lib.error) || null });
+    const libTier = await window.bridge.request('GET', '/api/library?sort=scrape_tier&limit=5');
+    out.push({ m: 'GET', u: '/api/library?sort=scrape_tier&limit=5', ok: !!(libTier && libTier.ok && libTier.data && Array.isArray(libTier.data.rows)), err: (libTier && libTier.error) || null });
     const fid = lib && lib.ok && lib.data && lib.data.rows && lib.data.rows.length ? lib.data.rows[0].id : null;
     if (fid) {
       // 用 <audio>（真实播放路径）验证 id→path 解析 + 协议 Range —— 自定义协议间
