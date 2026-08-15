@@ -44,7 +44,8 @@
       "assets/**"
     ],
     "asarUnpack": [
-      "node_modules/node-sqlite3-wasm/**"
+      "node_modules/node-sqlite3-wasm/**",
+      "electron/fingerprint-worker.js"
     ],
     "extraResources": [
       {

@@ -268,7 +268,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten}){
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -414,22 +414,25 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,dirChanged,onMatchAf
     e('div',{'data-hint-boundary':'',style:{display:'flex',flexDirection:'column',gap:14,paddingBottom:14}},
 
       // Unified prompt layout for "设置已修改，需要重新扫描" — jumps to 扫描 page.
-      needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',justifyContent:'space-between'}},
+      needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)'}},'频谱声纹阈值 / 时长容差 / 音质优先级 / 保留优先级 已修改，尚未重新应用到现有重复组'),
-        e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配')
+        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1}},'频谱声纹阈值 / 时长容差 / 音质优先级 / 保留优先级 已修改，尚未重新应用到现有重复组'),
+        e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配'),
+        e('button',{onClick:()=>setNeedsReapply(false),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
       ),
 
-      dirChanged&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',justifyContent:'space-between'}},
+      dirChanged&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)'}},'音乐目录已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）'),
-        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:onEnumOnly},scanRunning?'扫描进行中...':'立即更新音乐库')
+        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1}},'音乐目录已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）'),
+        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:onEnumOnly},scanRunning?'扫描进行中...':'立即更新音乐库'),
+        e('button',{onClick:onDismissDirChanged,title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
       ),
 
-      needsScrapeReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',justifyContent:'space-between'}},
+      needsScrapeReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
         Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)'}},'AcoustID Key 已验证，建议重新执行「刮削匹配」以应用声纹查询'),
-        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:()=>{onScrapeReapply?.();setNeedsScrapeReapply(false);}},scanRunning?'扫描进行中...':'立即刮削匹配')
+        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1}},'AcoustID Key 已验证，建议重新执行「刮削匹配」以应用声纹查询'),
+        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:()=>{onScrapeReapply?.();setNeedsScrapeReapply(false);}},scanRunning?'扫描进行中...':'立即刮削匹配'),
+        e('button',{onClick:()=>setNeedsScrapeReapply(false),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
       ),
 
       e(Card,{id:'sec-dirs'},

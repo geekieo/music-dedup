@@ -9,6 +9,7 @@ import { forceStripLaneTags } from '../../lib/db/groups.js';
 import { runEnumerate, runMetadata, runFingerprint } from '../../lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from '../../lib/matcher.js';
 import { runScrape } from '../../lib/scraper.js';
+import { startFpWorker } from '../fp-worker.js';
 
 const db = getDB();
 
@@ -25,7 +26,12 @@ async function waitIfPaused() {
 }
 
 function broadcast(data) {
-  Object.assign(scanState, data);
+  // 关键：type 不能并入 scanState —— broadcast({type:'done', ...scanState}) 时若
+  // scanState 已带 type:'progress'（被 Object.assign 污染），会把 done 覆盖成 progress，
+  // 渲染进程的 onDone / 主进程 sendScan 的 scanRunning=false 全部失效（P5 联调复现：
+  // "扫描后重复组不刷新""关闭按钮始终最小化到托盘"同源）。type 仅走事件载荷。
+  const { type, ...rest } = data;
+  Object.assign(scanState, rest);
   send({ ...data });
 }
 
@@ -72,6 +78,9 @@ async function runScanPipeline({ dirs, exclude, threads, threshold, durationTole
   const pause = waitIfPaused;
   let stepWeights = {}; // 延迟到 try 内计算：若抛错可走 catch→finally 广播 done，不卡 running 态
   let cumWeight = 0;
+  // P5：指纹阶段委派 worker（audio-decode 同步 CPU 大户，主进程跑会阻塞事件循环导致
+  // 窗口"未响应"）。仅当本轮含 fp 步骤才创建；finally 里 terminate。
+  let fpWorker = null;
   function wrapProg(stepName) {
     const w = stepWeights[stepName] || 0;
     const startWeight = cumWeight;
@@ -103,7 +112,8 @@ async function runScanPipeline({ dirs, exclude, threads, threshold, durationTole
     }
     // 步骤4: 提取声纹
     if (steps.includes('fp') && !abort()) {
-      await runFingerprint(db, { threads, smartScan: force ? false : smartScan, fpcalcPath, onProgress: wrapProg('fp'), onAbort: abort, onPause: pause });
+      if (!fpWorker) fpWorker = startFpWorker();
+      await runFingerprint(db, { threads, smartScan: force ? false : smartScan, fpcalcPath, fpCompute: fpWorker.compute, onProgress: wrapProg('fp'), onAbort: abort, onPause: pause });
       advanceWeight('fp');
     }
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
@@ -128,6 +138,7 @@ async function runScanPipeline({ dirs, exclude, threads, threshold, durationTole
   } catch (e) {
     prog({ phase: 'error', pct: 0, level: 'err', message: `失败: ${e.message}` });
   } finally {
+    if (fpWorker) { fpWorker.terminate(); fpWorker = null; }
     scanState.running = false;
     scanState.paused = false;
     broadcast({ type: 'done', ...scanState });

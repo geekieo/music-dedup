@@ -17,9 +17,9 @@ import { fileURLToPath } from 'url';
 // Windows 通知/任务栏需要 AppUserModelId（打包后 appId 已在 build 配置）
 app.setAppUserModelId('com.geekieo.musicdedup');
 
-import { migrateLegacyData } from '../scripts/migrate-data.mjs';
-import { registerProtocol } from './protocol.js';
-import { registerApi } from './ipc/index.js';
+import { runMigrationUX } from './migration.js';
+// protocol.js / ipc/index.js 在模块级即 getDB()（打开/创建目标库）—— 必须在迁移决策
+// 之后才动态 import（见 whenReady），否则首启迁移会被"先建出的空目标库"静默跳过。
 import { getDB } from '../lib/db/index.js';
 import { getSetting, setSetting } from '../lib/db/settings.js';
 
@@ -45,7 +45,6 @@ function getSampleFiles() {
 }
 
 // ── P4 客户端路径 ─────────────────────────────────────────────────────────
-const db = getDB();
 let mainWindow = null;
 let tray = null;
 // P4 关闭行为特殊化：空闲关窗=正常退出；扫描等长任务进行中关窗=最小化到托盘（不中断）。
@@ -62,6 +61,7 @@ function sendScan(data) {
       new Notification({
         title: data.abortFlag ? 'MusicDedup 扫描已中止' : 'MusicDedup 扫描完成',
         body: data.abortFlag ? '扫描已被中止。' : '全部所选步骤已完成。',
+        icon: appIcon(),
       }).show();
     } catch (e) { /* 通知失败不阻塞 */ }
   }
@@ -112,11 +112,23 @@ function applyWindowIcon(dataUrl) {
   }
 }
 
+// 通知用应用图标（Windows toast 小图标）：Electron Notification 的 icon 选项在
+// Windows 上生效（否则走 AUMID 快捷方式解析，dev 下 electron.exe 会退化成默认图标）。
+// 用 assets/icon.ico（dev 仓库 / 打包 asar 内都存在，build 时由 npm run icons 生成）。
+function appIcon() {
+  try {
+    const p = path.join(__dirname, '..', 'assets', 'icon.ico');
+    if (!fs.existsSync(p)) return null;
+    return p;
+  } catch { return null; }
+}
+
 function createClientWindow() {
   const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
-  // 窗口状态记忆（存 settings 表，计划 P4）：恢复上次尺寸/位置/最大化
-  const saved = getSetting(db, 'window_state', null) || {};
+  // 窗口状态记忆（存 settings 表，计划 P4）：恢复上次尺寸/位置/最大化。
+  // 惰性 getDB()：窗口只在迁移决策（whenReady）后创建，此刻库必已就绪。
+  const saved = getSetting(getDB(), 'window_state', null) || {};
   const win = new BrowserWindow({
     width: saved.width || 1280,
     height: saved.height || 840,
@@ -138,7 +150,7 @@ function createClientWindow() {
   // 关闭/最大化时记录窗口状态（最大化存 normal bounds + 标记，恢复时还原）
   win.on('close', (e) => {
     const b = win.getNormalBounds();
-    setSetting(db, 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() });
+    setSetting(getDB(), 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() });
     // 扫描进行中关窗 → 最小化到托盘（不中断扫描），并通知用户去向；
     // 托盘「退出」置 forceQuit 后走正常退出
     if (!forceQuit && scanRunning) {
@@ -150,6 +162,7 @@ function createClientWindow() {
           new Notification({
             title: 'MusicDedup 扫描进行中',
             body: '已最小化到托盘，扫描继续后台运行。恢复窗口请点击托盘图标；退出请用托盘菜单。',
+            icon: appIcon(),
           }).show();
         } catch (err) { /* 通知失败不阻塞 */ }
       }
@@ -239,8 +252,7 @@ async function runSmoke(win) {
 // ── 启动 ──────────────────────────────────────────────────────────────────
 // 单实例锁（防重复打开 → SQLite 并发写冲突，计划 §七.2）：第二个实例直接退出，
 // 并把已存在的窗口聚焦到前台。P0/smoke 测试模式不抢锁（smoke 只读，可与客户端共存）。
-const isClientMode = !isP0Verify && !isSmoke;
-if (isClientMode && !app.requestSingleInstanceLock()) {
+const isClientMode = !isP0Verify && !isSmoke;if (isClientMode && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   if (isClientMode) {
@@ -253,16 +265,25 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
   }
 
   app.whenReady().then(async () => {
-    // 数据迁移（幂等）：首启从旧 data/ 搬迁，绝不覆盖已存在库
-    const mig = migrateLegacyData({ targetDb: process.env.DB_PATH });
-    if (mig.migrated) console.log(`[v2] 已从旧 data/ 搬迁数据库 → ${mig.target}`);
-    else if (mig.reason === 'target-exists')
-      console.log(`[v2] 数据库已存在，跳过搬迁: ${process.env.DB_PATH}`);
-    else if (fs.existsSync(process.env.DB_PATH))
-      console.log(`[v2] 无旧 data/ 库，沿用已存在库: ${process.env.DB_PATH}`);
-    else console.log(`[v2] 无旧 data/ 库，使用全新库: ${process.env.DB_PATH}`);
+    // ── P5 数据迁移：决策先于任何 DB 打开 ────────────────────────────────
+    // protocol.js 与 ipc/*.js 在模块级即 getDB()（打开/创建目标库），必须等迁移
+    // 决策后才动态 import——否则"先建出的空目标库"会让迁移被 target-exists 静默跳过
+    // （P2 引入的排序回归，P5 修复）。P0 为 harness 样本专用，不迁移。
+    let mig = null;
+    if (!isP0Verify) {
+      mig = await runMigrationUX({ interactive: isClientMode });
+      if (mig.migrated) console.log(`[v2] 已迁移旧数据 → ${mig.target}`);
+      else if (mig.reason === 'target-exists')
+        console.log(`[v2] 数据库已存在，跳过迁移: ${process.env.DB_PATH}`);
+      else if (mig.reason === 'skipped') console.log('[v2] 用户选择全新开始（未迁移旧数据）');
+      else if (mig.reason === 'no-legacy-source') console.log('[v2] 未检测到旧数据，使用全新库');
+      else if (mig.reason === 'copy-failed')
+        console.error(`[v2] 迁移失败（已回滚目标，可重试）：${mig.error}`);
+      else console.log(`[v2] 未迁移（${mig.reason}）`);
+    }
 
-    // 协议处理（先于任何窗口加载）
+    // 协议处理（先于任何窗口加载；protocol.js 动态 import 才打开目标库——已在迁移后）
+    const { registerProtocol } = await import('./protocol.js');
     registerProtocol();
 
     if (isP0Verify) {
@@ -298,6 +319,8 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
     }
 
     // 默认：客户端（IPC + 自定义协议，无 HTTP）
+    // ipc/index.js 在模块级即 getDB()，动态 import 放在迁移决策之后（见上方注释）
+    const { registerApi } = await import('./ipc/index.js');
     mainWindow = createClientWindow();
     registerApi({ send: sendScan });
     registerWindowControls();

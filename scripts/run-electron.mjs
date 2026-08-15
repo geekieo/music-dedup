@@ -9,6 +9,9 @@
 //
 // 参数：--p0 → P0 验证模式（主进程跑回归套件 + P0 渲染页），对应 npm run p0:verify。
 //       --smoke → IPC 链路自测（真实库加载后打关键接口并退出），对应 npm run smoke。
+//       --userdata <dir> → 重定向 userData（MUSICDEDUP_USERDATA），隔离测试用
+//           （bootstrap-env 的 app.getPath('appData') 不受 APPDATA 环境变量影响）。
+//       --migrate <yes|no> → 首启迁移弹窗自动作答（V2_MIGRATE），无头验证用。
 // 不用命令行内嵌环境变量赋值（Windows cmd 不兼容），改为在子进程 env 里注入。
 
 import { spawn } from 'child_process';
@@ -23,14 +26,24 @@ if ('ELECTRON_RUN_AS_NODE' in process.env) {
   console.log('[electron] 检测到 ELECTRON_RUN_AS_NODE 已清除（避免 electron.exe 退化为纯 Node）');
 }
 
-const args = ['electron/main.js', ...process.argv.slice(2)];
+const argv = process.argv.slice(2);
+// 兼容 --name value 与 --name=value 两种写法
+const opt = (name) => {
+  const hit = argv.find((a) => a === name || a.startsWith(name + '='));
+  if (!hit) return null;
+  return hit === name ? argv[argv.indexOf(hit) + 1] || null : hit.slice(name.length + 1);
+};
+
+const args = ['electron/main.js', ...argv];
 const child = spawn(electronPath, args, {
   stdio: 'inherit',
   windowsHide: false,
   env: {
     ...process.env,
-    ...(process.argv.includes('--p0') ? { P0_VERIFY: '1' } : {}),
-    ...(process.argv.includes('--smoke') ? { V2_SMOKE: '1' } : {}),
+    ...(argv.includes('--p0') ? { P0_VERIFY: '1' } : {}),
+    ...(argv.includes('--smoke') ? { V2_SMOKE: '1' } : {}),
+    ...(opt('--userdata') ? { MUSICDEDUP_USERDATA: opt('--userdata') } : {}),
+    ...(opt('--migrate') ? { V2_MIGRATE: opt('--migrate') } : {}),
   },
 });
 child.on('close', (code) => process.exit(code == null ? 1 : code));
