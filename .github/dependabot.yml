@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      # music-metadata 主版本升级需单独回归验证（SECURITY.md），不自动升
+      - dependency-name: "music-metadata"
+        update-types: ["version-update:semver-major"]

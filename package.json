@@ -1,8 +1,34 @@
 {
   "name": "musicdedup",
-  "version": "2.0.0-beta.0",
+  "version": "2.0.0",
   "description": "本地重复音乐管理工具 — 纯JS声纹识别 + 智能保留策略",
-  "author": "geekieo",
+  "keywords": [
+    "music",
+    "duplicate",
+    "dedupe",
+    "audio",
+    "fingerprint",
+    "flac",
+    "mp3",
+    "m4a",
+    "chromaprint",
+    "acoustid",
+    "musicbrainz",
+    "electron"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/geekieo/music-dedup",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geekieo/music-dedup.git"
+  },
+  "bugs": {
+    "url": "https://github.com/geekieo/music-dedup/issues"
+  },
+  "author": {
+    "name": "Geekieo",
+    "url": "https://github.com/geekieo"
+  },
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -62,8 +88,18 @@
     "win": {
       "icon": "assets/icon.ico",
       "target": [
+        "nsis",
         "portable"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MusicDedup",
+      "artifactName": "MusicDedup Setup ${version}.exe",
+      "differentialPackage": false
     },
     "linux": {
       "icon": "assets/icons",

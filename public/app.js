@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2.0.0-beta.0';
+const APP_VERSION='2.0.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
 // v2（P2）：经 preload 暴露的 window.bridge.request 走 IPC（electron/ipc/index.js

@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] — 2026-08-16
+
+> 从「前端网页 + 后端 Node 服务」转型为 **Electron 桌面客户端** 的大版本。完整历程：v2.0.0-alpha.1（内嵌 Express 骨架）→ v2.0.0-beta.0（IPC 化 + 代码清理）→ v2.0.0（原生体验 + 数据迁移 + 发布）。
+
+### Added
+
+- **桌面客户端化** — Electron 单机应用，双击即用；单实例锁、系统托盘、扫描完成系统通知、窗口状态记忆
+- **无边框窗口（路线 A）** — Windows `titleBarStyle:hidden` + 原生控件悬浮（Aero Snap 免费）、macOS 交通灯避让、Linux 自绘三键；标题栏整行可拖拽
+- **扫描隔离 worker 化** — 整条 8 步扫描流水线移入独立 worker 线程，扫描时窗口其他功能全程流畅（主进程事件循环滞后 239ms → 33ms）；崩溃自动兜底广播终态
+- **扫描进度条 UI 重设计** — 单进度条 + 内联子% + 一行可关闭摘要（绿✓/红错/灰中止）
+- **并发数自适应** — 未设置时默认 `min(8, 核心数)`；新增「扫描性能」设置卡
+- **数据迁移交互式 UX** — 旧数据目录 → userData 的交互式迁移（迁移/选位置/全新开始 三选项），绝不静默覆盖；`V2_MIGRATE` 环境变量可自动作答
+- **NSIS 安装包 + 便携版双产物** — 安装器自动创建带 AUMID 的任务栏/开始菜单快捷方式
+- **打包体积瘦身** — 99M → 80.5M（locales 裁剪 + maximum 压缩 + 删除 DXC/Vulkan 软渲染/许可文本）
+
+### Changed
+
+- **移除 Express/HTTP 层** — 全部约 50 个接口改为 `ipcMain.handle` 单通道（URL 桥）+ 按域拆分 `electron/ipc/{library,files,tags,scrape,duplicates,scan,settings}.js`；SSE 进度改 IPC 事件；音频/封面走 `musicdedup://` 自定义协议直读磁盘
+- **代码清理** — `db.js` 按域拆 8 文件；`rules.js` 核心/展示两层拆分；tier 词汇收敛（绿蓝黄红单一出处）；相似度阈值收敛 `lib/constants.js`；`queryLibrary` 三件套合并；`app.js` 组件下沉 `components.js`
+- **统一图标（6 版迭代定稿）** — `assets/icon.svg` 单一源，构建期栅格化；header Logo/favicon/托盘/打包图标四处统一
+- **保留机制语义统一** — 保留名单与手动保留合并为统一「保留」，带来源标注 `smart | manual`；手动保留为级联结果的人工覆盖、不被重算冲掉
+
+### Fixed
+
+- **纯 JS M4A 标签写入写坏文件**（v1 遗留）— `buildAtom()` 覆盖 atom size 头，真实库 M4A 标签写入产出损坏 moov；已修并回归验证
+- **扫描时窗口「未响应」** — 主线程同步解码（单文件阻塞 1~2.5s）+ 匹配相似度对比（实测最大 27s）改为 worker 卸载 + 协作式让出
+- **扫描状态断链** — `broadcast` 的 `Object.assign` 把残留 `type` 并入 scanState，`done` 事件永不触发（重复组不刷新 / 关窗不退出 / 进度条不收起）
+- **迁移排序回归** — P2 把 `getDB()` 提到模块顶层，目标库在迁移决策前被创建，旧数据被静默跳过；已恢复「迁移决策先于任何 DB 打开」
+- **流式播放中文路径 TypeError** — ETag 含中文触发 ByteString 编码异常；改纯 `size-mtime`；路径型 URL 统一正斜杠编码
+- **`estimateStepWeights` 引用不存在列** — 新 schema 库扫描即 `no such column`；改正列名并把权重计算移入 try 块
+- **launch-dev.cmd 中文注释破坏启动命令** — cmd.exe 按 GBK 解析 UTF-8 批处理；重写为 ASCII 注释 + CRLF
+- **打包版扫描 worker 读 asar 依赖失败** — worker 不继承 Electron asar fs 补丁，声纹/扫描 worker 一直静默降级回主进程；`asarUnpack` 扩为 `lib/**` + `node_modules/**` + `scan-worker.js`，打包版扫描现已可用
+- **Windows 任务栏显示「Electron」** — 本机残留 `Electron.lnk` 与 AUMID 不匹配；清理并新建带 `com.geekieo.musicdedup` 的快捷方式
+- **托盘图标进系统托盘溢出区** — Windows 11 默认折叠属正常；补 `.ico` 格式
+
 ## [1.15.0] — 2026-08-03
 
 ### Added

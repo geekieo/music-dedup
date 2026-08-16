@@ -1,49 +1,77 @@
 # MusicDedup
 
-本地重复音乐管理工具 — 纯 JS 音频声纹识别 + 智能保留策略，浏览器内操作。
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-brightgreen)
 
-**环境要求：Node.js ≥ 18**
+本地重复音乐管理工具 — **纯 JS 声纹识别 + 智能保留策略**，桌面客户端（Electron）。
 
-## 快速开始
+在一张含数万首歌曲的音乐库里找出重复文件是件苦差事：同名不同专辑、同一首歌的多个音质版本、相同声纹的不同来源……MusicDedup 用**多通道匹配 + 7 级智能保留策略**帮你自动识别重复、推荐保留哪个文件，一键清理，全程离线可用。
+
+---
+
+## 特性
+
+- **桌面客户端** — Electron 单机应用，双击即用；无边框自绘标题栏、系统托盘、系统通知、窗口状态记忆、单实例锁
+- **四级匹配通道** — 音乐库更新（枚举+属性）/ 基础匹配（属性）/ 声纹匹配（频谱+CP）/ 刮削匹配（recording ID），各自独立运行、结果合并
+- **纯 JS 声纹识别** — 基于 Goertzel 算法的频谱声纹，无需任何外部二进制
+- **可选 Chromaprint** — 配置 fpcalc 后启用独立 CP 声纹比对 + AcoustID 查重
+- **双源刮削** — MusicBrainz 文本搜索 + AcoustID 声纹反查，逐字段单选、来源亲和推荐，数据独立存储互不覆盖
+- **智能保留策略** — 7 级级联（时长准确 → 音质 → 入库时间 → 专辑版 → 首发年份 → 刮削吻合 → 属性完整度），用户可手动覆盖且不被重算冲掉
+- **标签写入与回滚** — 刮削元数据写入音频标签，保留写入历史，一键还原
+- **扫描隔离** — 整条扫描流水线跑在独立 worker 线程，扫描时窗口其他功能全程流畅
+- **安全删除** — 非保留文件移入系统回收站，可撤销
+- **内嵌播放器** — 播放队列、进度拖拽、封面显示（自定义协议流式读取，不经 HTTP）
+
+---
+
+## 安装与运行
+
+### 安装包（推荐）
+
+从 [Releases](../../releases) 下载：
+
+| 产物 | 说明 |
+|---|---|
+| `MusicDedup Setup 2.0.0.exe` | NSIS 安装包，自动创建带图标的任务栏/开始菜单快捷方式 |
+| `MusicDedup 2.0.0.exe` | 便携版，解压即用，免安装 |
+
+> 未签名程序在 Windows SmartScreen 会提示"未知发布者"——选择"仍要运行"即可。数据全程在本机，无任何云同步。
+
+### 从源码运行
+
+**系统要求**：Node.js ≥ 18，Windows 10/11（macOS/Linux 代码就位，未经实机验证）
 
 ```bash
 npm install
-npm start
+npm run electron
 ```
 
-浏览器打开 **http://localhost:3456**
+> ⚠️ 国内网络需为 Electron 二进制配置镜像，见 [scripts/build-win.mjs](scripts/build-win.mjs) 头部注释。
+
+### 打包 Windows 产物
+
+```bash
+npm run build:win      # 产出 release/ 下 NSIS 安装包 + 便携版
+npm run smoke:packaged # 打包版冒烟自测
+```
+
+---
 
 ## 使用流程
 
-1. **设置** — 添加音乐库文件夹，配置 AcoustID Key（可选），调整音质优先级
-2. **扫描** — 四条独立通道按需执行：音乐库更新 → 基础匹配 → 声纹匹配 → 刮削匹配
-3. **重复组** — 按匹配方法/特征标签筛选，逐组确认保留方案，可手动覆盖
+1. **设置** — 添加音乐库文件夹，配置 AcoustID Key（可选）、音质优先级、扫描并发数
+2. **扫描** — 四条通道按需执行：音乐库更新 → 基础匹配 → 声纹匹配 → 刮削匹配，可暂停/恢复/中止
+3. **重复组** — 按匹配方法/特征标签筛选，逐组确认保留方案，可手动覆盖；比较表可刮削、可写入
 4. **处理** — 确认后非保留文件移入系统回收站，可撤销
 
-## 核心功能
+## 扫描与匹配
 
-- **纯 JS 声纹识别** — 基于 Goertzel 算法的频谱声纹，无需任何外部二进制依赖
-- **可选 Chromaprint** — 下载 fpcalc 放到项目根目录，启用独立 CP 声纹比对 + AcoustID 查重
-- **双源刮削** — MusicBrainz 文本搜索 + AcoustID 声纹反查，各自独立存储、互不覆盖
-- **四级匹配通道** — 音乐库更新（枚举+属性提取）/ 基础匹配（属性）/ 声纹匹配（频谱+CP）/ 刮削匹配（recording ID），各自独立运行、结果合并
-- **智能增量扫描** — 按文件修改时间跳过未变更文件，各阶段独立追踪处理状态
-- **智能保留策略** — 7 级级联：时长准确 → 音质 → 入库时间 → 专辑版 → 首发年份 → 刮削吻合 → 属性完整度，用户可手动覆盖
-- **可排序音质优先级** — 设置页拖拽排序音质层级，决定同组文件保留优先级
-- **标签写入与回滚** — 支持将刮削元数据写入音频文件标签，保留 30 天写入历史，可一键还原
-- **匹配标签体系** — 匹配方法标签（如何发现重复）+ 特征标签（组内文件关系），支持筛选
-- **安全删除** — 文件移入系统回收站，可撤销
-- **内嵌播放器** — 支持播放队列、进度拖拽、封面显示
-- **实时进度** — SSE 推送扫描进度，支持暂停/继续/停止
-- **CJK 繁简忽略** — 基于 opencc-js，刮削匹配时自动折叠繁简体差异
-- **文件属性查看** — 点击文件可查看完整音频属性及刮削数据对比
-- **保留名单** — 标记指定文件受保护，参与重复检测但保留决策中优先保留
-
-## 8 步扫描流程
+8 步流水线（分属四个通道，见 [扫描页](public/views/scanner.js)）：
 
 | 步骤 | 名称 | 说明 |
 |------|------|------|
 | 1 | 枚举 | 扫描目录，发现音频文件，入库 |
-| 2 | 提取属性 | 读取音频标签（标题/艺术家/专辑/时长/格式/比特率等），计算元数据完整度评分 |
+| 2 | 提取属性 | 读取标签（标题/艺术家/专辑/时长/格式/比特率等），计算完整度评分 |
 | 3 | 属性匹配 | 标题分组 → 艺术家归一化 → 时长确认，不依赖声纹 |
 | 4 | 提取声纹 | 频谱声纹（Goertzel）+ CP 声纹（fpcalc，可选） |
 | 5 | 频谱声纹匹配 | 精确声纹 → LSH 前缀分组 → 时长桶 + Hamming 相似度 |
@@ -51,170 +79,98 @@ npm start
 | 7 | 刮削 | MusicBrainz 文本搜索 + AcoustID 声纹反查，获取外部元数据 |
 | 8 | 刮削匹配 | MB / AcoustID recording ID 合并对比确认重复 |
 
-## 扫描页四个通道
+- 四条通道独立运行、结果合并；增量扫描只处理自上次成功后变更的文件
+- 声纹与刮削状态缓存在本地 SQLite，增量扫描秒级完成
+- 扫描在独立 worker 线程执行，窗口保持流畅
 
-| 通道 | 对应步骤 | 说明 |
-|------|---------|------|
-| 音乐库更新 | 步骤 1+2 | 枚举新文件 + 提取属性，入库后即可浏览曲库 |
-| 基础匹配 | 步骤 3 | 标题分组 + 元数据确认，不依赖声纹 |
-| 声纹匹配 | 步骤 4+5+6 | 声纹提取 + 频谱声纹匹配 + CP 声纹匹配 |
-| 刮削匹配 | 步骤 7+8 | 刮削 + MB/AcoustID recording ID 对比 |
+## 智能保留策略
 
-> 四条通道独立运行、结果合并。增量执行只处理自上次成功后变更的文件，全量重新执行忽略时间戳强制重跑。
+重复组检测到后自动推荐保留者，7 级级联：
+
+1. **时长准确** — 以组内精确刮削时长为参考（MB 优先），本地时长一致者优先
+2. **音质优先** — 按设置页音质优先级（默认 Hi-Res FLAC > FLAC/WAV > AIFF > M4A/AAC ≥256k > MP3 320k > … > MP3 128k）
+3. **入库更晚** — 文件创建时间越晚越优先
+4. **专辑优先** — 专辑版优先于单曲/合集版
+5. **首发专辑** — 同条件下保留发行年份最早的版本
+6. **刮削更准** — 年份/曲目号/风格与 MusicBrainz 吻合项数更多
+7. **属性最全** — 标签字段最完整
+
+手动保留是对级联结果的**人工覆盖**，不会被后续重算冲掉；UI 可区分某保留来自智能还是手动。
+
+## 刮削
+
+- **MusicBrainz**：文本搜索（标题 + 艺术家），无需 API Key；recording ID / release 列表 / 官方元数据；分级为精确或模糊匹配；限速 1 req/s
+- **AcoustID**：音频声纹反查，需免费 API Key（[acoustid.org](https://acoustid.org/) 注册）；返回 recording ID，置信度高于纯文本匹配；350ms 请求间隔，自动处理限流
+- 双源各自独立存储，MB 与 AcoustID 的 recording ID 合并对比，修复同 ID 不同来源文件无法匹配的问题
+- 刮削结果可**逐字段写入**音频标签，写入历史保留 30 天，可一键还原
 
 ## 声纹算法
 
 基于 **Goertzel 频谱声纹**（Sub-band Spectral Fingerprinting）：
 
-1. 音频解码为 PCM（支持 MP3、FLAC、M4A、OGG、WAV 等）
+1. 音频解码为 PCM（MP3、FLAC、M4A、OGG、WAV 等）
 2. 重采样至 11025 Hz 单声道
-3. Goertzel 算法计算 33 个对数均匀分布频率（300 Hz–2 kHz）的能量
-4. 5 个锚点（15%、30%、50%、65%、80% 位置）跳过低能量帧，各取 25 帧
-5. 比较相邻帧的频谱斜率变化方向 → 32 位整数
-6. ~120 个整数构成声纹
+3. Goertzel 计算 33 个对数均匀分布频率（300 Hz–2 kHz）的能量
+4. 5 个锚点跳过能量低帧，各取 25 帧
+5. 比较相邻帧频谱斜率变化方向 → 32 位整数
+6. ~120 个整数构成声纹；Hamming 距离逐位比较；解码失败自动降级为元数据伪声纹
 
-相似度：Hamming 距离逐位比较。音频解码失败时自动降级为元数据伪声纹。
+## 数据与隐私
 
-### Chromaprint（可选）
+- 全部数据存储在本机 `%APPDATA%/MusicDedup/`（SQLite + 日志），无任何云端上传
+- **首次启动自动迁移**：检测到 v1（Web 版）数据目录会交互式询问是否迁移，绝不静默覆盖
+- 删除操作一律进系统回收站，可撤销
 
-下载 [fpcalc](https://acoustid.org/chromaprint) 放到项目根目录，可启用独立的 Chromaprint 声纹比对。同一份 Chromaprint 数据也用于 AcoustID 刮削。
+## 系统托盘与窗口行为
 
-## 智能保留策略
+- 单实例锁：重复打开只聚焦已有窗口，避免数据库并发写冲突
+- 空闲时关闭窗口 = 退出；**扫描进行中关闭窗口 = 最小化到托盘**，扫描后台继续，完成后系统通知
+- 托盘「退出」为强制退出（扫描进行中时唯一的退出通道）
+- 窗口尺寸/位置/最大化状态自动记忆
 
-当检测到重复组时，系统自动推荐保留哪个文件：
+---
 
-1. **时长准确** — 以组内精确刮削时长为参考（MB 优先），本地时长一致的优先。读取的是音频本身，不受标签修改影响
-2. **音质优先** — 按设置页音质优先级排序（默认：Hi-Res FLAC > FLAC/WAV > AIFF > M4A/AAC ≥256k > MP3 320k > MP3 256k > MP3 192k > OGG/Opus > MP3 128k 及以下）
-3. **入库更晚** — 文件创建时间越晚越优先，同一专辑后导入的可能是修正过的版本
-4. **专辑优先** — 专辑版优先于单曲/合集版，选择更正确的发行版本
-5. **首发专辑** — 同条件下保留发行年份最早的版本
-6. **刮削更准** — 年份/曲目号/风格与 MusicBrainz 官方数据吻合项数更多（不含时长，时长已在第 1 步独立判断）
-7. **属性最全** — 以上均相同时，保留标签字段最完整的文件
+## 开发
 
-点击重复组中任意曲目可手动覆盖自动推荐。
+### 环境
 
-## 刮削
+- Node.js ≥ 18；本项目为 ESM（`"type": "module"`）
+- ⚠️ 本机若存在全局 `ELECTRON_RUN_AS_NODE` 环境变量，Electron 会退化为纯 Node 模式——已由 [scripts/run-electron.mjs](scripts/run-electron.mjs) 自动清除
 
-### MusicBrainz
+### 常用脚本
 
-- 文本搜索（标题 + 艺术家），无需 API Key
-- 获取 recording ID、release 列表、官方元数据
-- 按标题/艺术家/专辑/时长/轨号交叉验证，分级为精确匹配或模糊匹配
-- 限速 1 req/s
+| 命令 | 说明 |
+|---|---|
+| `npm run electron` | 启动开发客户端 |
+| `npm run smoke` | 真实库全链路自测（IPC/流式/渲染/托盘） |
+| `npm run p0:verify` | 核心技术栈回归（WASM 库/标签写入/声纹/流式） |
+| `npm run migrate-data` | 手动触发旧数据目录迁移 |
+| `npm run build:win` | 打包 Windows NSIS + 便携版 |
 
-### AcoustID
-
-- 音频声纹反查，需免费 API Key（[acoustid.org](https://acoustid.org/) 注册获取）
-- 返回 MusicBrainz recording ID，置信度高于纯文本匹配
-- 350ms 请求间隔，自动处理限流和 transient 错误
-
-双源数据各自独立存储，MB 和 AcoustID 的 recording ID 合并对比，修复同 ID 不同来源文件无法匹配的问题。
-
-## 部署
-
-### 本地
-
-```bash
-npm install && npm start
-```
-
-### 开发模式（文件变更自动重启）
-
-```bash
-npm run dev
-```
-
-### PM2
-
-```bash
-npm i -g pm2
-pm2 start server.js --name musicdedup
-pm2 save && pm2 startup
-```
-
-## API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/stats` | 曲库统计 |
-| GET/PUT | `/api/settings` | 获取/保存设置 |
-| GET | `/api/library` | 曲库分页查询（支持排序、搜索、格式/刮削状态筛选） |
-| GET | `/api/library/stats` | 曲库筛选统计 |
-| GET | `/api/library/locate/:id` | 定位文件在曲库中的页码 |
-| GET | `/api/files/:id` | 文件详情 |
-| POST | `/api/files/:id/reveal` | 在资源管理器中打开 |
-| GET | `/api/files/:id/stream` | 音频流（支持 Range 请求） |
-| GET | `/api/files/:id/cover` | 封面图片 |
-| POST | `/api/files/:id/rename` | 文件重命名 |
-| GET/POST | `/api/files/:id/live-tags` | 读取/写入音频标签 |
-| POST | `/api/files/:id/write-tags` | 将刮削数据写入文件标签 |
-| GET | `/api/files/:id/snapshots` | 标签写入历史 |
-| POST | `/api/files/:id/scrape-single` | 对单个文件执行刮削 |
-| GET/DELETE | `/api/files/:id/scraped` | 查看/清除刮削数据 |
-| GET/POST/DELETE | `/api/retention-list/:fileId?` | 保留名单管理 |
-| GET | `/api/duplicates` | 重复组列表 |
-| GET | `/api/duplicates/:id` | 重复组详情 |
-| POST | `/api/duplicates/:id/resolve` | 确认处理重复组 |
-| POST | `/api/duplicates/resolve-all` | 批量处理所有重复组 |
-| PUT | `/api/duplicates/:id/tracks/:fid/keep` | 手动指定保留文件 |
-| POST | `/api/scan/start` | 启动扫描 |
-| POST | `/api/scan/pause` | 暂停扫描 |
-| POST | `/api/scan/resume` | 恢复扫描 |
-| POST | `/api/scan/abort` | 停止扫描 |
-| GET | `/api/scan/stream` | SSE 进度流 |
-| GET | `/api/scan/status` | 扫描状态 |
-| POST | `/api/browse-folder` | 系统文件夹选择对话框 |
-| GET | `/api/system/fpcalc` | fpcalc 检测状态 |
-| GET | `/api/system/exiftool` | exiftool 检测状态 |
-| POST | `/api/validate-acoustid` | 验证 AcoustID API Key |
-
-## 项目结构
+### 架构
 
 ```
-musicdedup/
-├── server.js                 # Express 入口 + 全部 API 路由 + SSE
-├── fpcalc.exe                # Chromaprint 二进制（可选）
-├── lib/
-│   ├── db.js                 # SQLite (WASM) 数据层，schema 定义与迁移
-│   ├── fingerprint.js        # 纯 JS Goertzel 频谱声纹算法
-│   ├── chromaprint-bridge.js # fpcalc 桥接
-│   ├── scanner.js            # 文件枚举 + 属性提取 + 声纹提取
-│   ├── matcher.js            # 多阶段重复检测引擎
-│   ├── scraper.js            # MusicBrainz / AcoustID 双源刮削
-│   ├── rules.js              # 智能保留规则 + 匹配标签 + 音质分级
-│   ├── tagger.js             # 标签读写 + 写入快照与回滚
-│   ├── tier.js               # 刮削分级计算（绿/蓝/黄）
-│   ├── progress.js           # 统一进度报告器
-│   ├── flac-writer.js        # FLAC 标签写入
-│   ├── ogg-writer.js         # OGG 标签写入
-│   └── m4a-writer.js         # M4A 标签写入
-├── public/
-│   ├── index.html            # HTML 入口 + 全局样式
-│   ├── app.js                # React SPA（无 JSX，纯 React.createElement）
-│   ├── icons.css             # 图标定义
-│   ├── views/                # 页面视图组件
-│   │   ├── library.js        # 音乐库浏览
-│   │   ├── duplicates.js     # 重复组管理
-│   │   ├── scanner.js        # 扫描控制
-│   │   ├── scrape.js         # 刮削数据查看
-│   │   └── settings.js       # 设置页
-│   └── vendor/               # React 生产构建
-├── scripts/
-│   └── release.js            # 版本发布脚本（版本号/CHANGELOG/git tag）
-├── data/                     # SQLite 数据库（运行后生成）
-└── CHANGELOG.md
+Electron 单机应用，无 HTTP 层：
+Renderer (public/*.js, React)
+   │  window.bridge.request(method, url, body)  ←→  ipcRenderer.invoke('api')
+   ▼
+Preload (contextBridge) → Main (electron/ipc/index.js 路由表)
+   ▼
+electron/ipc/{library,files,tags,scrape,duplicates,scan,settings}.js
+   ▼
+lib/{db,scanner,matcher,rules,scraper,tagger,fingerprint,...}.js → SQLite/文件系统
+音频/封面：musicdedup:// 自定义协议直读磁盘（不进 IPC）
 ```
 
-## 性能参考
+贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)，行为准则见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
-扫描耗时取决于启用的步骤和库规模：
+## 常见问题
 
-- **文件枚举 / 属性提取 / 基础匹配 / 刮削匹配**：纯本地操作，速度较快，数万文件通常在分钟级完成
-- **声纹提取**：CPU 密集型，每文件约 0.1–0.3 秒，受线程数影响
-- **刮削（MusicBrainz + AcoustID）**：网络密集型，受限于 API 速率（MB 1 req/s，AcoustID ~3 req/s），是完整扫描中最耗时的阶段。数千文件可能需要数十分钟到数小时
-
-首次扫描后声纹和刮削状态缓存在 SQLite，增量扫描只处理新文件或已修改文件。
+- **扫描时窗口卡顿？** 2.0 起扫描已隔离到 worker 线程，若仍复现请带主进程日志提 issue。
+- **SmartScreen 提示"未知发布者"？** 程序未做代码签名，选择"仍要运行"；安装包与便携版皆如此。
+- **如何启用 AcoustID / Chromaprint？** 设置页填写 AcoustID API Key；fpcalc.exe 放入项目根目录或设置其路径。
+- **从 v1 Web 版升级？** 首次启动会自动询问是否迁移旧数据，选择"迁移到新位置"即可。
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Geekieo
