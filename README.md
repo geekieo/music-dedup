@@ -145,7 +145,13 @@ npm run smoke:packaged # 打包版冒烟自测
 | `npm run smoke` | 真实库全链路自测（IPC/流式/渲染/托盘） |
 | `npm run p0:verify` | 核心技术栈回归（WASM 库/标签写入/声纹/流式） |
 | `npm run migrate-data` | 手动触发旧数据目录迁移 |
+| `npm run test:setup` | 搭建隔离测试环境（备份生产库 + 复制重复曲目副本 + 建测试 userData） |
 | `npm run build:win` | 打包 Windows NSIS + 便携版 |
+
+**隔离测试**：`npm run test:setup` 后，用
+`npm run electron -- --userdata <测试userdata> --migrate no` 启动测试实例（数据与生产
+`%APPDATA%/MusicDedup` 完全隔离，生产库备份在 `%APPDATA%/MusicDedup/backup/`），
+验证完关窗、直接 `npm run electron` 即回到生产。详见 `scripts/setup-test-env.mjs` 头部说明。
 
 ### 架构
 

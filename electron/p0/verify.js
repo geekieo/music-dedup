@@ -24,15 +24,23 @@ const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const S = (name) => path.join(__dirname, '..', '..', '.p0-tmp', 'samples', name);
 
-// 真实曲库中的样本源（写入类测试只作用于 .p0-tmp 副本，每次运行都重新复制，
-// 保证验证幂等）。曲库路径若不存在（换机/改路径），对应样本会被跳过。
-const SAMPLE_SOURCES = {
-  'BarroomBallet.flac': '<samples>/BarroomBallet.flac',
-  'sample.m4a':        '<samples>/sample.m4a',
-  'sample.mp3':        '<samples>/sample.mp3',
-};
+// 样本源由环境变量 P0_SAMPLES_DIR 提供（run-electron.mjs --p0-samples <目录>，
+// 目录内需含 BarroomBallet.flac / sample.m4a / sample.mp3 三个文件）。
+// 写入类测试只作用于 .p0-tmp 副本，每次运行都重新复制，保证验证幂等。
+// 未配置样本目录时，样本类验证项会失败并提示——开源版不硬编码任何个人曲库路径。
+const SAMPLE_DIR = process.env.P0_SAMPLES_DIR;
+const SAMPLE_SOURCES = SAMPLE_DIR
+  ? {
+      'BarroomBallet.flac': path.join(SAMPLE_DIR, 'BarroomBallet.flac'),
+      'sample.m4a': path.join(SAMPLE_DIR, 'sample.m4a'),
+      'sample.mp3': path.join(SAMPLE_DIR, 'sample.mp3'),
+    }
+  : {};
 
 function ensureFreshSamples() {
+  if (!SAMPLE_DIR) {
+    console.warn('[P0] 未设置 P0_SAMPLES_DIR（样本目录），样本类验证项将失败；可用 run-electron.mjs --p0-samples <目录> 提供。');
+  }
   for (const [name, src] of Object.entries(SAMPLE_SOURCES)) {
     if (existsSync(src)) copyFileSync(src, S(name));
   }

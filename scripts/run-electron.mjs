@@ -8,6 +8,7 @@
 // npm run electron 在任何环境下都真正启动 Electron。
 //
 // 参数：--p0 → P0 验证模式（主进程跑回归套件 + P0 渲染页），对应 npm run p0:verify。
+//       --p0-samples <dir> → P0 验证的样本目录（P0_SAMPLES_DIR），开源版不硬编码样本路径。
 //       --smoke → IPC 链路自测（真实库加载后打关键接口并退出），对应 npm run smoke。
 //       --userdata <dir> → 重定向 userData（MUSICDEDUP_USERDATA），隔离测试用
 //           （bootstrap-env 的 app.getPath('appData') 不受 APPDATA 环境变量影响）。
@@ -50,6 +51,7 @@ const child = spawn(electronPath, args, {
   env: {
     ...process.env,
     ...(argv.includes('--p0') ? { P0_VERIFY: '1' } : {}),
+    ...(opt('--p0-samples') ? { P0_SAMPLES_DIR: opt('--p0-samples') } : {}),
     ...(argv.includes('--smoke') ? { V2_SMOKE: '1' } : {}),
     ...(opt('--userdata') ? { MUSICDEDUP_USERDATA: opt('--userdata') } : {}),
     ...(opt('--migrate') ? { V2_MIGRATE: opt('--migrate') } : {}),

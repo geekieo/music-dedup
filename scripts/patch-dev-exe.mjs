@@ -15,8 +15,8 @@
 // 已知坑（本机实测）：
 //   - fs.cpSync(recursive) 静默崩溃（Node24/本机 Windows）→ 单文件复制用
 //     fs.copyFileSync（非递归）。
-//   - electron-winstaller 的 rcedit.exe 是 ANSI 版：目标/图标路径含中文（本项目
-//     <个人目录>\...）会 "Unable to load file"，且不支持 --set-product-name 等
+//   - electron-winstaller 的 rcedit.exe 是 ANSI 版：目标/图标路径含中文（含中文的
+//     绝对路径）会 "Unable to load file"，且不支持 --set-product-name 等
 //     便捷 flag（报 "Unexpected trailing arguments"）。→ 在 ASCII 临时目录暂存
 //     exe+icon 再 rcedit（仅用 --set-version-string / --set-file-version /
 //     --set-product-version / --set-icon），再拷回 dist。
