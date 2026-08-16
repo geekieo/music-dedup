@@ -7,10 +7,12 @@
    switches — see useScanStream().
    ══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
-  library:{label:'音乐库更新',sub:'',  desc:'依次执行「文件枚举」和「文件属性提取」两个步骤。枚举步骤扫描目录发现音频文件，属性提取步骤读取内嵌标签（标题/艺术家/专辑/时长等），更新本地音乐库索引。',icon:'folders',      steps:['enum','meta']},
-  basic:  {label:'基础匹配',  sub:'',  desc:'执行「属性匹配」步骤。按标题分组、结合艺术家与时长容差比对，输出重复候选组，不依赖声纹。',icon:'tag',          steps:['basicMatch']},
-  fp:     {label:'声纹匹配',  sub:'',  desc:'依次执行「声纹提取」和「声纹匹配」两个步骤。提取步骤计算音频频谱声纹，匹配步骤比对相似度。不同编码或母带间的相位差异会让分数偏低，因此它不是判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
-  scrape: {label:'刮削匹配',  sub:'',  desc:'依次执行「刮削」和「刮削匹配」两个步骤。刮削步骤向 MusicBrainz 查询录音信息（可选叠加 AcoustID 声纹识别），匹配步骤比对两个文件是否命中同一条录音以交叉确认。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
+  library:{label:'音乐库更新',sub:'',  desc:'扫描音乐目录，发现音乐文件并读取标题、艺术家、专辑等信息，更新音乐库。',icon:'folders',      steps:['enum','meta']},
+  basic:  {label:'基础匹配',  sub:'',  desc:'按标题、艺术家和时长比对，找出重复候选，不依赖声纹。',icon:'tag',          steps:['basicMatch']},
+  // fp lane — 技术细节：频谱声纹相似度比对；不同编码/母带间的相位差异会让相似度偏低，
+  // 因此声纹匹配不单独作为判定唯一依据（阈值 + 基础匹配兜底）。
+  fp:     {label:'声纹匹配',  sub:'',  desc:'对比音频声纹找出重复。声纹匹配不作为判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
+  scrape: {label:'刮削匹配',  sub:'',  desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
 };
 function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
@@ -83,8 +85,7 @@ function ScannerView({scan}){
               e('button',{
                 onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
                 style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced[key]?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},
-                e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级',
-                e(Hint,{text:'全量重新执行（忽略缓存）：忽略智能跳过逻辑，强制重处理全部相关文件。刮削通道额外支持仅重试之前未命中的文件。'})
+                e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
               )
             ),
             advanced[key]&&e('div',{
@@ -115,14 +116,13 @@ function ScannerView({scan}){
             e('div',{style:{width:32,height:32,borderRadius:8,background:(status.running&&runningLane==='all')?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${(status.running&&runningLane==='all')?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginRight:9}},
               (status.running&&runningLane==='all')?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
             ),
-            '全部扫描操作',e(Hint,{text:'依次执行全局 8 个步骤：1.文件枚举 → 2.文件属性提取 → 3.属性匹配 → 4.声纹提取 → 5.频谱声纹匹配 → 6.CP声纹匹配 → 7.刮削 → 8.刮削匹配，一次性完成从扫描到重复判定的完整流程。'})),
+            '全部扫描操作',e(Hint,{text:'按顺序执行全部扫描步骤，完成从发现文件到判定重复的完整流程。'})),
         ),
         e('div',{style:{width:'calc(25% - 37.5px)',flexShrink:0}},
           e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
             e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
               e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'执行'),
-              e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级',
-              e(Hint,{text:'全量重新执行（忽略缓存）：忽略智能跳过逻辑，强制重处理全部相关文件。'})
+              e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级'
               )
             ),
             advanced.all&&e('div',{

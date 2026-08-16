@@ -458,34 +458,38 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         )
       ),
 
-      // 扫描性能 — 全局扫描设置（并发数影响所有扫描步骤），独立于音乐目录配置
+      // 扫描性能 — 全局扫描设置（并发数影响所有扫描步骤），独立于音乐目录配置。
+      // 技术细节：扫描在单个后台 worker 线程执行，不阻塞主/渲染进程；threads 是并发批大小
+      // （同时读入内存的文件数），非多核并行，不影响扫描速度。声纹阶段内部上限 16（batch 取
+      // Math.min(threads,16)），故 UI 滑块上限设 16 与之一致，再大只堆内存、无任何速度收益。
       e(Card,{id:'sec-scan-perf'},
-        e(SH,{title:'扫描性能',hint:'扫描全程在独立后台线程运行，不阻塞窗口其他功能。并发数只影响扫描时同时读入内存的文件数（内存占用），不影响扫描速度。'}),
+        e(SH,{title:'扫描性能'}),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'并发数',e(Hint,{text:'扫描在单个后台线程上执行，此值不是"用几个核心"，而是并发批大小——只决定同时读入内存的文件数。调低可省内存（低内存机器建议 2-4），不影响速度。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads||autoThreads)),
-          e('input',{type:'range',min:1,max:32,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))}),
-          e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'默认按核心数自适应（本机 '+autoThreads+'）'),e('span',null,'大文件库建议调低'))
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'值越大，扫描时占用的内存越多。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads||autoThreads)),
+          e('input',{type:'range',min:1,max:16,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))})
         )
       ),
 
       e(Card,{id:'sec-basic'},
-        e(SH,{title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'枚举文件、读取标签后直接比对，是最主要、最可靠的重复判定依据，完全不依赖声纹。'}),
+        e(SH,{title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'}),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},'时长容差',e(Hint,{text:'两个文件标题、艺术家一致时，时长相差在此范围内仍视为同一首歌——不同来源的同一首歌常有 1-5 秒的掐头去尾差异。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.duration_tolerance??5)+' 秒')),
           e('input',{type:'range',min:1,max:15,value:s.duration_tolerance??5,onChange:ev=>setS(p=>({...p,duration_tolerance:+ev.target.value}))})
         )
       ),
 
+      // 声纹匹配 — 技术细节：内置 Goertzel 声纹（无需配置）；Chromaprint（CP）可选，需 fpcalc
+      // 可执行文件，配置后在频谱声纹之外独立再比对一遍；同一份声纹数据也被刮削匹配的 AcoustID 使用。
       e(Card,{id:'sec-fp'},
-        e(SH,{title:'声纹匹配',hint:'提取音频声纹后交叉比对相似度（滑动窗口对齐）。达到阈值即视为声纹匹配。内置 Goertzel 声纹开箱即用；配置 fpcalc 后可额外启用 Chromaprint 声纹独立比对。'}),
+        e(SH,{title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'}),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'两条音轨的频谱声纹对比相似度达到此阈值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。注意：标题、艺术家、时长近似的歌曲，即使低于此阈值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'相似度达到此值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。标题、艺术家、时长近似的歌曲，即使低于此值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
           e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
         ),
 
         e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
-          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2,display:'flex',alignItems:'center'}},'CP 声纹（可选）',e(Hint,{text:'频谱声纹开箱即用，不需要配置。Chromaprint 是第二种声纹，配置后会在频谱声纹之外额外做一次独立比对，两者互不影响、结果会分别标注，通常能找到频谱声纹漏掉的一些重复。同一份 Chromaprint 数据也会被「刮削匹配」里的 AcoustID 用到。'})),
+          e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2,display:'flex',alignItems:'center'}},'CP 声纹（可选）',e(Hint,{text:'默认声纹无需配置。CP 声纹是可选第二种，配置后会额外检查一遍，通常能发现默认声纹漏掉的重复，结果会分开标注。同一份数据也会被「刮削匹配」用到。'})),
           e('div',{style:{display:'flex',gap:6,maxWidth:460}},
             e('input',{value:s.fpcalc_path||'',
               onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
@@ -561,7 +565,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-quality'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'按列表顺序对格式/码率/采样率/位深分级打分，作为保留优先级中"音质最优"维度的评分依据。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'拖动调整不同音质条件的优先顺序，越靠上越视为音质更优。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
         ),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
@@ -577,7 +581,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-pick'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件的级联规则：按列表顺序依次比较，每轮在当前候选池中取最高分文件晋级，直至唯一胜出。文件缺某项数据时不参与该轮，不会被淘汰。具体各维度含义见重复组详情"维度对比"旁的说明按钮。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件，越靠上越优先。某文件缺少对应数据时，该轮不参与、也不会被淘汰。各维度含义见重复组详情「维度对比」旁的说明按钮。'})),
           e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetPick},'恢复默认')
         ),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
