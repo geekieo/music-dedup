@@ -16,10 +16,13 @@ function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
   const[runningLane,setRunningLane]=useState(null);
   const[advanced,setAdvanced]=useState({});
+  // 终态摘要可关闭；下次扫描开始自动复位
+  const[summaryDismissed,setSummaryDismissed]=useState(false);
   const logRef=useRef(null);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[logs]);
   useEffect(()=>{if(!status.running)setRunningLane(null);},[status.running]);
+  useEffect(()=>{if(status.running)setSummaryDismissed(false);},[status.running]);
 
   function runLane(key,force=false){
     const lm=LANE_META[key];
@@ -34,7 +37,21 @@ function ScannerView({scan}){
     startStep(steps,false,'完整扫描');
   }
 
-  const isDone=status.phase==='done';
+  // 终态归一（scan.js finally）：done/error/aborted 且 running=false 时收起进度条、
+  // 显示一行可关闭摘要。注意匹配步骤完成点会以 running=true 发 phase:'done'，必须
+  // 用 !running 门控，否则运行中途会把进度块误替换成摘要。
+  const TERMINAL=['done','error','aborted'];
+  const isTerminal=TERMINAL.includes(status.phase)&&!status.running;
+  const SUM_META={
+    done:{icon:'circle-check',color:'var(--green)',bg:'var(--green-bg)',bd:'var(--green-bd)',text:'完成'},
+    error:{icon:'alert-circle',color:'var(--red)',bg:'var(--red-bg)',bd:'var(--red-bd)',text:'错误'},
+    aborted:{icon:'player-stop',color:'var(--tx-secondary)',bg:'var(--bg-subtle)',bd:'var(--bd-default)',text:'已中止'},
+  };
+  const summaryText=(status.message||'').replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/,'')||(SUM_META[status.phase]&&SUM_META[status.phase].text)||'完成';
+  // 活动行文字去时间戳（[HH:MM:SS] 是"现在"信息，日志里才有意义；进度块里是噪声）
+  const actText=(status.subMessage||status.message||'').replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/,'');
+  // 内联子进度%仅在与总%明显不同时显示——meta/fp 阶段二者相同，避免冗余
+  const showInlineSub=status.subPct!=null&&status.subPct>0&&Math.abs(status.subPct-(status.pct||0))>1;
   const LC={ok:'var(--amber)',done:'var(--green)',err:'var(--red)',info:'var(--tx-secondary)',sep:'var(--amber)'};
 
   return e('div',{className:'fade'},
@@ -117,32 +134,36 @@ function ScannerView({scan}){
       ),
     ),
 
-    // Progress — 暂停/继续/停止 alongside phase/percent/log output
-    // (pause/resume/abort are global, not per-lane).
-    status.phase!=='idle'&&e('div',{style:{background:'var(--bg-base)',border:`0.5px solid ${status.paused?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
-      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}},
-        e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
-          status.paused&&Icon('pause',{fontSize:12,color:'var(--amber)'}),
-          status.paused?'已暂停':({idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
-        ),
-        e('div',{style:{display:'flex',alignItems:'center',gap:10}},
-          status.running&&e('div',{style:{display:'flex',gap:6}},
-            e(Btn,{small:true,variant:'ghost',icon:status.paused?'player-play':'pause',onClick:()=>(status.paused?scan.resume():scan.pause())},status.paused?'继续':'暂停'),
-            e(Btn,{small:true,variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort')},'停止')
-          ),
-          e('span',{style:{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--amber)'}},(status.pct||0)+'%')
+    // Progress / result — 运行中：单进度条 + 活动行（内联子%仅在与总%明显不同时显示，
+    // 消除 meta/fp 阶段与主条完全重复的双条观感）；终态：收起进度条与按钮，保留一行
+    // 可关闭摘要（绿色✓/红色错误/灰色中止，下次扫描开始时自动复位）。
+    status.phase!=='idle'&&(isTerminal
+      ? !summaryDismissed&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:SUM_META[status.phase].bg,border:`0.5px solid ${SUM_META[status.phase].bd}`,borderRadius:'var(--r-lg)',marginBottom:10}},
+          Icon(SUM_META[status.phase].icon,{fontSize:15,color:SUM_META[status.phase].color,flexShrink:0}),
+          e('span',{style:{flex:1,minWidth:0,fontSize:12,fontWeight:500,color:SUM_META[status.phase].color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},summaryText),
+          e('button',{onClick:()=>setSummaryDismissed(true),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
         )
-      ),
-      e('div',{style:{height:5,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
-        e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber)',borderRadius:99,transition:'width .3s'}})),
-      // 子进度条 — 展示长耗时步骤（刮削/声纹匹配等）内部的详细进度
-      status.subPct!=null&&status.subPct>0&&e('div',{style:{marginTop:6}},
-        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}},
-          e('span',{style:{fontSize:10,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}},status.subMessage||status.message||''),
-          e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',marginLeft:8}},(status.subPct||0)+'%')
+      : e('div',{style:{background:'var(--bg-base)',border:`0.5px solid ${status.paused?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}},
+          e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
+            status.paused&&Icon('pause',{fontSize:12,color:'var(--amber)'}),
+            status.paused?'已暂停':({idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
+          ),
+          e('div',{style:{display:'flex',alignItems:'center',gap:10}},
+            status.running&&e('div',{style:{display:'flex',gap:6}},
+              e(Btn,{small:true,variant:'ghost',icon:status.paused?'player-play':'pause',onClick:()=>(status.paused?scan.resume():scan.pause())},status.paused?'继续':'暂停'),
+              e(Btn,{small:true,variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort')},'停止')
+            ),
+            e('span',{style:{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--amber)'}},(status.pct||0)+'%')
+          )
         ),
-        e('div',{style:{height:3,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
-          e('div',{style:{width:(status.subPct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber-bd)',borderRadius:99,transition:'width .15s'}}))
+        e('div',{style:{height:5,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
+          e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber)',borderRadius:99,transition:'width .3s'}})),
+        // 活动行 — 当前步骤细节（去时间戳，超长省略）
+        actText&&e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6,gap:8}},
+          e('span',{style:{fontSize:10.5,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}},actText),
+          showInlineSub&&e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',flexShrink:0}},'· '+(status.subPct||0)+'%')
+        )
       )
     ),
 

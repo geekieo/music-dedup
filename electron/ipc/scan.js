@@ -1,29 +1,41 @@
-// electron/ipc/scan.js — 扫描域：start（fire-and-forget）/ abort / pause / resume / status + 进度事件
+// electron/ipc/scan.js — 扫描域薄 broker（P5 扫描隔离）
 //
-// SSE 广播替换为 IPC 事件：broadcast() 通过 setSend() 注入的 webContents 发送
-// 'scan:progress'（v2-arch-review 步骤 5 决策 4）。Electron 依赖注入使本模块可测。
-// scan/start 保持 v1 语义：handler 立即返回 {ok:true}，8 步流水线异步执行，绝不 await。
+// 扫描的 8 步流水线整体移入 electron/scan-worker.js（worker 线程），主进程不再跑任何
+// 扫描 CPU 活——窗口其他功能（播放/导航/IPC 读库）不再被占用。本模块职责：
+//   1. 维护镜像 scanState（供 /api/scan/status 与 main.js sendScan）
+//   2. 转发 worker 消息 → broadcast（send 注入的 webContents）
+//   3. abort/pause/resume 控制位 → 更新镜像 + 转发 worker
+//   4. worker 生命周期：spawn per-scan、done/error 后 settle + terminate
+// 对外契约不变：routes（start/abort/pause/resume/status）+ setSend。
+//
+// 镜像同步规则：display 字段（phase/pct/message/level/subPct/groups/savings）以 worker
+// 为准；控制位（paused/abortFlag/running）永远以 broker 镜像为准——worker 的 progress
+// 载荷携带自身控制位且落后于 broker 的控制意图，直接覆盖会漂移。
+import { createRequire } from 'module';
+import path from 'path';
+import os from 'os';
+import { fileURLToPath } from 'url';
+import { Worker } from 'node:worker_threads';
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
-import { forceStripLaneTags } from '../../lib/db/groups.js';
-import { runEnumerate, runMetadata, runFingerprint } from '../../lib/scanner.js';
-import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from '../../lib/matcher.js';
-import { runScrape } from '../../lib/scraper.js';
-import { startFpWorker } from '../fp-worker.js';
+import { detectFpcalc } from '../../lib/chromaprint-bridge.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const db = getDB();
 
-// `paused` 是软停止：长耗时阶段在既有的批次/阶段检查点处 waitIfPaused() 阻塞
-//（暂停期间仍可经 abortFlag 取消），而不是把整轮执行拆掉。
 let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle', pct: 0, message: '', startTime: null };
 let send = () => {}; // 由 registerApi 注入（绑定窗口 webContents）
+let activeWorker = null;
+let settled = false; // 终态只广播一次（worker exit 在 terminate 后仍会触发，须防重）
+
+const now = () => new Date().toLocaleTimeString([], { hour12: false });
+
+// threads 语义：扫描在单 worker 线程上，threads 是并发批大小（异步 I/O 交叠 + 并发读入
+// 内存的文件数），不并行多核、不影响速度。默认按核心数自适应（封顶 8 防大文件库并发读入
+// 的内存尖峰）：低端机（2-4 核）自动落到 2-4，内存峰值随之减半以上；用户手动设置的优先。
+const DEFAULT_THREADS = Math.min(8, Math.max(1, os.cpus().length));
 
 export function setSend(fn) { send = fn; }
-
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-async function waitIfPaused() {
-  while (scanState.paused && !scanState.abortFlag) await sleep(200);
-}
 
 function broadcast(data) {
   // 关键：type 不能并入 scanState —— broadcast({type:'done', ...scanState}) 时若
@@ -35,122 +47,91 @@ function broadcast(data) {
   send({ ...data });
 }
 
-// 根据 DB 文件数量预估各步骤耗时占比，使进度条反映真实耗时分布（估算逻辑原样保留）。
-function estimateStepWeights(db, steps, { force, acoustidKey }) {
-  const totalAudio = (db.get("SELECT COUNT(*) n FROM files") || { n: 0 }).n;
-  const withTitle = (db.get("SELECT COUNT(*) n FROM files WHERE title IS NOT NULL AND title!=''") || { n: 0 }).n;
-  const withFp = (db.get("SELECT COUNT(*) n FROM files WHERE fingerprint IS NOT NULL AND fingerprint!='META:'") || { n: 0 }).n;
-  const withChroma = (db.get("SELECT COUNT(*) n FROM files WHERE chromaprint IS NOT NULL") || { n: 0 }).n;
-
-  const costs = {};
-  for (const s of steps) {
-    switch (s) {
-      case 'enum':       costs[s] = totalAudio * 0.002 + 1; break;
-      case 'meta':       costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE meta_extracted_at IS NULL") || { n: 0 }).n)) * 0.06 + 1; break;
-      case 'basicMatch': costs[s] = Math.max(1, withTitle) * 0.03 + 1; break;
-      case 'fp':         costs[s] = (force ? totalAudio : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE fp_extracted_at IS NULL OR chromaprint IS NULL") || { n: 0 }).n)) * 0.18 + 1; break;
-      case 'fpMatch':    costs[s] = Math.max(1, withFp) * 0.10 + Math.max(1, withChroma) * 0.04 + 1; break;
-      case 'scrape': {
-        const mbN = force ? Math.max(1, withTitle) : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE mb_checked_at IS NULL AND title IS NOT NULL AND title!=''") || { n: 0 }).n);
-        const aidN = acoustidKey ? (force ? Math.max(1, withChroma) : Math.max(1, (db.get("SELECT COUNT(*) n FROM files WHERE acoustid_checked_at IS NULL AND chromaprint IS NOT NULL AND title IS NOT NULL AND title!=''") || { n: 0 }).n)) : 0;
-        costs[s] = aidN * 0.45 + mbN * 1.15 + 1; break;
-      }
-      case 'scrapeMatch': costs[s] = Math.max(1, withTitle) * 0.02 + 1; break;
-      default: costs[s] = 1;
-    }
-  }
-  const total = Object.values(costs).reduce((a, b) => a + b, 0);
-  const w = {};
-  for (const [k, v] of Object.entries(costs)) w[k] = v / total;
-  return w;
+// ── 终态 ──────────────────────────────────────────────────────────────────
+function settle() {
+  if (settled) return;
+  settled = true;
+  scanState.running = false;
+  scanState.paused = false;
+  // 终态归一：phase 固定为 done/error/aborted（error 优先于 abort），否则"仅跑单步"
+  // 或"中止"后 phase 会停在最后一个步骤名，前端进度区块永不收起、'已中止'标签不生效。
+  if (scanState.phase !== 'error') scanState.phase = scanState.abortFlag ? 'aborted' : 'done';
+  broadcast({ type: 'done', ...scanState });
+  if (activeWorker) { try { activeWorker.terminate(); } catch {} activeWorker = null; }
 }
 
-async function runScanPipeline({ dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath }) {
-  scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${new Date().toLocaleTimeString([], { hour12: false })}] 准备中...`, startTime: Date.now() };
-  broadcast({ type: 'start', ...scanState });
-  // 原地 mutate scanState 并广播——只广播 evt 会因前端整体替换而丢掉 running/paused/abortFlag
-  const prog = (evt) => {
-    const ts = new Date().toLocaleTimeString([], { hour12: false });
-    Object.assign(scanState, evt.message ? { ...evt, message: `[${ts}] ${evt.message}` } : evt);
-    broadcast({ type: 'progress', ...scanState });
-  };
-  const abort = () => scanState.abortFlag;
-  const pause = waitIfPaused;
-  let stepWeights = {}; // 延迟到 try 内计算：若抛错可走 catch→finally 广播 done，不卡 running 态
-  let cumWeight = 0;
-  // P5：指纹阶段委派 worker（audio-decode 同步 CPU 大户，主进程跑会阻塞事件循环导致
-  // 窗口"未响应"）。仅当本轮含 fp 步骤才创建；finally 里 terminate。
-  let fpWorker = null;
-  function wrapProg(stepName) {
-    const w = stepWeights[stepName] || 0;
-    const startWeight = cumWeight;
-    return (evt) => {
-      const innerPct = evt.pct || 0;
-      const overallPct = w > 0 ? Math.round((startWeight + Math.min(100, innerPct) / 100 * w) * 100) : Math.round(cumWeight * 100);
-      prog({ ...evt, pct: Math.min(100, overallPct) });
-    };
+function onWorkerMessage(msg) {
+  if (msg.type === 'start' || msg.type === 'progress') {
+    const { paused, abortFlag, running, ...rest } = msg;
+    Object.assign(scanState, rest); // 只合并 display 字段，控制位保留镜像
+    broadcast({ type: msg.type, ...scanState });
+  } else if (msg.type === 'done') {
+    const { paused, abortFlag, running, ...rest } = msg;
+    Object.assign(scanState, rest);
+    settle();
+  } else if (msg.type === 'error') {
+    scanState.phase = 'error';
+    scanState.level = 'err';
+    scanState.message = `[${now()}] 扫描进程异常：${msg.message || ''}`;
+    settle();
   }
-  function advanceWeight(stepName) { cumWeight += stepWeights[stepName] || 0; }
+}
+
+function onWorkerError(e) {
+  // 广播 type:'done'（而非 progress）：main.js sendScan 靠它复位 scanRunning，
+  // 否则关窗=托盘行为会一直保持、托盘退出流程异常。
+  console.log('[scan] worker 错误：', e && e.message);
+  if (!settled) {
+    scanState.phase = 'error';
+    scanState.level = 'err';
+    scanState.message = `[${now()}] 扫描进程异常：${(e && e.message) || ''}`;
+    settle();
+  }
+}
+
+function onWorkerExit(code) {
+  if (!settled) {
+    scanState.phase = 'error';
+    scanState.level = 'err';
+    scanState.message = `[${now()}] 扫描进程异常退出（code ${code}）`;
+    settle();
+  }
+}
+
+// ── 启动（fire-and-forget：同步置 running → spawn → 立即返回）─────────────
+function startScanInWorker(options) {
+  // 同步先置 running（spawn 同步，postMessage 前已生效）→ 挡住并发 start
+  scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${now()}] 准备中...`, startTime: Date.now() };
+  settled = false;
+  let worker;
   try {
-    stepWeights = estimateStepWeights(db, steps, { force, acoustidKey });
-    // 步骤1: 枚举
-    if (steps.includes('enum') && !abort()) {
-      await runEnumerate(db, { dirs, exclude, onProgress: wrapProg('enum'), onAbort: abort, onPause: pause });
-      advanceWeight('enum');
-    }
-    // 步骤2: 提取属性
-    if (steps.includes('meta') && !abort()) {
-      await runMetadata(db, { threads, smartScan: force ? false : smartScan, onProgress: wrapProg('meta'), onAbort: abort, onPause: pause });
-      advanceWeight('meta');
-    }
-    // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
-    if (steps.includes('basicMatch') && !abort()) {
-      if (force) forceStripLaneTags(db, ['meta_confirmed']);
-      wrapProg('basicMatch')({ phase: 'basicMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始基础匹配分析...' });
-      await runBasicMatcher(db, { durationTolerance, onProgress: wrapProg('basicMatch'), onAbort: abort, onPause: pause });
-      advanceWeight('basicMatch');
-    }
-    // 步骤4: 提取声纹
-    if (steps.includes('fp') && !abort()) {
-      if (!fpWorker) fpWorker = startFpWorker();
-      await runFingerprint(db, { threads, smartScan: force ? false : smartScan, fpcalcPath, fpCompute: fpWorker.compute, onProgress: wrapProg('fp'), onAbort: abort, onPause: pause });
-      advanceWeight('fp');
-    }
-    // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
-    if (steps.includes('fpMatch') && !abort()) {
-      if (force) forceStripLaneTags(db, ['spectral_exact', 'same_recording', 'cp_exact', 'cp_similar']);
-      wrapProg('fpMatch')({ phase: 'fpMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始声纹匹配分析...' });
-      await runFpMatcher(db, { threshold, onProgress: wrapProg('fpMatch'), onAbort: abort, onPause: pause });
-      advanceWeight('fpMatch');
-    }
-    // 步骤7: 刮削
-    if (steps.includes('scrape') && !abort()) {
-      await runScrape(db, { smartScan: force ? false : smartScan, retryMissed, acoustidKey, onProgress: wrapProg('scrape'), onAbort: abort, onPause: pause });
-      advanceWeight('scrape');
-    }
-    // 步骤8: 刮削匹配（recording ID 对比）
-    if (steps.includes('scrapeMatch') && !abort()) {
-      if (force) forceStripLaneTags(db, ['mb_confirmed', 'acoustid_confirmed']);
-      wrapProg('scrapeMatch')({ phase: 'scrapeMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始刮削匹配分析...' });
-      await runScrapeMatcher(db, { onProgress: wrapProg('scrapeMatch'), onAbort: abort, onPause: pause });
-      advanceWeight('scrapeMatch');
-    }
+    // type:'module' 显式指定：打包后 worker 在 app.asar.unpacked/（该目录无 package.json，
+    // type:module 判定会回退 CJS，顶层 import 直接 SyntaxError）。env 显式传 process.env
+    // 保证 DB_PATH 到达 worker。
+    worker = new Worker(path.join(__dirname, '..', 'scan-worker.js'), { type: 'module', env: process.env });
   } catch (e) {
-    prog({ phase: 'error', pct: 0, level: 'err', message: `失败: ${e.message}` });
-  } finally {
-    if (fpWorker) { fpWorker.terminate(); fpWorker = null; }
+    console.log('[scan] worker 启动失败：', e.message);
+    scanState.phase = 'error';
+    scanState.level = 'err';
+    scanState.message = `[${now()}] 扫描进程启动失败：${e.message}`;
     scanState.running = false;
-    scanState.paused = false;
     broadcast({ type: 'done', ...scanState });
+    return;
   }
+  activeWorker = worker;
+  worker.on('message', onWorkerMessage);
+  worker.on('error', onWorkerError);
+  worker.on('exit', onWorkerExit);
+  broadcast({ type: 'start', ...scanState });
+  worker.postMessage({ cmd: 'start', options });
 }
 
 export const routes = [
-  { method: 'POST', path: '/api/scan/start', handler: (_p, _q, body) => {
+  { method: 'POST', path: '/api/scan/start', handler: async (_p, _q, body) => {
     if (scanState.running) return { ok: false, error: '已有扫描进行中' };
     const s = getAllSettings(db);
     const dirs = s.scan_dirs || [], exclude = s.exclude_patterns || [];
-    const threads = parseInt(s.threads || '8'), threshold = parseInt(s.threshold || '90');
+    const threads = parseInt(s.threads) || DEFAULT_THREADS, threshold = parseInt(s.threshold || '90');
     const durationTolerance = parseInt(s.duration_tolerance || '5');
     const smartScan = s.smart_scan !== false;
     const steps = body?.steps || ['enum', 'meta', 'basicMatch', 'fp', 'fpMatch', 'scrape', 'scrapeMatch'];
@@ -158,9 +139,11 @@ export const routes = [
     const retryMissed = body?.retryMissed === true;
     if (steps.includes('enum') && !dirs.length) return { ok: false, error: '未配置扫描目录' };
     const acoustidKey = s.acoustid_key || '';
-    const fpcalcPath = s.fpcalc_path || '';
-    // fire-and-forget：先返回已启动，流水线异步跑
-    runScanPipeline({ dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath });
+    // fpcalc 在主进程预解析（worker 线程无 process.resourcesPath，打包版无法自行检测）；
+    // 解析出的绝对路径传给 worker（computeChromaprint 内 detectFpcalc(绝对路径) 直命中）。
+    let fpcalcPath = s.fpcalc_path || '';
+    if (steps.includes('fp')) fpcalcPath = (await detectFpcalc(fpcalcPath)) || '';
+    startScanInWorker({ dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath });
     return { ok: true, message: '扫描已启动', steps };
   } },
   { method: 'POST', path: '/api/scan/abort', handler: () => {
@@ -168,20 +151,22 @@ export const routes = [
     scanState.abortFlag = true;
     scanState.paused = false;
     broadcast({ type: 'progress', ...scanState });
+    // abort 是软停止：不 terminate，让 worker 走检查点自行收尾（close DB + 上送 done）
+    activeWorker?.postMessage({ cmd: 'abort' });
     return { ok: true };
   } },
   { method: 'POST', path: '/api/scan/pause', handler: () => {
     if (!scanState.running || scanState.abortFlag) return { ok: false };
     scanState.paused = true;
-    const ts = new Date().toLocaleTimeString([], { hour12: false });
-    broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${ts}] 已暂停 · 点击继续以恢复` });
+    broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${now()}] 已暂停 · 点击继续以恢复` });
+    activeWorker?.postMessage({ cmd: 'pause' });
     return { ok: true };
   } },
   { method: 'POST', path: '/api/scan/resume', handler: () => {
     if (!scanState.running || !scanState.paused) return { ok: false };
     scanState.paused = false;
-    const ts = new Date().toLocaleTimeString([], { hour12: false });
-    broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${ts}] 已恢复` });
+    broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${now()}] 已恢复` });
+    activeWorker?.postMessage({ cmd: 'resume' });
     return { ok: true };
   } },
   { method: 'GET', path: '/api/scan/status', handler: () => ({ ok: true, data: scanState }) },

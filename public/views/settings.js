@@ -269,6 +269,8 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
 }
 
 function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten}){
+  // 并发数默认与主进程一致：按核心数自适应、封顶 8（navigator.hardwareConcurrency = 逻辑核心数）
+  const autoThreads=Math.min(8, navigator.hardwareConcurrency||8);
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -439,16 +441,12 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         e(SH,{title:'音乐目录',sub:'添加包含音乐文件的文件夹到音乐库'}),
         e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir,onEnumOnly}),
         e('button',{onClick:()=>setShowExclude(v=>!v),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4,padding:0,marginTop:10}},
-          e('i',{className:`ti ti-chevron-${showExclude?'up':'down'}`,style:{fontSize:12}}),'高级：排除规则 / 并发线程 / 增量扫描'
+          e('i',{className:`ti ti-chevron-${showExclude?'up':'down'}`,style:{fontSize:12}}),'高级：排除规则 / 增量扫描'
         ),
         showExclude&&e('div',{style:{marginTop:10,display:'flex',flexDirection:'column',gap:12}},
           e('div',null,
             e('textarea',{value:(s.exclude_patterns||[]).join(', '),onChange:ev=>setS(p=>({...p,exclude_patterns:ev.target.value.split(',').map(x=>x.trim()).filter(Boolean)})),style:{width:'100%',fontSize:11,fontFamily:'var(--font-mono)',padding:'8px 10px',borderRadius:'var(--r-md)',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-default)',color:'var(--tx-secondary)',resize:'none',height:54,lineHeight:1.6,outline:'none'}}),
             e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:4}},'逗号分隔，支持 glob。示例：*.tmp, .DS_Store, Thumbs.db')
-          ),
-          e('div',null,
-            e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)'}},'并发线程数'),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads||8)),
-            e('input',{type:'range',min:1,max:32,value:s.threads||8,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))})
           ),
           e('div',{style:{display:'flex',alignItems:'flex-start',gap:8,padding:'10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
             e('input',{type:'checkbox',id:'smart',checked:s.smart_scan!==false,onChange:ev=>setS(p=>({...p,smart_scan:ev.target.checked})),style:{marginTop:2}}),
@@ -457,6 +455,16 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
               e('span',{style:{fontSize:11,color:'var(--tx-faint)'}},'按文件修改时间跳过未变更文件；同时检查文件是否仍然存在，已删除的文件会从库中移除')
             )
           )
+        )
+      ),
+
+      // 扫描性能 — 全局扫描设置（并发数影响所有扫描步骤），独立于音乐目录配置
+      e(Card,{id:'sec-scan-perf'},
+        e(SH,{title:'扫描性能',hint:'扫描全程在独立后台线程运行，不阻塞窗口其他功能。并发数只影响扫描时同时读入内存的文件数（内存占用），不影响扫描速度。'}),
+        e('div',null,
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'并发数',e(Hint,{text:'扫描在单个后台线程上执行，此值不是"用几个核心"，而是并发批大小——只决定同时读入内存的文件数。调低可省内存（低内存机器建议 2-4），不影响速度。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads||autoThreads)),
+          e('input',{type:'range',min:1,max:32,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))}),
+          e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'默认按核心数自适应（本机 '+autoThreads+'）'),e('span',null,'大文件库建议调低'))
         )
       ),
 

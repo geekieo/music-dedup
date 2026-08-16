@@ -220,6 +220,29 @@ async function runSmoke(win) {
     }
     out.push({ m: 'JS', u: '/rules-meta.js globals', ok: typeof GROUP_TAG_LABELS !== 'undefined' && typeof computeScrapeMatch === 'function', err: null });
     out.push({ m: 'UI', u: 'React app rendered', ok: document.body.innerText.includes('MusicDedup') && !!document.querySelector('button'), err: null });
+    // 进度 UI 重设计回归（P5）：单进度条+活动行（内联子%仅在与总%不同时出现）+ 终态摘要
+    // 渲染 ScannerView 测试实例（真实页面全局，不碰真实库），断言三个状态：
+    // t1 匹配阶段（子%≠总%→显示，去时间戳）；t2 meta（子%=总%→不重复显示%）；t3 终态→摘要行。
+    const progUI = await (async () => {
+      const scan = { status: null, logs: [], setLogs() {}, confirm: null, setConfirm() {}, tryStart() {}, startStep() {} };
+      const render = (s) => new Promise((res) => {
+        const el = document.createElement('div');
+        scan.status = s;
+        ReactDOM.createRoot(el).render(React.createElement(ScannerView, { scan }));
+        setTimeout(() => res(el.innerText), 0);
+      });
+      const t0 = await render({ phase: 'idle', running: false, paused: false, pct: 0, message: '', level: 'info', type: 'state' });
+      // t0: 初始 idle（视图永久挂载即渲染）不得抛错，渲染出 lane 卡片
+      if (!t0.includes('执行')) return { m: 'UI', u: 'progress idle render', ok: false, err: 'idle: ' + t0.slice(0, 140) };
+      const t1 = await render({ phase: 'fpMatch', running: true, paused: false, pct: 35, subPct: 60, message: '[08:00:00] 频谱多段LSH分组: 300/500 组', level: 'ok', type: 'progress' });
+      if (!t1.includes('60%') || t1.includes('[08:00:00]') || !t1.includes('频谱多段LSH分组')) return { m: 'UI', u: 'progress running', ok: false, err: 'running: ' + t1.slice(0, 140) };
+      const t2 = await render({ phase: 'meta', running: true, paused: false, pct: 44, subPct: 44, message: '[08:00:01] 文件属性提取: 1,200 / 2,758', level: 'ok', type: 'progress' });
+      if ((t2.match(/44%/g) || []).length > 1) return { m: 'UI', u: 'progress meta no-dup-sub', ok: false, err: 'meta dup %: ' + t2.slice(0, 140) };
+      const t3 = await render({ phase: 'done', running: false, paused: false, pct: 100, message: '[08:00:02] 刮削匹配完成！发现 462 个重复组，可释放 12.3GB', level: 'done', type: 'done' });
+      if (!t3.includes('刮削匹配完成') || t3.includes('暂停') || t3.includes('[08:00:02]')) return { m: 'UI', u: 'progress done summary', ok: false, err: 'done: ' + t3.slice(0, 140) };
+      return { m: 'UI', u: 'progress UI states', ok: true, err: null };
+    })();
+    out.push(progUI);
     // 托盘图标代码生成验证：favicon SVG → 32px PNG data URL（首启由同一逻辑生成托盘）
     const trayIcon = await (async () => {
       try {

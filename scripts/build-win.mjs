@@ -11,6 +11,9 @@
 
 import { createRequire } from 'module';
 import { execSync } from 'child_process';
+import { existsSync, rmSync, readdirSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const require = createRequire(import.meta.url);
 const { build, Platform } = require('electron-builder');
@@ -22,6 +25,18 @@ process.env.ELECTRON_BUILDER_BINARIES_MIRROR =
 // 构建期生成应用图标（assets/icon.ico + icons/*.png，不提交；源为 assets/icon.svg）
 console.log('[build:win] 生成图标（render-icons）…');
 execSync('node scripts/render-icons.mjs', { stdio: 'inherit' });
+
+// 清理上一次构建产物（release/ 是纯构建输出、已 gitignore），避免多版本堆积占磁盘
+const releaseDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'release');
+if (existsSync(releaseDir)) {
+  for (const f of readdirSync(releaseDir)) {
+    // 只清构建产物：旧便携版 exe、win-unpacked、builder-debug.yml
+    if (f.endsWith('.exe') || f === 'win-unpacked' || f === 'builder-debug.yml') {
+      rmSync(path.join(releaseDir, f), { recursive: true, force: true });
+    }
+  }
+  console.log('[build:win] 已清理旧构建产物（win-unpacked / 旧 exe / builder-debug.yml）');
+}
 
 console.log('[build:win] 目标: Windows portable（配置取 package.json "build"）');
 try {

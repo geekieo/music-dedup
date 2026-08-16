@@ -10,6 +10,7 @@
     "release": "node scripts/release.js",
     "electron": "node scripts/run-electron.mjs",
     "smoke": "node scripts/run-electron.mjs --smoke",
+    "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "p0:verify": "node scripts/run-electron.mjs --p0",
     "migrate-data": "node scripts/migrate-data.mjs",
     "icons": "node scripts/render-icons.mjs",
@@ -44,8 +45,9 @@
       "assets/**"
     ],
     "asarUnpack": [
-      "node_modules/node-sqlite3-wasm/**",
-      "electron/fingerprint-worker.js"
+      "lib/**",
+      "node_modules/**",
+      "electron/scan-worker.js"
     ],
     "extraResources": [
       {
@@ -54,6 +56,9 @@
       }
     ],
     "npmRebuild": false,
+    "afterPack": "scripts/after-pack.cjs",
+    "electronLanguages": ["zh-CN", "zh-TW", "en-US"],
+    "compression": "maximum",
     "win": {
       "icon": "assets/icon.ico",
       "target": [
