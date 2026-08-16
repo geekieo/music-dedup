@@ -35,9 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **迁移排序回归** — P2 把 `getDB()` 提到模块顶层，目标库在迁移决策前被创建，旧数据被静默跳过；已恢复「迁移决策先于任何 DB 打开」
 - **流式播放中文路径 TypeError** — ETag 含中文触发 ByteString 编码异常；改纯 `size-mtime`；路径型 URL 统一正斜杠编码
 - **`estimateStepWeights` 引用不存在列** — 新 schema 库扫描即 `no such column`；改正列名并把权重计算移入 try 块
-- **launch-dev.cmd 中文注释破坏启动命令** — cmd.exe 按 GBK 解析 UTF-8 批处理；重写为 ASCII 注释 + CRLF
 - **打包版扫描 worker 读 asar 依赖失败** — worker 不继承 Electron asar fs 补丁，声纹/扫描 worker 一直静默降级回主进程；`asarUnpack` 扩为 `lib/**` + `node_modules/**` + `scan-worker.js`，打包版扫描现已可用
-- **Windows 任务栏显示「Electron」** — 本机残留 `Electron.lnk` 与 AUMID 不匹配；清理并新建带 `com.geekieo.musicdedup` 的快捷方式
+- **dev 进程身份显示「Electron」（任务栏/任务管理器）** — 本机 Start Menu 曾残留指向 electron.exe 的 `Electron.lnk` 干扰任务栏身份，且 dev 直跑 electron.exe 时任务管理器必然显示「Electron」。最终方案：主窗口显式 `icon` + 新增 dev 专用 `MusicDedup.exe`（electron.exe 复制 + rcedit 打图标/版本资源，`scripts/patch-dev-exe.mjs`），dev 全程显示 MusicDedup，不再依赖或污染 Start Menu 快捷方式
 - **托盘图标进系统托盘溢出区** — Windows 11 默认折叠属正常；补 `.ico` 格式
 
 ## [1.15.0] — 2026-08-03

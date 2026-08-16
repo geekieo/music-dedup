@@ -16,10 +16,9 @@
 
 import { spawn } from 'child_process';
 import { createRequire } from 'module';
+import { ensureDevExe } from './patch-dev-exe.mjs';
 
 const require = createRequire(import.meta.url);
-// electron npm 包的 module.exports 即 electron.exe 的绝对路径
-const electronPath = require('electron');
 
 if ('ELECTRON_RUN_AS_NODE' in process.env) {
   delete process.env.ELECTRON_RUN_AS_NODE;
@@ -35,6 +34,16 @@ const opt = (name) => {
 };
 
 const args = ['electron/main.js', ...argv];
+// dev 用打过分身/图标的 MusicDedup.exe（electron.exe 复制 + rcedit），
+// 让 Task Manager/任务栏显示 MusicDedup 而非 Electron；首次或 electron 升级后自动重建。
+// 重建失败（如正在运行的实例锁住 exe）时回退 electron.exe，不阻塞启动。
+let electronPath = null;
+try {
+  electronPath = ensureDevExe();
+} catch (e) {
+  console.warn('[electron] dev-exe 生成失败，回退 electron.exe：' + e.message);
+  electronPath = require('electron');
+}
 const child = spawn(electronPath, args, {
   stdio: 'inherit',
   windowsHide: false,

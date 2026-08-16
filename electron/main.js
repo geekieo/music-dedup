@@ -135,6 +135,9 @@ function createClientWindow() {
     x: saved.x,
     y: saved.y,
     title: 'MusicDedup',
+    // 窗口/任务栏/Alt-Tab 图标：dev 下 electron.exe 默认图标是 Electron，必须显式指定
+    // （打包版 exe 内嵌图标不受影响；这里统一走 appIcon() 与托盘/通知同源）
+    icon: appIcon(),
     autoHideMenuBar: true,
     // ── P4 无边框（路线 A · 保留原生窗口控件）────────────────────────────
     // Windows: titleBarStyle hidden + titleBarOverlay（原生 min/max/close 悬浮，
