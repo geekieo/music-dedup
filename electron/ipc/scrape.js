@@ -6,8 +6,19 @@ import { getAllSettings } from '../../lib/db/settings.js';
 import { getFileById } from '../../lib/db/files.js';
 import { getScrapedMeta, upsertScrapedMeta } from '../../lib/db/scrape.js';
 import { getExiftoolStatus } from '../../lib/tagger.js';
-import { scrapeSingleFile, getMbCandidates, getAcoustidCandidates } from '../../lib/scraper.js';
+import { scrapeSingleFile, getMbCandidates, getAcoustidCandidates, setHttpFetch } from '../../lib/scraper.js';
 import { computeScrapeTier, mergeDualScrapeShape } from '../../lib/tier.js';
+import { createRequire } from 'module';
+
+// 主进程网络请求一律走 Electron net.fetch（Chromium 网络栈）：
+// 全局 fetch（undici）在主进程跑会占主进程事件循环——被墙/代理环境下连接挂起时
+// 会阻塞全部 IPC，表现为"验证时整个应用卡死、其他功能点不了"（P5 联调实测）。
+// net.fetch 跑在 Chromium IO 线程、尊重系统代理，天然不阻塞主进程 JS。
+// 手动刮削（scrape-single / mb-candidates / acoustid-candidates）经 lib/scraper.js
+// 的可注入 httpFetch 同样切到 net.fetch；scan worker 线程保持全局 fetch（不影响主进程）。
+const require = createRequire(import.meta.url);
+const { net } = require('electron');
+setHttpFetch(net.fetch);
 
 const db = getDB();
 
@@ -95,10 +106,23 @@ export const routes = [
       // 用最小（故意无效）指纹做一次 lookup —— 若 KEY 本身有效，AcoustID 会改报指纹
       // 问题而非 key 问题，从而无需真实指纹即可确认 key 可用。
       const params = new URLSearchParams({ client: key.trim(), duration: '240', fingerprint: 'AQAAA', meta: 'recordings' });
-      const r = await fetch(`https://api.acoustid.org/v2/lookup?${params}`, {
-        headers: { 'User-Agent': 'MusicDedup/2.0' }
-      });
-      const d = await r.json();
+      // 10s 超时：被墙/无网环境下 acoustid.org 连接会无限挂起（AbortController 兜底）。
+      // 用 net.fetch（Chromium 栈，不阻塞主进程事件循环）而非全局 fetch（undici 会卡 IPC）。
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 10000);
+      let d;
+      try {
+        const r = await net.fetch(`https://api.acoustid.org/v2/lookup?${params}`, {
+          headers: { 'User-Agent': 'MusicDedup/2.0' },
+          signal: ac.signal,
+        });
+        d = await r.json();
+      } catch (e) {
+        if (e.name === 'AbortError') return { ok: false, error: '请求超时（10s），请检查网络连接后重试' };
+        return { ok: false, error: '网络错误: ' + e.message };
+      } finally {
+        clearTimeout(timer);
+      }
       // Code 4（而非 3）= key 无效。同时匹配 message 文本（文档化的契约，code 可能变化）。
       const msg = (d.error?.message || '').toLowerCase();
       const isKeyInvalid = d.status === 'error' && (d.error?.code === 4 || msg.includes('invalid api key') || msg.includes('invalid client'));

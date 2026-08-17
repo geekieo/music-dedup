@@ -15,6 +15,7 @@ import { createRequire } from 'module';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { existsSync, rmSync } from 'fs';
 import { Worker } from 'node:worker_threads';
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
@@ -27,6 +28,7 @@ let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle'
 let send = () => {}; // 由 registerApi 注入（绑定窗口 webContents）
 let activeWorker = null;
 let settled = false; // 终态只广播一次（worker exit 在 terminate 后仍会触发，须防重）
+let activeTempDb = null; // 本次扫描 worker 用的临时库副本路径（结束后合并回主库并删除）
 
 const now = () => new Date().toLocaleTimeString([], { hour12: false });
 
@@ -47,15 +49,81 @@ function broadcast(data) {
   send({ ...data });
 }
 
+// ── 临时库（P5.1 锁冲突修复）────────────────────────────────────────────
+// 根因：node-sqlite3-wasm 不支持 WAL（PRAGMA journal_mode=WAL 静默回退 delete），主进程与
+// worker 双连接在 DELETE 模式下读写互锁，busy_timeout=10s 是同步忙等 → 主进程冻结 +
+// "database is locked" 崩溃（P5 复验实测）。方案：worker 用主库的 VACUUM INTO 快照副本，
+// 全程独享（与主进程零冲突）；结束后主进程单连接 ATTACH 合并回主库，再删临时库。
+function snapshotDbForScan() {
+  const dbDir = path.dirname(process.env.DB_PATH);
+  const tmpPath = path.join(dbDir, `scan-tmp-${Date.now()}.db`);
+  db.exec(`VACUUM INTO '${tmpPath.replace(/'/g, "''")}'`);
+  return tmpPath;
+}
+
+function cleanupTempDb(tmpPath) {
+  if (!tmpPath) return;
+  for (const p of [tmpPath, tmpPath + '-wal', tmpPath + '-shm']) { try { rmSync(p, { force: true }); } catch {} }
+  try { rmSync(tmpPath + '.lock', { recursive: true, force: true }); } catch {}
+  if (activeTempDb === tmpPath) activeTempDb = null;
+}
+
+// 把 worker 写好的临时库合并回主库（主连接 ATTACH，单连接无争用）。
+// temp 是主库快照 + 扫描全部写入，故 files/scraped_meta 整表 upsert；
+// matcher 的 clearGroups 是全删重写，故组表整表替换（temp 即完整正确状态）。
+function mergeTempDb(tmpPath) {
+  if (!tmpPath || !existsSync(tmpPath)) return;
+  // worker 已在 finally 关闭临时库连接；残留的 .lock 为陈旧锁（mkdir 未 rmdir），
+  // 不清会让下方 ATTACH 报 database is locked。
+  try { rmSync(tmpPath + '.lock', { recursive: true, force: true }); } catch {}
+  try {
+    db.exec(`ATTACH DATABASE '${tmpPath.replace(/'/g, "''")}' AS scan_tmp`);
+    // REPLACE 语义 = DELETE+INSERT，可能触发 tag_snapshots 的 FK；合并保留全部 id 引用
+    // 完整性，期间关闭 FK 校验（事务内不可改，须在 BEGIN 之前设置）。
+    db.exec('PRAGMA foreign_keys=OFF');
+    db.exec('BEGIN');
+    db.exec('INSERT OR REPLACE INTO files SELECT * FROM scan_tmp.files');
+    db.exec('DELETE FROM group_tracks; DELETE FROM dup_groups;');
+    db.exec('INSERT INTO dup_groups SELECT * FROM scan_tmp.dup_groups');
+    db.exec('INSERT INTO group_tracks SELECT * FROM scan_tmp.group_tracks');
+    db.exec('INSERT OR REPLACE INTO scraped_meta SELECT * FROM scan_tmp.scraped_meta');
+    db.exec('COMMIT');
+    db.exec('PRAGMA foreign_keys=ON');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch {}
+    db.exec('PRAGMA foreign_keys=ON');
+    throw e;
+  } finally {
+    try { db.exec('DETACH scan_tmp'); } catch {}
+  }
+}
+
 // ── 终态 ──────────────────────────────────────────────────────────────────
+let doneMessage = ''; // worker 的最终完成消息（settle 的合并广播会覆盖 scanState.message，须先保存）
+
 function settle() {
   if (settled) return;
   settled = true;
+  // 先合并临时库（worker 已完成且关闭 temp 连接，此刻 ATTACH 无锁冲突），
+  // 再广播 done——done 后前端 refreshStats 读到的是合并后的最新数据。
+  if (activeTempDb) {
+    broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${now()}] 正在合并扫描结果...` });
+    try { mergeTempDb(activeTempDb); }
+    catch (e) { console.log('[scan] 临时库合并失败：', e.message); }
+    finally { cleanupTempDb(activeTempDb); }
+  }
   scanState.running = false;
   scanState.paused = false;
   // 终态归一：phase 固定为 done/error/aborted（error 优先于 abort），否则"仅跑单步"
   // 或"中止"后 phase 会停在最后一个步骤名，前端进度区块永不收起、'已中止'标签不生效。
   if (scanState.phase !== 'error') scanState.phase = scanState.abortFlag ? 'aborted' : 'done';
+  // 终态消息：abort 给出明确总结；正常 done 恢复 worker 的最后完成消息（不被合并广播覆盖）。
+  if (scanState.abortFlag) {
+    scanState.level = 'info';
+    scanState.message = `[${now()}] 扫描已中止，已完成步骤的结果已保留`;
+  } else if (doneMessage) {
+    scanState.message = doneMessage;
+  }
   broadcast({ type: 'done', ...scanState });
   if (activeWorker) { try { activeWorker.terminate(); } catch {} activeWorker = null; }
 }
@@ -67,6 +135,7 @@ function onWorkerMessage(msg) {
     broadcast({ type: msg.type, ...scanState });
   } else if (msg.type === 'done') {
     const { paused, abortFlag, running, ...rest } = msg;
+    doneMessage = rest.message || ''; // 保存 worker 完成消息（合并广播前）
     Object.assign(scanState, rest);
     settle();
   } else if (msg.type === 'error') {
@@ -98,11 +167,25 @@ function onWorkerExit(code) {
   }
 }
 
-// ── 启动（fire-and-forget：同步置 running → spawn → 立即返回）─────────────
+// ── 启动（fire-and-forget：同步置 running → 快照 → spawn → 立即返回）─────────────
 function startScanInWorker(options) {
   // 同步先置 running（spawn 同步，postMessage 前已生效）→ 挡住并发 start
   scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${now()}] 准备中...`, startTime: Date.now() };
   settled = false;
+  // 快照主库 → 临时库副本（worker 全程只读写副本，与主进程零锁冲突；P5.1）
+  let tempDbPath;
+  try {
+    tempDbPath = snapshotDbForScan();
+    activeTempDb = tempDbPath;
+  } catch (e) {
+    console.log('[scan] 库快照失败：', e.message);
+    scanState.phase = 'error';
+    scanState.level = 'err';
+    scanState.message = `[${now()}] 扫描库快照失败：${e.message}`;
+    scanState.running = false;
+    broadcast({ type: 'done', ...scanState });
+    return;
+  }
   let worker;
   try {
     // type:'module' 显式指定：打包后 worker 在 app.asar.unpacked/（该目录无 package.json，
@@ -111,6 +194,7 @@ function startScanInWorker(options) {
     worker = new Worker(path.join(__dirname, '..', 'scan-worker.js'), { type: 'module', env: process.env });
   } catch (e) {
     console.log('[scan] worker 启动失败：', e.message);
+    cleanupTempDb(tempDbPath);
     scanState.phase = 'error';
     scanState.level = 'err';
     scanState.message = `[${now()}] 扫描进程启动失败：${e.message}`;
@@ -123,7 +207,7 @@ function startScanInWorker(options) {
   worker.on('error', onWorkerError);
   worker.on('exit', onWorkerExit);
   broadcast({ type: 'start', ...scanState });
-  worker.postMessage({ cmd: 'start', options });
+  worker.postMessage({ cmd: 'start', options: { ...options, tempDbPath } });
 }
 
 export const routes = [

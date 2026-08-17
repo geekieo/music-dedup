@@ -16,6 +16,7 @@ import { forceStripLaneTags } from '../lib/db/groups.js';
 import { runEnumerate, runMetadata, runFingerprint } from '../lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from '../lib/matcher.js';
 import { runScrape } from '../lib/scraper.js';
+import { killActiveFpcalc } from '../lib/chromaprint-bridge.js';
 
 let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle', pct: 0, message: '', startTime: null };
 let db = null; // 流水线内打开，finally 里 close
@@ -59,9 +60,12 @@ function estimateStepWeights(db, steps, { force, acoustidKey }) {
 }
 
 async function runScanPipeline(options) {
-  const { dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath } = options;
-  // 本 worker 独立 DB 连接（WAL 多连接，主进程为读者）。skipInit：schema 已由主进程建立。
-  db = openDB({ skipInit: true });
+  const { dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath, tempDbPath } = options;
+  // 本 worker 独立 DB 连接（P5.1：改开主库快照副本 scan-tmp-*.db——node-sqlite3-wasm 无 WAL，
+  // 双连接同库在 DELETE 模式互锁；副本让 worker 与主进程零冲突，结束后由 broker 合并回主库）。
+  // skipInit：schema 已由主进程建立（快照副本自带 schema）。skipPragma：单连接临时库不需要
+  // 并发 pragma，且 worker 线程对 VACUUM 产物执行 journal_mode=WAL 会报 database is locked。
+  db = openDB({ skipInit: true, skipPragma: true, path: tempDbPath });
   scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${new Date().toLocaleTimeString([], { hour12: false })}] 准备中...`, startTime: Date.now() };
   post({ type: 'start', ...scanState });
   // 原地 mutate scanState 并上送——只上送 evt 会因前端整体替换而丢掉 running/paused/abortFlag
@@ -85,12 +89,38 @@ async function runScanPipeline(options) {
   }
   function advanceWeight(stepName) { cumWeight += stepWeights[stepName] || 0; }
   try {
-    stepWeights = estimateStepWeights(db, steps, { force, acoustidKey });
-    // 步骤1: 枚举
-    if (steps.includes('enum') && !abort()) {
-      await runEnumerate(db, { dirs, exclude, onProgress: wrapProg('enum'), onAbort: abort, onPause: pause });
-      advanceWeight('enum');
+    // ── 权重重估：enum 后基于实际文件集估算其余步骤 ──
+    // enum 会增删 files 表，先用预估算权重跑，跑完后再估算（计数反映真实文件集），
+    // 缩放至剩余份额（1 - enumW），进度条分布与本次实际工作量一致。
+    let enumW = 0; // enum 不在步骤时无预留份额
+    if (steps.includes('enum')) {
+      const pre = estimateStepWeights(db, steps, { force, acoustidKey });
+      enumW = pre.enum || 0.02;
+      stepWeights = { enum: enumW };
+      if (!abort()) {
+        await runEnumerate(db, { dirs, exclude, onProgress: wrapProg('enum'), onAbort: abort, onPause: pause });
+        advanceWeight('enum');
+      }
     }
+    const est = estimateStepWeights(db, steps, { force, acoustidKey });
+    // 单步权重上限：网络步骤（刮削）估算常占绝大部分权重，会把本地步骤的进度压平。
+    // 用水位线法——超限步骤压到上限，超出份额按比例分摊给其余步骤，总和保持 1。
+    const MAX_STEP = 0.45;
+    const w = { ...est };
+    for (let iter = 0; iter < 8; iter++) {
+      let excess = 0, over = false;
+      for (const s of steps) {
+        if (s === 'enum') continue;
+        if (w[s] > MAX_STEP) { excess += w[s] - MAX_STEP; w[s] = MAX_STEP; over = true; }
+      }
+      if (!over || excess <= 0.001) break;
+      const below = Object.entries(w).filter(([k, v]) => k !== 'enum' && v < MAX_STEP);
+      const belowSum = below.reduce((a, [, v]) => a + v, 0);
+      if (belowSum <= 0) break;
+      for (const [k, v] of below) w[k] = v + (v / belowSum) * excess;
+    }
+    const nonEnumSum = Object.entries(w).filter(([k]) => k !== 'enum').reduce((a, [, v]) => a + v, 0) || 1;
+    for (const s of steps) if (s !== 'enum') stepWeights[s] = (w[s] / nonEnumSum) * (1 - enumW);
     // 步骤2: 提取属性
     if (steps.includes('meta') && !abort()) {
       await runMetadata(db, { threads, smartScan: force ? false : smartScan, onProgress: wrapProg('meta'), onAbort: abort, onPause: pause });
@@ -163,9 +193,16 @@ parentPort.on('message', (msg) => {
       break;
     case 'abort':
       if (scanState.running) { scanState.abortFlag = true; scanState.paused = false; }
+      // 杀掉在跑的 fpcalc，让当前批快速结束（否则批要等 fpcalc 跑完/超时）。
+      // kill 后 computeChromaprint 的 execP reject → 批结束 → 边界 onAbort() 随即返回。
+      // Goertzel/parseFile 不可打断，至多等一个文件解码。
+      killActiveFpcalc();
       break;
     case 'pause':
       if (scanState.running && !scanState.abortFlag) scanState.paused = true;
+      // 暂停同样杀 fpcalc：让当前批尽快结束、暂停在批边界立即生效。
+      // 被杀文件的本轮 Chromaprint 缺失，下次扫描（chromaprint IS NULL）自愈。
+      killActiveFpcalc();
       break;
     case 'resume':
       if (scanState.running) scanState.paused = false;

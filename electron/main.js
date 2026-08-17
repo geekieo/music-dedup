@@ -8,7 +8,7 @@
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, ipcMain, protocol, Notification, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, Tray, Menu, nativeImage } = require('electron');
 import './bootstrap-env.js'; // 必须先于其它 import：lib/db.js 在模块加载时即解析 DB_PATH
 import path from 'path';
 import fs from 'fs';
@@ -26,6 +26,12 @@ import { getSetting, setSetting } from '../lib/db/settings.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isP0Verify = process.env.P0_VERIFY === '1';
 const isSmoke = process.env.V2_SMOKE === '1';
+
+// 全局兜底：主进程未捕获异常不弹 Electron 崩溃对话框，改为打印堆栈后继续
+//（便于定位并发锁等运行时错误，避免打断用户操作）。
+process.on('uncaughtException', (e) => {
+  console.error('[v2] 未捕获异常：', e && e.stack ? e.stack : e);
+});
 
 // P0 自测需要渲染进程无手势直接 play()；真实播放器走用户手势
 if (isP0Verify) app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -47,24 +53,20 @@ function getSampleFiles() {
 // ── P4 客户端路径 ─────────────────────────────────────────────────────────
 let mainWindow = null;
 let tray = null;
-// P4 关闭行为特殊化：空闲关窗=正常退出；扫描等长任务进行中关窗=最小化到托盘（不中断）。
+// 关闭行为：任务进行中关窗 → 程序内弹窗确认（渲染层），确认后中止任务再退出；
+// 空闲关窗直接退出。forceQuit 由确认关闭路径置位。
 let scanRunning = false; // 由 scan 事件跟踪（start→true / done→false）
-let forceQuit = false;   // 托盘「退出」置位，跳过关窗拦截
+let forceQuit = false;   // 确认关闭后置位，跳过关窗拦截
+let pendingClose = false; // 用户已确认关闭、等待扫描中止归位后退出
 function sendScan(data) {
   if (!data) return;
   if (data.type === 'start') scanRunning = true;
-  else if (data.type === 'done') scanRunning = false;
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
-  // P4 扫描完成系统通知（done 事件由 scan.js finally 广播，含 abortFlag）
-  if (data.type === 'done') {
-    try {
-      new Notification({
-        title: data.abortFlag ? 'MusicDedup 扫描已中止' : 'MusicDedup 扫描完成',
-        body: data.abortFlag ? '扫描已被中止。' : '全部所选步骤已完成。',
-        icon: appIcon(),
-      }).show();
-    } catch (e) { /* 通知失败不阻塞 */ }
+  else if (data.type === 'done') {
+    scanRunning = false;
+    // 已确认关闭：扫描已中止归位 → 立刻退出（等合并完成后窗口才会收到 done）
+    if (pendingClose) { pendingClose = false; forceQuit = true; if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); }
   }
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
 }
 
 function showMainWindow() {
@@ -86,7 +88,8 @@ function createTrayFromDataUrl(dataUrl) {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示主窗口', click: showMainWindow },
       { type: 'separator' },
-      { label: '退出', click: () => { forceQuit = true; app.quit(); } },
+      // 托盘「退出」与窗口关闭按钮一致：任务进行中先经程序内确认，空闲直接退出。
+      { label: '退出', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); } },
     ]));
     tray.on('double-click', showMainWindow);
     console.log('[v2] 托盘已创建（代码生成图标）');
@@ -128,7 +131,8 @@ function createClientWindow() {
   const isWin = process.platform === 'win32';
   // 窗口状态记忆（存 settings 表，计划 P4）：恢复上次尺寸/位置/最大化。
   // 惰性 getDB()：窗口只在迁移决策（whenReady）后创建，此刻库必已就绪。
-  const saved = getSetting(getDB(), 'window_state', null) || {};
+  let saved = {};
+  try { saved = getSetting(getDB(), 'window_state', null) || {}; } catch (e) { console.log('[v2] 读取窗口状态失败：', e && e.message); }
   const win = new BrowserWindow({
     width: saved.width || 1280,
     height: saved.height || 840,
@@ -153,22 +157,18 @@ function createClientWindow() {
   // 关闭/最大化时记录窗口状态（最大化存 normal bounds + 标记，恢复时还原）
   win.on('close', (e) => {
     const b = win.getNormalBounds();
-    setSetting(getDB(), 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() });
-    // 扫描进行中关窗 → 最小化到托盘（不中断扫描），并通知用户去向；
-    // 托盘「退出」置 forceQuit 后走正常退出
+    // 存窗口状态失败（如扫描合并期的临时锁冲突）不阻断关闭——关窗路径不容许抛未捕获异常
+    // 触发 Electron 崩溃对话框（实测：merge 撞锁时此处 setSetting 抛 database is locked）。
+    try { setSetting(getDB(), 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() }); }
+    catch (err) { console.log('[v2] 保存窗口状态失败：', err && err.message); }
+    // 任务进行中 → 程序内弹窗确认（渲染层），确认后中止任务再退出；空闲直接退出。
+    // 渲染层不可达时回退直接退出。
     if (!forceQuit && scanRunning) {
-      const wasVisible = win.isVisible();
-      e.preventDefault();
-      win.hide();
-      if (wasVisible) {
-        try {
-          new Notification({
-            title: 'MusicDedup 扫描进行中',
-            body: '已最小化到托盘，扫描继续后台运行。恢复窗口请点击托盘图标；退出请用托盘菜单。',
-            icon: appIcon(),
-          }).show();
-        } catch (err) { /* 通知失败不阻塞 */ }
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+        e.preventDefault();
+        mainWindow.webContents.send('app:confirm-close');
       }
+      // else：渲染层已死，无法弹窗确认 → 走正常退出
     }
   });
   win.on('maximize', () => win.webContents.send('win:maximized', true));
@@ -190,6 +190,25 @@ function registerWindowControls() {
   });
   ipcMain.handle('win:close', () => { if (mainWindow) mainWindow.close(); });
   ipcMain.handle('win:is-maximized', () => (mainWindow ? mainWindow.isMaximized() : false));
+  // 关闭确认通道：置 pendingClose，等扫描中止归位（sendScan done 分支）后退出；
+  // 中止超时 5s 兜底强退，避免任务中止异常时窗口关不掉。
+  ipcMain.handle('app:confirm-close', () => {
+    pendingClose = true;
+    if (!scanRunning) {
+      pendingClose = false;
+      forceQuit = true;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      return true;
+    }
+    setTimeout(() => {
+      if (pendingClose) {
+        pendingClose = false;
+        forceQuit = true;
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      }
+    }, 5000);
+    return true;
+  });
 }
 
 // Smoke：真实库 + preload + ipc + lib 全链路自测（V2_SMOKE=1 时运行）
@@ -242,7 +261,8 @@ async function runSmoke(win) {
       const t2 = await render({ phase: 'meta', running: true, paused: false, pct: 44, subPct: 44, message: '[08:00:01] 文件属性提取: 1,200 / 2,758', level: 'ok', type: 'progress' });
       if ((t2.match(/44%/g) || []).length > 1) return { m: 'UI', u: 'progress meta no-dup-sub', ok: false, err: 'meta dup %: ' + t2.slice(0, 140) };
       const t3 = await render({ phase: 'done', running: false, paused: false, pct: 100, message: '[08:00:02] 刮削匹配完成！发现 462 个重复组，可释放 12.3GB', level: 'done', type: 'done' });
-      if (!t3.includes('刮削匹配完成') || t3.includes('暂停') || t3.includes('[08:00:02]')) return { m: 'UI', u: 'progress done summary', ok: false, err: 'done: ' + t3.slice(0, 140) };
+      // 终态：绿字完成文本 + 「运行完成」标签、按钮置灰常驻（卡片尺寸各状态一致），无时间戳
+      if (!t3.includes('刮削匹配完成') || !t3.includes('运行完成') || t3.includes('[08:00:02]')) return { m: 'UI', u: 'progress done summary', ok: false, err: 'done: ' + t3.slice(0, 140) };
       return { m: 'UI', u: 'progress UI states', ok: true, err: null };
     })();
     out.push(progUI);
@@ -288,6 +308,15 @@ const isClientMode = !isP0Verify && !isSmoke;if (isClientMode && !app.requestSin
         mainWindow.focus();
       }
     });
+    // 清理 node-sqlite3-wasm 的陈旧 .lock 目录（强杀/崩溃后残留）：拿到单实例锁即证明
+    // 无其他 MusicDedup 进程存活，此刻的 .lock 必为陈旧——不清的话 getDB() 的 read-write
+    // 打开会报 database is locked，应用无法启动（P5.1 联调实测）。必须在 getDB 前执行。
+    try {
+      if (process.env.DB_PATH) {
+        const lockDir = process.env.DB_PATH + '.lock';
+        if (fs.statSync(lockDir).isDirectory()) fs.rmSync(lockDir, { recursive: true, force: true });
+      }
+    } catch { /* .lock 不存在或非目录——无需清理 */ }
   }
 
   app.whenReady().then(async () => {

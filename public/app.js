@@ -320,13 +320,20 @@ function useScanStream(onDone){
   const[confirm,setConfirm]=useState(null);
   const onDoneRef=useRef(onDone);
   onDoneRef.current=onDone;
+  // 匹配阶段完成即刷新（中途可见新重复组）：basicMatch/fpMatch/scrapeMatch 完成时会以
+  // running=true 发 phase:'done'（matcher 完成消息），此刻新组已写入数据库——相位从
+  // 匹配阶段跳变到 done 时刷新一次，不必等整个扫描结束（P5 联调：中途重复组页不刷新）。
+  const MATCH_PHASES=new Set(['basicMatch','fpMatch','scrapeMatch']);
+  const prevPhaseRef=useRef(null);
 
   useEffect(()=>{
     if(!window.bridge?.onScanProgress)return;
     // v2（P2）：SSE → IPC 事件（scan:progress）。事件 payload 与 v1 SSE 的
     // JSON 消息同构（{phase,pct,running,message,level,type}），此消费逻辑不变。
     const off=window.bridge.onScanProgress(d=>{
-      setStatus(d);
+      // 相位切换时清 subPct：新相位首个 emit 常不带 subPct，残留上一相位的值会让
+      // 内联子% 卡在旧值（如上一相位结束的 100%）。
+      setStatus(prev=>(d.phase!==prevPhaseRef.current?{...d,subPct:undefined}:d));
       if(d.message){
         setLogs(p=>{
           if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
@@ -335,6 +342,8 @@ function useScanStream(onDone){
         });
       }
       if(d.type==='done')onDoneRef.current?.();
+      else if(d.phase!==prevPhaseRef.current&&MATCH_PHASES.has(prevPhaseRef.current))onDoneRef.current?.();
+      prevPhaseRef.current=d.phase;
     });
     // 挂载时拉一次当前状态（等价 SSE 首连的 type:'state' 事件，覆盖重载场景）
     api.get('/api/scan/status').then(r=>{if(r.ok&&r.data)setStatus(r.data);});
@@ -372,6 +381,7 @@ function App(){
   const[libraryKey,setLibraryKey]=useState(0);
   const[retentionListKey,setRetentionListKey]=useState(0);
   const[writeHistoryKey,setWriteHistoryKey]=useState(0);
+  const[confirmCloseOpen,setConfirmCloseOpen]=useState(false); // 任务进行中关窗的确认弹窗
   const player=useGlobalPlayer();
 
   function refreshStats(){
@@ -407,6 +417,13 @@ function App(){
     };
     img.onerror=()=>{};
     img.src=link.href;
+  },[]);
+
+  // 任务进行中关窗：主进程发 app:confirm-close → 弹窗确认；确认后中止扫描并调
+  // confirmClose()，主进程等归位后退出。
+  useEffect(()=>{
+    if(!window.bridge?.onConfirmClose)return;
+    return window.bridge.onConfirmClose(()=>setConfirmCloseOpen(true));
   },[]);
 
   // Stable identities — required for React.memo on LibraryView/DuplicatesView
@@ -530,7 +547,8 @@ function App(){
       e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start',paddingLeft:window.bridge?.platform==='darwin'?72:0}},
         e(Logo,{size:28}),
         e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em'}},'MusicDedup'),
-        e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION)
+        e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION),
+        window.bridge?.isTest&&e('span',{style:{fontSize:11,color:'var(--amber)',background:'var(--amber-bg)',padding:'2px 8px',borderRadius:4,border:'1px solid var(--amber-bd)',fontFamily:'var(--font-mono)',fontWeight:600}},'隔离测试')
       ),
       e('nav',{style:{display:'flex',gap:4,justifySelf:'center',WebkitAppRegion:'no-drag'}},
         TABS.map(t=>e('button',{key:t.id,onClick:()=>setView(t.id),style:{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:view===t.id?'var(--amber-bg)':'none',border:'none',outline:'none',borderRadius:'var(--r-md)',transition:'all .15s'}},
@@ -554,6 +572,13 @@ function App(){
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
-    e(PlayerBar,{player,onLocate:handleLocate})
+    e(PlayerBar,{player,onLocate:handleLocate}),
+    // 扫描进行中关窗时弹出的确认弹窗：确认后中止扫描 → confirmClose() → 主进程等归位后退出。
+    confirmCloseOpen&&e(ConfirmModal,{
+      title:'关闭应用',
+      message:e('span',null,'有任务正在执行（扫描进行中）。确认停止任务并关闭应用？未完成的扫描结果将丢失。'),
+      onConfirm:()=>{ api.post('/api/scan/abort'); if(window.bridge?.confirmClose)window.bridge.confirmClose(); },
+      onClose:()=>setConfirmCloseOpen(false),
+    })
   );
 }

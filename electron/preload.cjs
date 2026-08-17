@@ -18,6 +18,17 @@ contextBridge.exposeInMainWorld('bridge', {
   },
   // P4 无边框：平台标识 + 窗口控制（Linux 自绘按钮用；Win/mac 走原生控件）
   platform: process.platform,
+  // 关闭确认：主进程发 app:confirm-close → 渲染层弹窗；确认后调 confirmClose()，
+  // 主进程等任务中止归位后退出。
+  onConfirmClose: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('app:confirm-close', listener);
+    return () => ipcRenderer.removeListener('app:confirm-close', listener);
+  },
+  confirmClose: () => ipcRenderer.invoke('app:confirm-close'),
+  // 隔离测试模式：--userdata 指向非默认目录时置 true，渲染进程 header 显示「隔离测试」徽标，
+  // 与生产环境区分（类似 develop/test/product 环境标记）。
+  isTest: !!process.env.MUSICDEDUP_USERDATA,
   winControls: {
     minimize: () => ipcRenderer.invoke('win:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('win:toggle-maximize'),

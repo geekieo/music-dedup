@@ -18,13 +18,10 @@ function ScannerView({scan}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
   const[runningLane,setRunningLane]=useState(null);
   const[advanced,setAdvanced]=useState({});
-  // 终态摘要可关闭；下次扫描开始自动复位
-  const[summaryDismissed,setSummaryDismissed]=useState(false);
   const logRef=useRef(null);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[logs]);
   useEffect(()=>{if(!status.running)setRunningLane(null);},[status.running]);
-  useEffect(()=>{if(status.running)setSummaryDismissed(false);},[status.running]);
 
   function runLane(key,force=false){
     const lm=LANE_META[key];
@@ -39,9 +36,9 @@ function ScannerView({scan}){
     startStep(steps,false,'完整扫描');
   }
 
-  // 终态归一（scan.js finally）：done/error/aborted 且 running=false 时收起进度条、
-  // 显示一行可关闭摘要。注意匹配步骤完成点会以 running=true 发 phase:'done'，必须
-  // 用 !running 门控，否则运行中途会把进度块误替换成摘要。
+  // 终态判定（scan.js finally）：done/error/aborted 且 running=false 才算整轮扫描结束。
+  // 注意匹配步骤完成点会以 running=true 发 phase:'done'，必须用 !running 门控，
+  // 否则运行中途会把进度卡误判成终态（"匹配完成"而非"运行完成"）。
   const TERMINAL=['done','error','aborted'];
   const isTerminal=TERMINAL.includes(status.phase)&&!status.running;
   const SUM_META={
@@ -134,38 +131,54 @@ function ScannerView({scan}){
       ),
     ),
 
-    // Progress / result — 运行中：单进度条 + 活动行（内联子%仅在与总%明显不同时显示，
-    // 消除 meta/fp 阶段与主条完全重复的双条观感）；终态：收起进度条与按钮，保留一行
-    // 可关闭摘要（绿色✓/红色错误/灰色中止，下次扫描开始时自动复位）。
-    status.phase!=='idle'&&(isTerminal
-      ? !summaryDismissed&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:SUM_META[status.phase].bg,border:`0.5px solid ${SUM_META[status.phase].bd}`,borderRadius:'var(--r-lg)',marginBottom:10}},
-          Icon(SUM_META[status.phase].icon,{fontSize:15,color:SUM_META[status.phase].color,flexShrink:0}),
-          e('span',{style:{flex:1,minWidth:0,fontSize:12,fontWeight:500,color:SUM_META[status.phase].color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},summaryText),
-          e('button',{onClick:()=>setSummaryDismissed(true),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
-        )
-      : e('div',{style:{background:'var(--bg-base)',border:`0.5px solid ${status.paused?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
+    // 常驻进度卡（Steam「管理下载」式）—— 三态：
+    //   idle：默认态，按钮置灰（无可暂停/停止对象）、进度条空、短默认文本「就绪」；
+    //   运行中：单进度条 + 活动行（内联子%仅在与总%明显不同时显示）；
+    //   终态(done/error/aborted)：保持卡片、不提供关闭、不收起进度条，用 绿/红/灰 完成文本
+    //     （如「运行完成」+ 最终消息），下次扫描开始自动复位。
+    // 相位语义：匹配步骤完成点会以 running=true 发 phase:'done'（matcher 完成消息），
+    // 必须用 isTerminal（done/error/aborted 且 !running）区分"单步完成"与"整轮扫描结束"。
+    (()=>{
+      const TERM_LABEL={done:'运行完成',error:'错误',aborted:'已中止'};
+      const RUN_LABEL={idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配'};
+      const phaseLabel=isTerminal
+        ?(TERM_LABEL[status.phase]||'完成')
+        :(status.phase==='done'?'匹配完成':(RUN_LABEL[status.phase]||status.phase));
+      const phaseColor=isTerminal?(SUM_META[status.phase]?.color||'var(--tx-primary)'):'var(--tx-secondary)';
+      const phaseIcon=isTerminal
+        ?Icon(SUM_META[status.phase]?.icon||'circle-check',{fontSize:14,color:phaseColor,flexShrink:0})
+        :status.running
+          ?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}})
+          :Icon('radar',{fontSize:14,color:'var(--tx-faint)'});
+      const barFill=status.paused?'var(--tx-faint)':(isTerminal?(SUM_META[status.phase]?.color||'var(--amber)'):'var(--amber)');
+      const pct=status.pct||0;
+      // 活动/完成行 —— 常驻固定高度（各状态都渲染），保证卡片上下高度一致不跳变。
+      // 空闲显示占位（ ），运行中显示活动行，终态显示绿/红/灰完成文本。
+      const lineText=isTerminal?summaryText:actText;
+      const lineColor=isTerminal?phaseColor:'var(--tx-faint)';
+      return e('div',{style:{background:'var(--bg-base)',border:`0.5px solid ${status.paused?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-lg)',padding:'12px 16px',marginBottom:10,boxShadow:'var(--sh-xs)'}},
         e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}},
-          e('span',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:6}},
+          e('span',{style:{fontSize:12,fontWeight:500,color:phaseColor,display:'flex',alignItems:'center',gap:6}},
             status.paused&&Icon('pause',{fontSize:12,color:'var(--amber)'}),
-            status.paused?'已暂停':({idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',done:'完成 ✓',error:'错误',aborted:'已中止'}[status.phase]||status.phase)
+            phaseIcon,phaseLabel
           ),
           e('div',{style:{display:'flex',alignItems:'center',gap:10}},
-            status.running&&e('div',{style:{display:'flex',gap:6}},
-              e(Btn,{small:true,variant:'ghost',icon:status.paused?'player-play':'pause',onClick:()=>(status.paused?scan.resume():scan.pause())},status.paused?'继续':'暂停'),
-              e(Btn,{small:true,variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort')},'停止')
+            // 按钮行常驻（非运行置灰）——隐藏会造成卡片高度变化，尺寸须各状态一致
+            e('div',{style:{display:'flex',gap:6}},
+              e(Btn,{small:true,variant:'ghost',icon:status.paused?'player-play':'pause',onClick:()=>(status.paused?scan.resume():scan.pause()),disabled:!status.running},status.paused?'继续':'暂停'),
+              e(Btn,{small:true,variant:'danger',icon:'player-stop',onClick:()=>api.post('/api/scan/abort'),disabled:!status.running},'停止')
             ),
-            e('span',{style:{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:600,color:'var(--amber)'}},(status.pct||0)+'%')
+            e('span',{style:{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:600,color:isTerminal?phaseColor:(pct>0?'var(--amber)':'var(--tx-faint)')}},pct+'%')
           )
         ),
         e('div',{style:{height:5,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden'}},
-          e('div',{style:{width:(status.pct||0)+'%',height:'100%',background:status.paused?'var(--tx-faint)':'var(--amber)',borderRadius:99,transition:'width .3s'}})),
-        // 活动行 — 当前步骤细节（去时间戳，超长省略）
-        actText&&e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6,gap:8}},
-          e('span',{style:{fontSize:10.5,color:'var(--tx-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}},actText),
-          showInlineSub&&e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',flexShrink:0}},'· '+(status.subPct||0)+'%')
+          e('div',{style:{width:pct+'%',height:'100%',background:barFill,borderRadius:99,transition:'width .3s'}})),
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6,gap:8,minHeight:16}},
+          e('span',{style:{fontSize:10.5,color:lineColor,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}},lineText||' '),
+          (!isTerminal&&showInlineSub)&&e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--tx-faint)',flexShrink:0}},'· '+(status.subPct||0)+'%')
         )
-      )
-    ),
+      );
+    })(),
 
     // Log — progressive, never cleared mid-session
     e('div',{style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',overflow:'hidden',boxShadow:'var(--sh-xs)'}},
