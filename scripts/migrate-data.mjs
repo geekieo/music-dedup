@@ -40,7 +40,7 @@ const SQLITE_HEADER = Buffer.from('SQLite format 3\0');
 // 只读探测某 .db 是否 MusicDedup 库（有 files 表）。只读优先；WAL 只读打开可能
 // 因 -shm 访问失败 → 回退读写（源已关闭，读写打开干净关闭后不留边车）。返回 { ok, error }。
 function probeOpen(dbPath) {
-  const lastErr = new Error('未知');
+  let lastErr = new Error('未知');
   for (const opts of [{ readOnly: true }, {}]) {
     try {
       const db = new Database(dbPath, { fileMustExist: true, ...opts });

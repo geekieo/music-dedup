@@ -32,6 +32,11 @@ const isSmoke = process.env.V2_SMOKE === '1';
 process.on('uncaughtException', (e) => {
   console.error('[v2] 未捕获异常：', e && e.stack ? e.stack : e);
 });
+// unhandledRejection 同理：Node 15+ 默认 throw 会让未处理的 promise 拒绝直接崩掉
+// 主进程（扫描刮削并发 + 手动操作时易触发），这里打印堆栈后继续。
+process.on('unhandledRejection', (e) => {
+  console.error('[v2] 未处理的 Promise 拒绝：', e && e.stack ? e.stack : e);
+});
 
 // P0 自测需要渲染进程无手势直接 play()；真实播放器走用户手势
 if (isP0Verify) app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -190,8 +195,9 @@ function registerWindowControls() {
   });
   ipcMain.handle('win:close', () => { if (mainWindow) mainWindow.close(); });
   ipcMain.handle('win:is-maximized', () => (mainWindow ? mainWindow.isMaximized() : false));
-  // 关闭确认通道：置 pendingClose，等扫描中止归位（sendScan done 分支）后退出；
-  // 中止超时 5s 兜底强退，避免任务中止异常时窗口关不掉。
+  // 关闭确认通道：置 pendingClose，等扫描中止归位（sendScan done 分支，此时合并已完成）后退出；
+  // 中止超时兜底强退，避免任务中止异常时窗口关不掉。超时放宽到 30s——worker 可能在长同步
+  // 匹配块（fpMatch 单块曾实测 27s）中，5s 会赶在合并完成前强退 → 临时库孤立、扫描结果丢失。
   ipcMain.handle('app:confirm-close', () => {
     pendingClose = true;
     if (!scanRunning) {
@@ -206,7 +212,7 @@ function registerWindowControls() {
         forceQuit = true;
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
       }
-    }, 5000);
+    }, 30000);
     return true;
   });
 }

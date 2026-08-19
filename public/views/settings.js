@@ -269,8 +269,8 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
 }
 
 function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten}){
-  // 并发数默认与主进程一致：按核心数自适应、封顶 8（navigator.hardwareConcurrency = 逻辑核心数）
-  const autoThreads=Math.min(8, navigator.hardwareConcurrency||8);
+  // 并发默认值 = 自动 min(12, 物理核)（主进程经 /api/system/info 查询；非 SMT 机型也能用满物理核）
+  const [autoThreads,setAutoThreads]=useState(Math.min(12, Math.round((navigator.hardwareConcurrency||8)/2)));
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
@@ -286,6 +286,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   const[fpcalcChecking,setFpcalcChecking]=useState(false);
   const saveTimer=useRef(null);
   useEffect(()=>{api.get('/api/system/fpcalc').then(r=>{if(r.ok)setFpcalc(r.data);});},[]);
+  useEffect(()=>{api.get('/api/system/info').then(r=>{if(r.ok&&r.data?.physicalCores)setAutoThreads(Math.min(12, r.data.physicalCores));});},[]);
   async function recheckFpcalc(){
     setFpcalcChecking(true);
     try{
@@ -458,15 +459,14 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         )
       ),
 
-      // 扫描性能 — 全局扫描设置（并发数影响所有扫描步骤），独立于音乐目录配置。
-      // 技术细节：扫描在单个后台 worker 线程执行，不阻塞主/渲染进程；threads 是并发批大小
-      // （同时读入内存的文件数），非多核并行，不影响扫描速度。声纹阶段内部上限 16（batch 取
-      // Math.min(threads,16)），故 UI 滑块上限设 16 与之一致，再大只堆内存、无任何速度收益。
+      // 扫描性能 — 声纹解码并发数（同时解码的文件数），直接影响声纹阶段的并行度与内存。
+      // threads 未设置（自动）时由 scan-worker 按逻辑核数计算 min(12, 逻辑核/2)；滑块上限 12
+      // 与并发上限一致（更高只加内存无收益）。
       e(Card,{id:'sec-scan-perf'},
         e(SH,{title:'扫描性能'}),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'值越大，扫描时占用的内存越多。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads||autoThreads)),
-          e('input',{type:'range',min:1,max:16,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))})
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'并发解码的文件数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:'自动 ('+autoThreads+')')),
+          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))})
         )
       ),
 

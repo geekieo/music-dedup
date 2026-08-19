@@ -311,7 +311,9 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
             )),
             e('tbody',null,rows.map((f,idx)=>{
               const isCur=player.current?.id===f.id;
-              const playableQueue=rows.filter(r=>r.fingerprint).map(r=>({id:r.id,title:r.title,artist:r.artist,src:'library',rowIdx:idx}));
+              // 播放只依赖流式读取（musicdedup://stream/<id>），与指纹是否入库无关——
+              // 指纹缺失（扫描未合并/未提取）时仍可播放，故队列不做 fingerprint 过滤。
+              const playableQueue=rows.map(r=>({id:r.id,title:r.title,artist:r.artist,src:'library',rowIdx:idx}));
               return e('tr',{
                 key:f.id,
                 ref:el=>{if(el)rowRefs.current[f.id]=el;else delete rowRefs.current[f.id];},
@@ -324,7 +326,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
                 onMouseLeave:ev=>ev.currentTarget.style.background=f.in_retention_list?'var(--bg-muted)':isCur?'var(--amber-bg)':'transparent',
               },
                 e('td',{style:{padding:'6px 8px',width:36}},
-                  f.fingerprint&&e('button',{
+                  e('button',{
                     onClick:()=>player.playTrack({id:f.id,title:f.title,artist:f.artist,src:'library',rowIdx:idx},playableQueue),
                     style:{background:isCur?'var(--amber)':'var(--bg-muted)',border:'none',borderRadius:'50%',width:24,height:24,
                       display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}},

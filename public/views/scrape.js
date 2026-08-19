@@ -221,26 +221,32 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   async function doScrape(){
     setScraping(true);setWriteResult(null);setMbCandidates(null);setAidCandidates(null);setAidError(null);
     setPreviewMbId(null);setPreviewAidId(null);
-    if(hasScraped){
-      // 重新刮削（已有数据）：只拉取候选列表，不自动保存，等用户手动选择
-      const[mbR, aidR]=await Promise.all([
-        api.get(`/api/files/${fileId}/mb-candidates`),
-        api.get(`/api/files/${fileId}/acoustid-candidates`),
-      ]);
+    try {
+      if(hasScraped){
+        // 重新刮削（已有数据）：只拉取候选列表，不自动保存，等用户手动选择
+        const[mbR, aidR]=await Promise.all([
+          api.get(`/api/files/${fileId}/mb-candidates`),
+          api.get(`/api/files/${fileId}/acoustid-candidates`),
+        ]);
+        setScraping(false);
+        if(mbR.ok) setMbCandidates(mbR.data||[]);
+        if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
+      } else {
+        // 首次刮削（无数据）：自动保存 AcoustID + MB 结果，与批量扫描一致
+        const[srapeR, mbR, aidR]=await Promise.all([
+          api.post(`/api/files/${fileId}/scrape-single`),
+          api.get(`/api/files/${fileId}/mb-candidates`),
+          api.get(`/api/files/${fileId}/acoustid-candidates`),
+        ]);
+        setScraping(false);
+        if(mbR.ok) setMbCandidates(mbR.data||[]);
+        if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
+        reload(); if(srapeR.ok) onUpdated&&onUpdated();
+      }
+    } catch (e) {
+      // 任一请求 reject（主进程异常/网络中断）→ 复位刮削状态，不让弹窗卡在"刮削中"
       setScraping(false);
-      if(mbR.ok) setMbCandidates(mbR.data||[]);
-      if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
-    } else {
-      // 首次刮削（无数据）：自动保存 AcoustID + MB 结果，与批量扫描一致
-      const[srapeR, mbR, aidR]=await Promise.all([
-        api.post(`/api/files/${fileId}/scrape-single`),
-        api.get(`/api/files/${fileId}/mb-candidates`),
-        api.get(`/api/files/${fileId}/acoustid-candidates`),
-      ]);
-      setScraping(false);
-      if(mbR.ok) setMbCandidates(mbR.data||[]);
-      if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
-      reload(); if(srapeR.ok) onUpdated&&onUpdated();
+      setAidError('刮削请求失败: ' + ((e && e.message) || String(e)));
     }
   }
   async function selectCandidate(candidate){

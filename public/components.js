@@ -299,7 +299,7 @@ function SettingStatus({state='idle',message,onClick,busy}){
   );
 }
 function Btn({children,onClick,variant='primary',small,disabled,icon,style:sx={}}){
-  const base={display:'flex',alignItems:'center',gap:5,borderRadius:'var(--r-md)',fontFamily:'var(--font-sans)',fontWeight:500,cursor:disabled?'not-allowed':'pointer',fontSize:small?11:12,padding:small?'4px 10px':'7px 14px',transition:'all .12s',border:'none',opacity:disabled?.45:1,whiteSpace:'nowrap',...sx};
+  const base={display:'flex',alignItems:'center',gap:5,borderRadius:'var(--r-md)',fontFamily:'var(--font-sans)',fontWeight:500,cursor:disabled?'not-allowed':'pointer',fontSize:small?11:12,padding:small?'4px 10px':'7px 14px',transition:'all .12s',border:'none',opacity:disabled?.6:1,whiteSpace:'nowrap',...sx};
   const V={primary:{...base,background:'var(--amber)',color:'#fff'},ghost:{...base,background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'},danger:{...base,background:'var(--red-bg)',color:'var(--red)',border:'0.5px solid var(--red-bd)'},success:{...base,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}};
   return e('button',{onClick:disabled?undefined:onClick,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
 }
@@ -315,7 +315,7 @@ function IconAction({icon,title,onClick,active,activeColor='var(--amber)',active
     background:bg,border:`1px solid ${bd}`,borderRadius:'var(--r-md)',
     cursor:'pointer',
     color:disabled?'var(--tx-faint)':fg,
-    opacity:disabled?0.4:1,
+    opacity:disabled?0.6:1,
     width:30,height:30,display:'flex',alignItems:'center',justifyContent:'center',
     flexShrink:0,transition:'all .12s',boxShadow:'var(--sh-xs)'}},
     Icon(icon,{fontSize:size}));

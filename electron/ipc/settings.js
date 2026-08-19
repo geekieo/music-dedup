@@ -9,11 +9,14 @@ const { dialog } = require('electron');
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings, setSetting } from '../../lib/db/settings.js';
 import { detectFpcalc, resetDetection } from '../../lib/chromaprint-bridge.js';
+import { getPhysicalCores } from '../cpuinfo.js';
 
 const db = getDB();
 
 export const routes = [
   { method: 'GET', path: '/api/settings', handler: () => ({ ok: true, data: getAllSettings(db) }) },
+  // 系统环境信息（渲染层"自动并发"显示用）：物理核数
+  { method: 'GET', path: '/api/system/info', handler: () => ({ ok: true, data: { physicalCores: getPhysicalCores() } }) },
   { method: 'PUT', path: '/api/settings', handler: (_p, _q, body) => {
     for (const [k, v] of Object.entries(body)) setSetting(db, k, v);
     return { ok: true };

@@ -320,10 +320,10 @@ function useScanStream(onDone){
   const[confirm,setConfirm]=useState(null);
   const onDoneRef=useRef(onDone);
   onDoneRef.current=onDone;
-  // 匹配阶段完成即刷新（中途可见新重复组）：basicMatch/fpMatch/scrapeMatch 完成时会以
-  // running=true 发 phase:'done'（matcher 完成消息），此刻新组已写入数据库——相位从
-  // 匹配阶段跳变到 done 时刷新一次，不必等整个扫描结束（P5 联调：中途重复组页不刷新）。
-  const MATCH_PHASES=new Set(['basicMatch','fpMatch','scrapeMatch']);
+  // 扫描结果分阶段增量合并（P5.2）：worker 每完成一个阶段，broker 合并临时库→主库并广播
+  // type:'merged'，此处据此刷新——"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的
+  // 阶段数据（enum 后文件列表、fp 后播放按钮、匹配后重复组）。终态 type:'done'（settle
+  // 合并之后广播）再做最终刷新兜底。中途不再依赖匹配步骤完成点的旧刷新逻辑。
   const prevPhaseRef=useRef(null);
 
   useEffect(()=>{
@@ -331,6 +331,9 @@ function useScanStream(onDone){
     // v2（P2）：SSE → IPC 事件（scan:progress）。事件 payload 与 v1 SSE 的
     // JSON 消息同构（{phase,pct,running,message,level,type}），此消费逻辑不变。
     const off=window.bridge.onScanProgress(d=>{
+      // merged（分阶段合并完成）只触发刷新，不更新进度卡状态/日志——payload 无 phase/message，
+      // 交给 setStatus 会把进度卡抹掉。
+      if(d.type==='merged'){ onDoneRef.current?.(); return; }
       // 相位切换时清 subPct：新相位首个 emit 常不带 subPct，残留上一相位的值会让
       // 内联子% 卡在旧值（如上一相位结束的 100%）。
       setStatus(prev=>(d.phase!==prevPhaseRef.current?{...d,subPct:undefined}:d));
@@ -342,7 +345,6 @@ function useScanStream(onDone){
         });
       }
       if(d.type==='done')onDoneRef.current?.();
-      else if(d.phase!==prevPhaseRef.current&&MATCH_PHASES.has(prevPhaseRef.current))onDoneRef.current?.();
       prevPhaseRef.current=d.phase;
     });
     // 挂载时拉一次当前状态（等价 SSE 首连的 type:'state' 事件，覆盖重载场景）

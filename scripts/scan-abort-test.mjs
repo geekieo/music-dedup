@@ -54,6 +54,7 @@ function spawnWorker(dbPath, options, { onProgress } = {}) {
     worker.on('message', (msg) => {
       if (msg.type === 'done') { clearTimeout(timer); worker.terminate(); resolve(msg); }
       else if (msg.type === 'error') { clearTimeout(timer); worker.terminate(); reject(new Error('worker error: ' + (msg.message || ''))); }
+      else if (msg.type === 'phase') { worker.postMessage({ cmd: 'phaseContinue' }); } // 分阶段闸门：harness 立即放行
       else if (onProgress) onProgress(msg);
     });
     worker.on('error', (e) => { clearTimeout(timer); reject(e); });
@@ -78,6 +79,8 @@ function spawnAndAbort(dbPath, options, abortDelayMs) {
       } else if (msg.type === 'error') {
         clearTimeout(timer); worker.terminate();
         reject(new Error('worker error: ' + (msg.message || '')));
+      } else if (msg.type === 'phase') {
+        worker.postMessage({ cmd: 'phaseContinue' }); // 分阶段闸门：harness 立即放行
       } else if (msg.phase === 'fp' && !armed) {
         // fp 阶段已开始（批循环在进行，fpcalc 子进程在跑）——延时后 abort
         armed = true;
@@ -107,6 +110,8 @@ function spawnPauseResume(dbPath, options, pauseDelayMs = 300) {
       } else if (msg.type === 'error') {
         clearTimeout(timer); worker.terminate();
         reject(new Error('worker error: ' + (msg.message || '')));
+      } else if (msg.type === 'phase') {
+        worker.postMessage({ cmd: 'phaseContinue' }); // 分阶段闸门：harness 立即放行
       } else if (msg.phase === 'fp') {
         if (!paused) events.before++;
         else if (!resumedAt) events.during++;

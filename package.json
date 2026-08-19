@@ -38,6 +38,8 @@
     "smoke": "node scripts/run-electron.mjs --smoke",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "p0:verify": "node scripts/run-electron.mjs --p0",
+    "scan:abort": "node scripts/scan-abort-test.mjs",
+    "scan:phase": "node scripts/scan-phase-merge-test.mjs",
     "migrate-data": "node scripts/migrate-data.mjs",
     "test:setup": "node scripts/setup-test-env.mjs",
     "icons": "node scripts/render-icons.mjs",
@@ -74,7 +76,9 @@
     "asarUnpack": [
       "lib/**",
       "node_modules/**",
-      "electron/scan-worker.js"
+      "electron/scan-worker.js",
+      "electron/fp-decode-pool.mjs",
+      "electron/fp-decode-cli.mjs"
     ],
     "extraResources": [
       {

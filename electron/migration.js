@@ -31,6 +31,10 @@ export async function runMigrationUX({ interactive, targetDb = process.env.DB_PA
   // 1. 目标已存在（已迁移/已有库）→ 永不打扰（幂等安全契约）
   if (existsSync(targetDb)) return { migrated: false, reason: 'target-exists', target: targetDb };
 
+  // 测试作答 no = 全新开始：不必探测旧源（探测只服务于弹窗按钮/自动迁移决策，
+  // 对"不迁移"答案无意义，且源库只读打开失败会额外引入无谓报错路径）。
+  if (process.env.V2_MIGRATE === 'no') return { migrated: false, reason: 'skipped' };
+
   const def = probeSourceDb();
 
   // 2. 非交互（smoke）：沿用 v1 自动迁移语义（现在顺序正确，真正生效）
@@ -39,12 +43,11 @@ export async function runMigrationUX({ interactive, targetDb = process.env.DB_PA
     return migrateLegacyData({ targetDb });
   }
 
-  // 3. 测试自动作答：yes→迁移默认源；no→全新开始
+  // 3. 测试自动作答：yes→迁移默认源（no 已在上面短路）
   if (process.env.V2_MIGRATE === 'yes') {
     if (!def.valid) return { migrated: false, reason: 'no-legacy-source' };
     return migrateLegacyData({ targetDb });
   }
-  if (process.env.V2_MIGRATE === 'no') return { migrated: false, reason: 'skipped' };
 
   // 4. 交互：原生弹窗（窗口创建前，无 owner 窗口合法；Windows 下靠任务栏定位，可接受）
   const buttons = def.valid

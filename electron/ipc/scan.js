@@ -13,13 +13,13 @@
 // 载荷携带自身控制位且落后于 broker 的控制意图，直接覆盖会漂移。
 import { createRequire } from 'module';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, rmSync, readdirSync } from 'fs';
 import { Worker } from 'node:worker_threads';
-import { getDB } from '../../lib/db/index.js';
+import { getDB, openDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
 import { detectFpcalc } from '../../lib/chromaprint-bridge.js';
+import { getPhysicalCores } from '../cpuinfo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const db = getDB();
@@ -32,10 +32,8 @@ let activeTempDb = null; // 本次扫描 worker 用的临时库副本路径（�
 
 const now = () => new Date().toLocaleTimeString([], { hour12: false });
 
-// threads 语义：扫描在单 worker 线程上，threads 是并发批大小（异步 I/O 交叠 + 并发读入
-// 内存的文件数），不并行多核、不影响速度。默认按核心数自适应（封顶 8 防大文件库并发读入
-// 的内存尖峰）：低端机（2-4 核）自动落到 2-4，内存峰值随之减半以上；用户手动设置的优先。
-const DEFAULT_THREADS = Math.min(8, Math.max(1, os.cpus().length));
+// threads 语义：用户设置的声纹解码并发数（1~12，UI「同时处理文件数」），缺省 null=自动
+//（worker 按逻辑核数计算 min(12, 逻辑核/2)）。meta 步骤仅用它作批大小（解析本身串行）。
 
 export function setSend(fn) { send = fn; }
 
@@ -63,7 +61,7 @@ function snapshotDbForScan() {
 
 function cleanupTempDb(tmpPath) {
   if (!tmpPath) return;
-  for (const p of [tmpPath, tmpPath + '-wal', tmpPath + '-shm']) { try { rmSync(p, { force: true }); } catch {} }
+  for (const p of [tmpPath, tmpPath + '-wal', tmpPath + '-shm', tmpPath + '-journal']) { try { rmSync(p, { force: true }); } catch {} }
   try { rmSync(tmpPath + '.lock', { recursive: true, force: true }); } catch {}
   if (activeTempDb === tmpPath) activeTempDb = null;
 }
@@ -108,9 +106,11 @@ function settle() {
   // 再广播 done——done 后前端 refreshStats 读到的是合并后的最新数据。
   if (activeTempDb) {
     broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${now()}] 正在合并扫描结果...` });
-    try { mergeTempDb(activeTempDb); }
-    catch (e) { console.log('[scan] 临时库合并失败：', e.message); }
-    finally { cleanupTempDb(activeTempDb); }
+    try {
+      mergeTempDb(activeTempDb);
+      cleanupTempDb(activeTempDb); // 合并成功才清理；失败保留临时库，下次扫描孤儿恢复兜底
+    }
+    catch (e) { console.log('[scan] 临时库合并失败，保留临时库供下次恢复：', e.message); }
   }
   scanState.running = false;
   scanState.paused = false;
@@ -133,6 +133,17 @@ function onWorkerMessage(msg) {
     const { paused, abortFlag, running, ...rest } = msg;
     Object.assign(scanState, rest); // 只合并 display 字段，控制位保留镜像
     broadcast({ type: msg.type, ...scanState });
+  } else if (msg.type === 'phase') {
+    // 分阶段增量合并（P5.2）：每完成一个阶段，把该阶段成果合并进主库并广播 merged，
+    // 渲染层据此刷新（"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的阶段数据）。
+    // 合并完再放行 worker 进下一阶段（gatePhase 等待）。临时库此刻由 worker 持有但空闲，
+    // 无写事务 → 无 .lock → ATTACH 只读零冲突；合并失败不影响 worker 继续，终态 settle 兜底。
+    if (activeTempDb) {
+      try { mergeTempDb(activeTempDb); }
+      catch (e) { console.log('[scan] 分阶段合并失败：', e.message); }
+    }
+    broadcast({ type: 'merged', phase: msg.phase });
+    activeWorker?.postMessage({ cmd: 'phaseContinue' });
   } else if (msg.type === 'done') {
     const { paused, abortFlag, running, ...rest } = msg;
     doneMessage = rest.message || ''; // 保存 worker 完成消息（合并广播前）
@@ -168,10 +179,42 @@ function onWorkerExit(code) {
 }
 
 // ── 启动（fire-and-forget：同步置 running → 快照 → spawn → 立即返回）─────────────
+// 清理上次残留的临时库（app 在上次扫描合并前被关闭/崩溃会留下 scan-tmp-*.db；
+// 单实例锁 + start 路由防并发，此刻无进行中扫描，均为陈旧残留）。
+// 若残留库含比主库新的扫描结果（scan_time 更新）→ 先合并恢复，再清理——防止
+// 停止/关闭时合并没有完成导致扫描数据（声纹/重复组）丢失。
+function cleanupStaleTempDbs() {
+  const dir = path.dirname(process.env.DB_PATH);
+  try {
+    const orphans = readdirSync(dir).filter(f => f.startsWith('scan-tmp-') && f.endsWith('.db')).sort();
+    if (!orphans.length) return;
+    console.log(`[scan] 检测到 ${orphans.length} 个上次扫描未合并的残留临时库`);
+    const latest = path.join(dir, orphans[orphans.length - 1]);
+    // 先清陈旧锁再探测：孤儿库的 .lock 是上次崩溃残留（此处无进行中扫描，必为陈旧），
+    // 不清则 openDB 直接 database is locked → 恢复失败 → 还会被清理删除（数据再次丢失）。
+    try { rmSync(latest + '.lock', { recursive: true, force: true }); } catch {}
+    try {
+      const o = openDB({ skipInit: true, skipPragma: true, path: latest });
+      const orphMax = (o.get('SELECT MAX(scan_time) m FROM files') || { m: 0 }).m || 0;
+      o.close();
+      const mainMax = (db.get('SELECT MAX(scan_time) m FROM files') || { m: 0 }).m || 0;
+      if (orphMax > mainMax) {
+        console.log('[scan] 残留临时库含未入库的扫描结果，正在合并恢复...');
+        mergeTempDb(latest);
+        console.log('[scan] 已恢复上次扫描结果');
+      }
+    } catch (e) {
+      console.log('[scan] 残留临时库恢复失败：', e.message);
+    }
+    for (const f of orphans) cleanupTempDb(path.join(dir, f));
+  } catch { /* 目录不可读/不存在 */ }
+}
+
 function startScanInWorker(options) {
   // 同步先置 running（spawn 同步，postMessage 前已生效）→ 挡住并发 start
   scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${now()}] 准备中...`, startTime: Date.now() };
   settled = false;
+  cleanupStaleTempDbs(); // 清上次残留临时库（快照前，防陈旧文件堆积）
   // 快照主库 → 临时库副本（worker 全程只读写副本，与主进程零锁冲突；P5.1）
   let tempDbPath;
   try {
@@ -215,7 +258,7 @@ export const routes = [
     if (scanState.running) return { ok: false, error: '已有扫描进行中' };
     const s = getAllSettings(db);
     const dirs = s.scan_dirs || [], exclude = s.exclude_patterns || [];
-    const threads = parseInt(s.threads) || DEFAULT_THREADS, threshold = parseInt(s.threshold || '90');
+    const threads = s.threads ? parseInt(s.threads, 10) : null, threshold = parseInt(s.threshold || '90');
     const durationTolerance = parseInt(s.duration_tolerance || '5');
     const smartScan = s.smart_scan !== false;
     const steps = body?.steps || ['enum', 'meta', 'basicMatch', 'fp', 'fpMatch', 'scrape', 'scrapeMatch'];
@@ -227,7 +270,7 @@ export const routes = [
     // 解析出的绝对路径传给 worker（computeChromaprint 内 detectFpcalc(绝对路径) 直命中）。
     let fpcalcPath = s.fpcalc_path || '';
     if (steps.includes('fp')) fpcalcPath = (await detectFpcalc(fpcalcPath)) || '';
-    startScanInWorker({ dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath });
+    startScanInWorker({ dirs, exclude, threads, physicalCores: getPhysicalCores(), threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath });
     return { ok: true, message: '扫描已启动', steps };
   } },
   { method: 'POST', path: '/api/scan/abort', handler: () => {

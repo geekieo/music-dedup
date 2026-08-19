@@ -11,15 +11,19 @@
 // 控制位（paused/abortFlag/running）虽随载荷上送，但最终以 broker 镜像为准（防漂移）。
 // DB 在流水线内打开/关闭（worker 进程级 fd，terminate() 不自动关——必须 close 防文件锁泄漏）。
 import { parentPort } from 'node:worker_threads';
+import os from 'os';
 import { openDB } from '../lib/db/index.js';
 import { forceStripLaneTags } from '../lib/db/groups.js';
 import { runEnumerate, runMetadata, runFingerprint } from '../lib/scanner.js';
 import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from '../lib/matcher.js';
 import { runScrape } from '../lib/scraper.js';
 import { killActiveFpcalc } from '../lib/chromaprint-bridge.js';
+import { createDecodePool } from './fp-decode-pool.mjs';
 
 let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle', pct: 0, message: '', startTime: null };
 let db = null; // 流水线内打开，finally 里 close
+let decodePool = null; // 声纹解码进程池（解码移出 Electron worker，见 fp-decode-pool.mjs）
+let phaseAck = false; // 分阶段合并闸门：broker 合并完发 phaseContinue 才放行下一阶段
 
 function post(data) {
   parentPort.postMessage(data);
@@ -27,6 +31,16 @@ function post(data) {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function waitIfPaused() {
   while (scanState.paused && !scanState.abortFlag) await sleep(200);
+}
+
+// 分阶段增量合并（P5.2）：每完成一个阶段，通知 broker 合并临时库→主库（渲染层据此刷新，
+// "完成一个阶段，更新一个阶段"），等 broker 确认（phaseContinue）后再进下一阶段——保证
+// 合并读到的是该阶段完成点的稳定状态（temp 与 main 是不同文件，broker 只读 temp，无锁冲突）。
+// 中止时不等待（终态 settle 合并兜底）。phaseAck 先复位再发信号，broker 的 continue 必然落在之后。
+async function gatePhase(phase) {
+  phaseAck = false;
+  post({ type: 'phase', phase });
+  while (!phaseAck && !scanState.abortFlag) await sleep(200);
 }
 
 // 根据 DB 文件数量预估各步骤耗时占比，使进度条反映真实耗时分布（从主进程原样迁移）。
@@ -60,12 +74,17 @@ function estimateStepWeights(db, steps, { force, acoustidKey }) {
 }
 
 async function runScanPipeline(options) {
-  const { dirs, exclude, threads, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath, tempDbPath } = options;
+  const { dirs, exclude, threads, physicalCores, threshold, durationTolerance, smartScan, steps, force, retryMissed, acoustidKey, fpcalcPath, tempDbPath } = options;
+  // 解码并发：用户 threads 设置（1~12）直接生效；缺省自动 min(12, 物理核)（主进程经
+  // cpuinfo.js 查询，非 SMT 机型也能用满物理核；未传时回退逻辑核/2）。上限 12 防高并发
+  // 下内存/带宽过载。FP_DECODE_CONCURRENCY env 可覆盖。
+  const decodeConcurrency = Math.max(1, Math.min(12, parseInt(process.env.FP_DECODE_CONCURRENCY || threads, 10) || physicalCores || Math.round(os.cpus().length / 2)));
   // 本 worker 独立 DB 连接（P5.1：改开主库快照副本 scan-tmp-*.db——node-sqlite3-wasm 无 WAL，
   // 双连接同库在 DELETE 模式互锁；副本让 worker 与主进程零冲突，结束后由 broker 合并回主库）。
   // skipInit：schema 已由主进程建立（快照副本自带 schema）。skipPragma：单连接临时库不需要
   // 并发 pragma，且 worker 线程对 VACUUM 产物执行 journal_mode=WAL 会报 database is locked。
   db = openDB({ skipInit: true, skipPragma: true, path: tempDbPath });
+  decodePool = createDecodePool({ concurrency: decodeConcurrency });
   scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${new Date().toLocaleTimeString([], { hour12: false })}] 准备中...`, startTime: Date.now() };
   post({ type: 'start', ...scanState });
   // 原地 mutate scanState 并上送——只上送 evt 会因前端整体替换而丢掉 running/paused/abortFlag
@@ -100,6 +119,7 @@ async function runScanPipeline(options) {
       if (!abort()) {
         await runEnumerate(db, { dirs, exclude, onProgress: wrapProg('enum'), onAbort: abort, onPause: pause });
         advanceWeight('enum');
+        await gatePhase('enum');
       }
     }
     const est = estimateStepWeights(db, steps, { force, acoustidKey });
@@ -123,8 +143,9 @@ async function runScanPipeline(options) {
     for (const s of steps) if (s !== 'enum') stepWeights[s] = (w[s] / nonEnumSum) * (1 - enumW);
     // 步骤2: 提取属性
     if (steps.includes('meta') && !abort()) {
-      await runMetadata(db, { threads, smartScan: force ? false : smartScan, onProgress: wrapProg('meta'), onAbort: abort, onPause: pause });
+      await runMetadata(db, { threads: decodeConcurrency, smartScan: force ? false : smartScan, onProgress: wrapProg('meta'), onAbort: abort, onPause: pause });
       advanceWeight('meta');
+      await gatePhase('meta');
     }
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
     if (steps.includes('basicMatch') && !abort()) {
@@ -132,14 +153,17 @@ async function runScanPipeline(options) {
       wrapProg('basicMatch')({ phase: 'basicMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始基础匹配分析...' });
       await runBasicMatcher(db, { durationTolerance, onProgress: wrapProg('basicMatch'), onAbort: abort, onPause: pause });
       advanceWeight('basicMatch');
+      await gatePhase('basicMatch');
     }
     // 步骤4: 提取声纹
     if (steps.includes('fp') && !abort()) {
-      // fp 直接在本 worker 线程跑 computeFingerprint（runFingerprint 的 fpCompute 缺省即本地）——
-      // worker 线程本身就是隔离，无需再套一层 fp-worker。fpcalcPath 由主进程预解析后传入
+      // fp 解码走 sidecar 进程池（见 fp-decode-pool.mjs）；fpcalcPath 由主进程预解析后传入
       //（worker 内无 process.resourcesPath，打包版无法自行检测）。
-      await runFingerprint(db, { threads, smartScan: force ? false : smartScan, fpcalcPath, onProgress: wrapProg('fp'), onAbort: abort, onPause: pause });
+      await runFingerprint(db, { threads: decodeConcurrency, smartScan: force ? false : smartScan, fpcalcPath,
+        fpCompute: (p) => decodePool.compute(p), fpComputeParallel: true,
+        onProgress: wrapProg('fp'), onAbort: abort, onPause: pause });
       advanceWeight('fp');
+      await gatePhase('fp');
     }
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
     if (steps.includes('fpMatch') && !abort()) {
@@ -147,11 +171,13 @@ async function runScanPipeline(options) {
       wrapProg('fpMatch')({ phase: 'fpMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始声纹匹配分析...' });
       await runFpMatcher(db, { threshold, onProgress: wrapProg('fpMatch'), onAbort: abort, onPause: pause });
       advanceWeight('fpMatch');
+      await gatePhase('fpMatch');
     }
     // 步骤7: 刮削
     if (steps.includes('scrape') && !abort()) {
       await runScrape(db, { smartScan: force ? false : smartScan, retryMissed, acoustidKey, onProgress: wrapProg('scrape'), onAbort: abort, onPause: pause });
       advanceWeight('scrape');
+      await gatePhase('scrape');
     }
     // 步骤8: 刮削匹配（recording ID 对比）
     if (steps.includes('scrapeMatch') && !abort()) {
@@ -159,6 +185,7 @@ async function runScanPipeline(options) {
       wrapProg('scrapeMatch')({ phase: 'scrapeMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始刮削匹配分析...' });
       await runScrapeMatcher(db, { onProgress: wrapProg('scrapeMatch'), onAbort: abort, onPause: pause });
       advanceWeight('scrapeMatch');
+      await gatePhase('scrapeMatch');
     }
   } catch (e) {
     prog({ phase: 'error', pct: 0, level: 'err', message: `失败: ${e.message}` });
@@ -167,20 +194,23 @@ async function runScanPipeline(options) {
     // 关键：先 close DB 再上送 done——fd 是进程级资源，terminate() 不自动关。
     scanState.running = false;
     scanState.paused = false;
+    if (decodePool) { try { decodePool.close(); } catch {} decodePool = null; }
     if (db) { try { db.close(); } catch {} db = null; }
     post({ type: 'done', ...scanState });
   }
 }
 
-// 崩溃兜底：任何未捕获异常也保证 close DB + 通知主进程（否则文件锁泄漏、broker 卡 running）。
+// 崩溃兜底：任何未捕获异常也保证 close DB/解码池 + 通知主进程（否则文件锁泄漏、broker 卡 running）。
 process.on('uncaughtException', (e) => {
   console.error('[scan-worker] uncaughtException:', e);
+  try { if (decodePool) decodePool.close(); } catch {}
   try { if (db) db.close(); } catch {}
   parentPort.postMessage({ type: 'error', message: e && e.message ? e.message : String(e) });
   process.exit(1);
 });
 process.on('unhandledRejection', (e) => {
   console.error('[scan-worker] unhandledRejection:', e);
+  try { if (decodePool) decodePool.close(); } catch {}
   try { if (db) db.close(); } catch {}
   parentPort.postMessage({ type: 'error', message: e && e.message ? e.message : String(e) });
   process.exit(1);
@@ -206,6 +236,9 @@ parentPort.on('message', (msg) => {
       break;
     case 'resume':
       if (scanState.running) scanState.paused = false;
+      break;
+    case 'phaseContinue':
+      phaseAck = true; // 分阶段合并完成，放行下一阶段
       break;
   }
 });
