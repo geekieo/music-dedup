@@ -60,7 +60,6 @@ app.whenReady().then(async () => {
   const pngOf = (s) => Buffer.from(results[s].split(',')[1], 'base64');
   for (const s of SIZES) fs.writeFileSync(path.join(iconsDir, `icon-${s}.png`), pngOf(s));
   fs.writeFileSync(path.join(ROOT, 'assets', 'icon.ico'), buildIco([16, 32, 48, 256].map((s) => ({ size: s, png: pngOf(s) }))));
-  // 托盘图标不在此生成——运行时由渲染进程首启代码生成（见 main.js 'tray:icon'）
   console.log('[render-icons] 完成：assets/icons/*.png + icon.ico（构建期产物，不提交）');
   app.quit();
 });

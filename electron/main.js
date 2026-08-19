@@ -8,13 +8,13 @@
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, ipcMain, protocol, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, nativeImage } = require('electron');
 import './bootstrap-env.js'; // 必须先于其它 import：lib/db.js 在模块加载时即解析 DB_PATH
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-// Windows 通知/任务栏需要 AppUserModelId（打包后 appId 已在 build 配置）
+// Windows 任务栏分组/身份需要 AppUserModelId（打包后 appId 已在 build 配置）
 app.setAppUserModelId('com.geekieo.musicdedup');
 
 import { runMigrationUX } from './migration.js';
@@ -57,7 +57,6 @@ function getSampleFiles() {
 
 // ── P4 客户端路径 ─────────────────────────────────────────────────────────
 let mainWindow = null;
-let tray = null;
 // 关闭行为：任务进行中关窗 → 程序内弹窗确认（渲染层），确认后中止任务再退出；
 // 空闲关窗直接退出。forceQuit 由确认关闭路径置位。
 let scanRunning = false; // 由 scan 事件跟踪（start→true / done→false）
@@ -74,36 +73,7 @@ function sendScan(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
 }
 
-function showMainWindow() {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-}
-
-// P4 系统托盘：图标由渲染进程首启代码生成（栅格化 favicon SVG → PNG data URL →
-// 主进程 createTrayFromDataUrl），不提交图片资产；退出置 forceQuit 跳过关窗拦截。
-function createTrayFromDataUrl(dataUrl) {
-  try {
-    const icon = nativeImage.createFromDataURL(dataUrl);
-    if (icon.isEmpty()) { console.log('[v2] 警告：托盘图标（dataURL）为空'); return; }
-    if (tray) { tray.setImage(icon); return; } // 已存在则仅更新图标
-    tray = new Tray(icon);
-    tray.setToolTip('MusicDedup');
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: '显示主窗口', click: showMainWindow },
-      { type: 'separator' },
-      // 托盘「退出」与窗口关闭按钮一致：任务进行中先经程序内确认，空闲直接退出。
-      { label: '退出', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); } },
-    ]));
-    tray.on('double-click', showMainWindow);
-    console.log('[v2] 托盘已创建（代码生成图标）');
-  } catch (e) {
-    console.log('[v2] 托盘创建失败：', e.message);
-  }
-}
-
-// P4 统一图标：窗口/任务栏图标与托盘同源（渲染进程栅格化 favicon SVG 送达，不提交图片资产）
+// P4 统一图标：窗口/任务栏图标由渲染进程首启栅格化 favicon SVG 送达（不提交图片资产）
 // Windows/Linux: win.setIcon 更新任务栏+标题栏；macOS: Dock 图标走 app.dock
 function applyWindowIcon(dataUrl) {
   try {
@@ -120,9 +90,8 @@ function applyWindowIcon(dataUrl) {
   }
 }
 
-// 通知用应用图标（Windows toast 小图标）：Electron Notification 的 icon 选项在
-// Windows 上生效（否则走 AUMID 快捷方式解析，dev 下 electron.exe 会退化成默认图标）。
-// 用 assets/icon.ico（dev 仓库 / 打包 asar 内都存在，build 时由 npm run icons 生成）。
+// 窗口/任务栏图标：用 assets/icon.ico（dev 仓库 / 打包 asar 内都存在，build 时由
+// npm run icons 生成）。
 function appIcon() {
   try {
     const p = path.join(__dirname, '..', 'assets', 'icon.ico');
@@ -145,7 +114,7 @@ function createClientWindow() {
     y: saved.y,
     title: 'MusicDedup',
     // 窗口/任务栏/Alt-Tab 图标：dev 下 electron.exe 默认图标是 Electron，必须显式指定
-    // （打包版 exe 内嵌图标不受影响；这里统一走 appIcon() 与托盘/通知同源）
+    // （打包版 exe 内嵌图标不受影响；这里统一走 appIcon()）
     icon: appIcon(),
     autoHideMenuBar: true,
     // ── P4 无边框（路线 A · 保留原生窗口控件）────────────────────────────
@@ -272,22 +241,22 @@ async function runSmoke(win) {
       return { m: 'UI', u: 'progress UI states', ok: true, err: null };
     })();
     out.push(progUI);
-    // 托盘图标代码生成验证：favicon SVG → 32px PNG data URL（首启由同一逻辑生成托盘）
-    const trayIcon = await (async () => {
+    // 窗口图标代码生成验证：favicon SVG → 256px PNG data URL（首启由同一逻辑生成窗口图标）
+    const winIcon = await (async () => {
       try {
         const link = document.querySelector('link[rel=icon]');
-        if (!link) return { m: 'TRAY', u: 'favicon', ok: false, err: 'no favicon link' };
+        if (!link) return { m: 'ICON', u: 'favicon', ok: false, err: 'no favicon link' };
         const img = new Image();
         img.src = link.href;
         await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('svg load failed')); });
         const c = document.createElement('canvas');
-        c.width = c.height = 32;
-        c.getContext('2d').drawImage(img, 0, 0, 32, 32);
+        c.width = c.height = 256;
+        c.getContext('2d').drawImage(img, 0, 0, 256, 256);
         const url = c.toDataURL('image/png');
-        return { m: 'TRAY', u: 'favicon→32px png', ok: url.startsWith('data:image/png') && url.length > 200, err: null };
-      } catch (e) { return { m: 'TRAY', u: 'favicon', ok: false, err: String(e) }; }
+        return { m: 'ICON', u: 'favicon→256px png', ok: url.startsWith('data:image/png') && url.length > 200, err: null };
+      } catch (e) { return { m: 'ICON', u: 'favicon', ok: false, err: String(e) }; }
     })();
-    out.push(trayIcon);
+    out.push(winIcon);
     out.push(await req('GET', '/api/duplicates'));
     out.push(await req('GET', '/api/scan/status'));
     out.push(await req('GET', '/api/retention-list'));
@@ -385,9 +354,7 @@ const isClientMode = !isP0Verify && !isSmoke;if (isClientMode && !app.requestSin
     mainWindow = createClientWindow();
     registerApi({ send: sendScan });
     registerWindowControls();
-    // 托盘：渲染进程首启代码生成图标后经 tray:icon 送达（不提交图片资产）
-    ipcMain.on('tray:icon', (_e, dataUrl) => { if (dataUrl) createTrayFromDataUrl(dataUrl); });
-    // 统一图标：窗口/任务栏图标同样由渲染进程栅格化 favicon SVG 后经 win:icon 送达
+    // 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG 后经 win:icon 送达（不提交图片资产）
     ipcMain.on('win:icon', (_e, dataUrl) => { if (dataUrl) applyWindowIcon(dataUrl); });
     await mainWindow.loadURL('musicdedup://app/index.html');
     console.log('[v2-P4] 客户端就绪（单实例锁生效，IPC 化，无 HTTP 层）');

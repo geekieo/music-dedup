@@ -41,7 +41,7 @@ function broadcast(data) {
   // 关键：type 不能并入 scanState —— broadcast({type:'done', ...scanState}) 时若
   // scanState 已带 type:'progress'（被 Object.assign 污染），会把 done 覆盖成 progress，
   // 渲染进程的 onDone / 主进程 sendScan 的 scanRunning=false 全部失效（P5 联调复现：
-  // "扫描后重复组不刷新""关闭按钮始终最小化到托盘"同源）。type 仅走事件载荷。
+  // "扫描后重复组不刷新"、关闭流程异常同源）。type 仅走事件载荷。
   const { type, ...rest } = data;
   Object.assign(scanState, rest);
   send({ ...data });
@@ -159,7 +159,7 @@ function onWorkerMessage(msg) {
 
 function onWorkerError(e) {
   // 广播 type:'done'（而非 progress）：main.js sendScan 靠它复位 scanRunning，
-  // 否则关窗=托盘行为会一直保持、托盘退出流程异常。
+  // 否则任务进行中的关窗确认流程会一直等待、窗口无法正常退出。
   console.log('[scan] worker 错误：', e && e.message);
   if (!settled) {
     scanState.phase = 'error';

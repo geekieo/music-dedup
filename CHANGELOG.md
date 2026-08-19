@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **桌面客户端化** — Electron 单机应用，双击即用；单实例锁、系统托盘、扫描完成系统通知、窗口状态记忆
+- **桌面客户端化** — Electron 单机应用，双击即用；单实例锁、窗口状态记忆
 - **无边框窗口（路线 A）** — Windows `titleBarStyle:hidden` + 原生控件悬浮（Aero Snap 免费）、macOS 交通灯避让、Linux 自绘三键；标题栏整行可拖拽
 - **扫描隔离 worker 化** — 整条 8 步扫描流水线移入独立 worker 线程，扫描时窗口其他功能全程流畅（主进程事件循环滞后 239ms → 33ms）；崩溃自动兜底广播终态
 - **扫描进度条 UI 重设计** — 单进度条 + 内联子% + 一行可关闭摘要（绿✓/红错/灰中止）
@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **移除 Express/HTTP 层** — 全部约 50 个接口改为 `ipcMain.handle` 单通道（URL 桥）+ 按域拆分 `electron/ipc/{library,files,tags,scrape,duplicates,scan,settings}.js`；SSE 进度改 IPC 事件；音频/封面走 `musicdedup://` 自定义协议直读磁盘
 - **代码清理** — `db.js` 按域拆 8 文件；`rules.js` 核心/展示两层拆分；tier 词汇收敛（绿蓝黄红单一出处）；相似度阈值收敛 `lib/constants.js`；`queryLibrary` 三件套合并；`app.js` 组件下沉 `components.js`
-- **统一图标（6 版迭代定稿）** — `assets/icon.svg` 单一源，构建期栅格化；header Logo/favicon/托盘/打包图标四处统一
+- **统一图标（6 版迭代定稿）** — `assets/icon.svg` 单一源，构建期栅格化；header Logo/favicon/打包图标统一
 - **保留机制语义统一** — 保留名单与手动保留合并为统一「保留」，带来源标注 `smart | manual`；手动保留为级联结果的人工覆盖、不被重算冲掉
 
 ### Fixed
@@ -37,7 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`estimateStepWeights` 引用不存在列** — 新 schema 库扫描即 `no such column`；改正列名并把权重计算移入 try 块
 - **打包版扫描 worker 读 asar 依赖失败** — worker 不继承 Electron asar fs 补丁，声纹/扫描 worker 一直静默降级回主进程；`asarUnpack` 扩为 `lib/**` + `node_modules/**` + `scan-worker.js`，打包版扫描现已可用
 - **dev 进程身份显示「Electron」（任务栏/任务管理器）** — 本机 Start Menu 曾残留指向 electron.exe 的 `Electron.lnk` 干扰任务栏身份，且 dev 直跑 electron.exe 时任务管理器必然显示「Electron」。最终方案：主窗口显式 `icon` + 新增 dev 专用 `MusicDedup.exe`（electron.exe 复制 + rcedit 打图标/版本资源，`scripts/patch-dev-exe.mjs`），dev 全程显示 MusicDedup，不再依赖或污染 Start Menu 快捷方式
-- **托盘图标进系统托盘溢出区** — Windows 11 默认折叠属正常；补 `.ico` 格式
 
 ## [1.15.0] — 2026-08-03
 

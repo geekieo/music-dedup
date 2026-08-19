@@ -1,5 +1,5 @@
 // scripts/render-icons.mjs — 统一图标生成器（Electron 栅格化 assets/icon.svg）
-// 产出：assets/icons/icon-{16..512}.png + assets/icon.ico（应用图标）+ assets/tray.png/.ico（托盘）
+// 产出：assets/icons/icon-{16..512}.png + assets/icon.ico（应用图标）
 // 用法：node scripts/render-icons.mjs
 import { spawn } from 'child_process';
 import { createRequire } from 'module';

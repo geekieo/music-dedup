@@ -32,7 +32,7 @@
 
 ```bash
 npm run electron       # 启动开发客户端
-npm run smoke          # 真实库全链路自测（IPC/流式/渲染/托盘）
+npm run smoke          # 真实库全链路自测（IPC/流式/渲染/图标）
 npm run p0:verify      # 核心技术栈回归（WASM 库/标签写入/声纹/流式）
 npm run build:win      # 打包 Windows NSIS + 便携版
 npm run smoke:packaged # 打包版冒烟

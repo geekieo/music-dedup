@@ -8,7 +8,7 @@
 //   FileVersion 等）。Electron 允许重命名 exe——资源（dll/pak/locales/snapshot）
 //   按「exe 所在目录」解析，同目录复制即可，无需搬整个 dist。
 // 收益：dev 的 Task Manager 进程名 = MusicDedup、图标 = 应用图标；配合 main.js
-//   的 BrowserWindow icon，任务栏/Alt-Tab/托盘全部一致。不再需要 Start Menu
+//   的 BrowserWindow icon，任务栏/Alt-Tab 全部一致。不再需要 Start Menu
 //   快捷方式来撑任务栏身份 → dev 不再污染 Start Menu。
 // 幂等：dest 存在且不旧于源则跳过（electron 升级后自动重建）。
 //

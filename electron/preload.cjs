@@ -40,8 +40,7 @@ contextBridge.exposeInMainWorld('bridge', {
       return () => ipcRenderer.removeListener('win:maximized', listener);
     },
   },
-  // P4 统一图标：托盘/窗口图标同源（渲染进程栅格化 favicon SVG → PNG data URL）
-  readyTrayIcon: (dataUrl) => ipcRenderer.send('tray:icon', dataUrl),
+  // P4 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG → PNG data URL
   readyWindowIcon: (dataUrl) => ipcRenderer.send('win:icon', dataUrl),
   // ── P0 回归用（只读）──
   verify: () => ipcRenderer.invoke('p0:verify'),
