@@ -3,7 +3,7 @@
 // 唯一消费者都在本域，随迁移单点归属（v2-arch-review 步骤 5 决策 5）。
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
-import { getFileById } from '../../lib/db/files.js';
+import { getFileById, setFileDeleted } from '../../lib/db/files.js';
 import { getGroups, getGroupDetail, resolveGroup } from '../../lib/db/groups.js';
 import { addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds } from '../../lib/db/retention.js';
 import { tagTracks } from '../../lib/rules.js';
@@ -122,11 +122,14 @@ export const routes = [
     const dels = g.tracks.filter((t) => !keepSet.has(t.id));
     if (dels.length === 0) return { ok: false, error: '该组没有需要删除的文件——所有曲目均为保留状态，无需处理。' };
     const results = [];
+    const trashedIds = [];
     for (const t of dels) {
       if (!existsSync(t.path)) { results.push({ path: t.path, ok: true, method: 'missing' }); continue; }
       const r = await trashFile(t.path);
       results.push(...r);
+      if (r[0]?.ok) trashedIds.push(t.id); // 主文件改名成功 → 标记回收站
     }
+    if (trashedIds.length) setFileDeleted(db, trashedIds, 1);
     resolveGroup(db, +p.id);
     return { ok: true, deleted: results };
   } },
@@ -134,6 +137,7 @@ export const routes = [
     const ids = body?.ids; // 可选：只处理指定组
     const pending = getGroups(db, { resolved: false }).filter((g) => !ids || ids.includes(g.id));
     let del = 0, err = 0;
+    const trashedIds = [];
     for (const g of pending) {
       const d = getGroupDetail(db, g.id);
       if (!d) continue;
@@ -144,9 +148,11 @@ export const routes = [
         if (!existsSync(t.path)) continue;
         const results = await trashFile(t.path);
         for (const r of results) r.ok ? del++ : err++;
+        if (results[0]?.ok) trashedIds.push(t.id);
       }
       resolveGroup(db, g.id);
     }
+    if (trashedIds.length) setFileDeleted(db, trashedIds, 1);
     return { ok: true, deletedCount: del, errorCount: err, groupsProcessed: pending.length };
   } },
 
@@ -156,16 +162,20 @@ export const routes = [
     if (!g) return { ok: false };
     const keepSet = computeKeepSet(g.tracks);
     const restored = [], failed = [];
+    const restoredIds = [];
     for (const t of g.tracks.filter((t) => !keepSet.has(t.id))) {
       const delPath = t.path + '.deleted';
-      if (existsSync(delPath)) { try { renameSync(delPath, t.path); restored.push(t.path); } catch (e) { failed.push({ path: t.path, error: e.message }); } }
+      let didRestore = false;
+      if (existsSync(delPath)) { try { renameSync(delPath, t.path); restored.push(t.path); didRestore = true; } catch (e) { failed.push({ path: t.path, error: e.message }); } }
       const dir = path.dirname(t.path);
       const base = path.basename(t.path, path.extname(t.path));
       for (const ext of LRC_EXTS) {
         const lrcDel = path.join(dir, base + ext + '.deleted');
         if (existsSync(lrcDel)) { try { renameSync(lrcDel, path.join(dir, base + ext)); restored.push(lrcDel); } catch (e) { failed.push({ path: lrcDel, error: e.message }); } }
       }
+      if (didRestore) restoredIds.push(t.id); // 主文件恢复成功 → 取消回收站标记
     }
+    if (restoredIds.length) setFileDeleted(db, restoredIds, 0);
     db.run('UPDATE dup_groups SET resolved=0,resolved_time=NULL WHERE id=?', [+p.id]);
     return { ok: true, restored, failed };
   } },
@@ -173,6 +183,7 @@ export const routes = [
     const ids = body?.ids;
     const groups = getGroups(db, { resolved: true }).filter((g) => !ids || ids.includes(g.id));
     let totalRestored = 0, groupsRestored = 0;
+    const restoredIds = [];
     for (const g of groups) {
       const d = getGroupDetail(db, g.id);
       if (!d) continue;
@@ -180,18 +191,21 @@ export const routes = [
       let restored = [];
       for (const t of d.tracks.filter((t) => !keepSet.has(t.id))) {
         const delPath = t.path + '.deleted';
-        if (existsSync(delPath)) { try { renameSync(delPath, t.path); restored.push(t.path); } catch (e) {} }
+        let didRestore = false;
+        if (existsSync(delPath)) { try { renameSync(delPath, t.path); restored.push(t.path); didRestore = true; } catch (e) {} }
         const dir2 = path.dirname(t.path);
         const base2 = path.basename(t.path, path.extname(t.path));
         for (const ext of LRC_EXTS) {
           const lrcDel = path.join(dir2, base2 + ext + '.deleted');
           if (existsSync(lrcDel)) { try { renameSync(lrcDel, path.join(dir2, base2 + ext)); restored.push(lrcDel); } catch (e) {} }
         }
+        if (didRestore) restoredIds.push(t.id);
       }
       db.run('UPDATE dup_groups SET resolved=0,resolved_time=NULL WHERE id=?', [g.id]);
       groupsRestored++;
       totalRestored += restored.length;
     }
+    if (restoredIds.length) setFileDeleted(db, restoredIds, 0);
     return { ok: true, restoredCount: totalRestored, groupsRestored };
   } },
 

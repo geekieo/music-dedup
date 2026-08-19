@@ -58,9 +58,10 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
     if(suppressAutoLoad.current){ suppressAutoLoad.current=false; return; }
     loadFresh();
   },[sort,order,fmt,libFilter,scrapeFilter]);
-  // Reload library when a scan completes (libraryKey increments from App)
+  // libraryKey 由 App 在扫描完成或库变更（resolve/unresolve 等）时递增；
+  // 行列表和统计卡（"重复组 N 个"）都要刷新，否则卡片计数保持陈旧。
   useEffect(()=>{
-    if(libraryKey>0) loadFresh();
+    if(libraryKey>0){ loadFresh(); loadStats(); }
   },[libraryKey]);
 
   function loadMore(){

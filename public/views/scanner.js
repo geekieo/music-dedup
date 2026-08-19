@@ -14,7 +14,7 @@ const LANE_META={
   fp:     {label:'声纹匹配',  sub:'',  desc:'对比音频声纹找出重复。声纹匹配不作为判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
   scrape: {label:'刮削匹配',  sub:'',  desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
 };
-function ScannerView({scan}){
+function ScannerView({scan,hasPlayer}){
   const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
   const[runningLane,setRunningLane]=useState(null);
   const[advanced,setAdvanced]=useState({});
@@ -52,6 +52,8 @@ function ScannerView({scan}){
   // 内联子进度%仅在与总%明显不同时显示——meta/fp 阶段二者相同，避免冗余
   const showInlineSub=status.subPct!=null&&status.subPct>0&&Math.abs(status.subPct-(status.pct||0))>1;
   const LC={ok:'var(--amber)',done:'var(--green)',err:'var(--red)',info:'var(--tx-secondary)',sep:'var(--amber)'};
+  // 播放器出现时（底部固定高度的 PlayerBar ~64px），日志高度相应收缩，避免被其覆盖产生滚动条。
+  const PLAYER_H=hasPlayer?64:0;
 
   return e('div',{className:'fade'},
     confirm&&e(ConfirmModal,{
@@ -187,7 +189,7 @@ function ScannerView({scan}){
         e('button',{onClick:()=>setLogs([]),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4}},Icon('trash',{fontSize:12}),'清空')
       ),
       e('div',{ref:logRef,style:{padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,
-        height:'calc(100vh - 430px)',minHeight:180,maxHeight:'calc(100vh - 300px)',
+        height:`calc(100vh - ${430+PLAYER_H}px)`,minHeight:180,maxHeight:`calc(100vh - ${300+PLAYER_H}px)`,
         overflowY:'auto'}},
         logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始...'),
         logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:((m=>{const ts=m[1],txt=m[2];return e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),ts&&e('span',{style:{color:'var(--tx-faint)',marginRight:6,userSelect:'none',fontWeight:400}},ts),e('span',null,txt))})(l.msg.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)/)||['',null,l.msg])))),

@@ -560,7 +560,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                     e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--tx-primary)',flex:1}},
                       mbVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
                       isSelected&&recommend[key]&&e('span',{style:{color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
-                      hasAidConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                      hasAidConflict&&Icon('alert-triangle',{fontSize:11,color:'#D97706',style:{position:'absolute',top:1,right:2}})
                     )
                   ));
               }
@@ -588,7 +588,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
                     e('span',{style:{fontFamily:'var(--font-mono)',color:'var(--tx-primary)',flex:1}},
                       aidVal||e('span',{style:{color:'var(--tx-faint)',fontStyle:'italic'}},'—'),
                       isSelected&&recommend[key]&&e('span',{style:{color:'var(--amber)',fontWeight:500,marginLeft:3}},'推荐'),
-                      hasMbConflict&&Icon('alert-circle',{fontSize:9,color:'#D97706',style:{position:'absolute',top:1,right:2}})
+                      hasMbConflict&&Icon('alert-triangle',{fontSize:11,color:'#D97706',style:{position:'absolute',top:1,right:2}})
                     )
                   ));
               }
@@ -600,7 +600,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#F0FDF4',border:'0.5px solid var(--bd-subtle)'}}),'绿=一致'),
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#EFF6FF',border:'0.5px solid var(--bd-subtle)'}}),'蓝=推荐写入（精确·空白）'),
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{width:12,height:12,borderRadius:2,background:'#FFFBEB',border:'0.5px solid var(--bd-subtle)'}}),'黄=需自行判断'),
-            e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('alert-circle',{fontSize:10,color:'#D97706'}),'=两来源冲突'),
+            e('span',{style:{display:'flex',alignItems:'center',gap:4}},Icon('alert-triangle',{fontSize:10,color:'#D97706'}),'=两来源冲突'),
             e('span',{style:{display:'flex',alignItems:'center',gap:4}},e('span',{style:{color:'var(--tx-muted)',fontStyle:'italic'}}),'时长仅对比，不写入')
           ),
           // MB identifiers info

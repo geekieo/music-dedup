@@ -285,6 +285,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   const[fpcalcPathDirty,setFpcalcPathDirty]=useState(false);
   const[fpcalcChecking,setFpcalcChecking]=useState(false);
   const saveTimer=useRef(null);
+  const draggingRange=useRef(false); // 滑块拖动中不保存（松开时一次提交，见 commitRange）
   useEffect(()=>{api.get('/api/system/fpcalc').then(r=>{if(r.ok)setFpcalc(r.data);});},[]);
   useEffect(()=>{api.get('/api/system/info').then(r=>{if(r.ok&&r.data?.physicalCores)setAutoThreads(Math.min(12, r.data.physicalCores));});},[]);
   async function recheckFpcalc(){
@@ -334,27 +335,36 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     });
   },[]);
 
-  // Settings save: no longer auto-fires a re-match. Changes are only
-  // applied via the explicit reapply banner button below.
+  // Settings save: 非滑块改动走 700ms 防抖；滑块拖动中（draggingRange）不保存，
+  // 松开/失焦时 commitRange 用最终值一次提交——拖动过程零保存、零「保存中」闪烁。
+  function persist(){
+    if(!s)return;
+    api.put('/api/settings',s).then(r=>{
+      if(!r.ok){setSaveState('error');return;}
+      setSaveState('saved');setTimeout(()=>setSaveState('idle'),2200);
+      const qj=JSON.stringify(s.quality_tiers||[]);
+      const pj=JSON.stringify(s.pick_tag_order||[]);
+      const changed = lastApplied.current && (
+        lastApplied.current.threshold!==s.threshold ||
+        lastApplied.current.duration_tolerance!==s.duration_tolerance ||
+        lastApplied.current.quality_tiers!==qj ||
+        lastApplied.current.pick_tag_order!==pj
+      );
+      if(changed)setNeedsReapply(true);
+    });
+  }
+  function commitRange(){
+    if(!draggingRange.current)return; // 已提交过（如 pointerUp 后 blur 再触发）
+    draggingRange.current=false;
+    clearTimeout(saveTimer.current);
+    persist(); // 立即用拖动结束后的最终值保存
+  }
   useEffect(()=>{
     if(!s)return;
     if(isFirst.current){isFirst.current=false;return;}
+    if(draggingRange.current)return; // 滑块拖动中：跳过，松开时 commitRange 统一保存
     setSaveState('saving');clearTimeout(saveTimer.current);
-    saveTimer.current=setTimeout(()=>{
-      api.put('/api/settings',s).then(r=>{
-        if(!r.ok){setSaveState('error');return;}
-        setSaveState('saved');setTimeout(()=>setSaveState('idle'),2200);
-        const qj=JSON.stringify(s.quality_tiers||[]);
-        const pj=JSON.stringify(s.pick_tag_order||[]);
-        const changed = lastApplied.current && (
-          lastApplied.current.threshold!==s.threshold ||
-          lastApplied.current.duration_tolerance!==s.duration_tolerance ||
-          lastApplied.current.quality_tiers!==qj ||
-          lastApplied.current.pick_tag_order!==pj
-        );
-        if(changed)setNeedsReapply(true);
-      });
-    },700);
+    saveTimer.current=setTimeout(persist,700);
     return()=>clearTimeout(saveTimer.current);
   },[s]);
 
@@ -466,7 +476,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         e(SH,{title:'扫描性能'}),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'并发解码的文件数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:'自动 ('+autoThreads+')')),
-          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value}))})
+          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value})),onPointerDown:()=>draggingRange.current=true,onPointerUp:commitRange,onBlur:commitRange})
         )
       ),
 
@@ -474,7 +484,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         e(SH,{title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'}),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},'时长容差',e(Hint,{text:'两个文件标题、艺术家一致时，时长相差在此范围内仍视为同一首歌——不同来源的同一首歌常有 1-5 秒的掐头去尾差异。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.duration_tolerance??5)+' 秒')),
-          e('input',{type:'range',min:1,max:15,value:s.duration_tolerance??5,onChange:ev=>setS(p=>({...p,duration_tolerance:+ev.target.value}))})
+          e('input',{type:'range',min:1,max:15,value:s.duration_tolerance??5,onChange:ev=>setS(p=>({...p,duration_tolerance:+ev.target.value})),onPointerDown:()=>draggingRange.current=true,onPointerUp:commitRange,onBlur:commitRange})
         )
       ),
 
@@ -484,7 +494,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         e(SH,{title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'}),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'相似度达到此值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。标题、艺术家、时长近似的歌曲，即使低于此值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
-          e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value}))}),
+          e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value})),onPointerDown:()=>draggingRange.current=true,onPointerUp:commitRange,onBlur:commitRange}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
         ),
 

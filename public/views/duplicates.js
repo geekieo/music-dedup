@@ -430,7 +430,7 @@ function buildLegendRows(tagArray){
   return rows;
 }
 
-const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,scanDoneKey,libraryKey,onLocate,onRetentionChange,onTagsWritten}){
+const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libraryKey,onLocate,onRetentionChange,onTagsWritten,onLibraryMutated}){
   const[filter,setFilter]=useState('pending');
   const[sort,setSort]=useState('savings');
   const[groups,setGroups]=useState([]);
@@ -603,18 +603,18 @@ const DuplicatesView=React.memo(function DuplicatesView({setPendingCount,player,
 
   async function resolve(id){
     const r=await api.post('/api/duplicates/'+id+'/resolve');
-    if(r.ok){setToast({msg:`已放入回收站，删除 ${r.deleted?.length||0} 个文件`,type:'success'});loadList();if(detail?.id===id)setDetail(d=>d?{...d,resolved:1}:d);setPendingCount(n=>Math.max(0,(n||1)-1));}
+    if(r.ok){setToast({msg:`已放入回收站，删除 ${r.deleted?.length||0} 个文件`,type:'success'});loadList();if(detail?.id===id)setDetail(d=>d?{...d,resolved:1}:d);onLibraryMutated?.();}
     else setToast({msg:r.error||'操作失败',type:'warn'});
   }
   async function unresolve(id){
     const r=await api.post('/api/duplicates/'+id+'/unresolve');
-    if(r.ok){setToast({msg:r.restored?.length?`已恢复 ${r.restored.length} 个文件`:r.failed?.length?'部分文件恢复失败':'已撤销处理',type:'success'});loadList();api.get('/api/duplicates/'+id).then(r2=>{if(r2.ok)setDetail(r2.data);});}
+    if(r.ok){setToast({msg:r.restored?.length?`已恢复 ${r.restored.length} 个文件`:r.failed?.length?'部分文件恢复失败':'已撤销处理',type:'success'});loadList();api.get('/api/duplicates/'+id).then(r2=>{if(r2.ok)setDetail(r2.data);});onLibraryMutated?.();}
     else setToast({msg:'操作失败: '+(r.error||''),type:'error'});
   }
-  async function unresolveAll(){setShowBatchUnresolve(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/duplicates/unresolve-all',{ids});if(r.ok){setToast({msg:`已恢复 ${r.restoredCount} 个文件，${r.groupsRestored} 组`,type:'success'});loadList();}else setToast({msg:'批量撤销失败',type:'error'});}
-  async function resolveAll(){setShowBatchResolve(false);const ids=visiblePending.map(g=>g.id);const r=await api.post('/api/duplicates/resolve-all',{ids});if(r.ok){setToast({msg:`批量完成，放入回收站 ${r.deletedCount} 个文件`,type:'success'});loadList();setPendingCount(0);}else setToast({msg:r.error||'失败',type:'error'});}
-  async function emptyTrash(){setShowEmptyTrash(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/trash/empty',{ids});if(r.ok){setToast({msg:`已永久删除 ${r.deletedCount} 个文件${r.groupsRemoved?`，${r.groupsRemoved} 个组已清理`:''}`,type:'success'});loadList();if(r.groupsRemoved>0)setSelId(null);}else setToast({msg:'清空失败',type:'error'});}
-  async function purgeGroup(id){const r=await api.post('/api/duplicates/'+id+'/purge');if(r.ok){setToast({msg:r.groupRemoved?`已彻底删除并清理该组`:`已彻底删除 ${r.deletedCount} 个文件`,type:'success'});loadList();if(r.groupRemoved){setDetail(null);setSelId(null);}}else setToast({msg:'删除失败',type:'error'});}
+  async function unresolveAll(){setShowBatchUnresolve(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/duplicates/unresolve-all',{ids});if(r.ok){setToast({msg:`已恢复 ${r.restoredCount} 个文件，${r.groupsRestored} 组`,type:'success'});loadList();onLibraryMutated?.();}else setToast({msg:'批量撤销失败',type:'error'});}
+  async function resolveAll(){setShowBatchResolve(false);const ids=visiblePending.map(g=>g.id);const r=await api.post('/api/duplicates/resolve-all',{ids});if(r.ok){setToast({msg:`批量完成，放入回收站 ${r.deletedCount} 个文件`,type:'success'});loadList();onLibraryMutated?.();}else setToast({msg:r.error||'失败',type:'error'});}
+  async function emptyTrash(){setShowEmptyTrash(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/trash/empty',{ids});if(r.ok){setToast({msg:`已永久删除 ${r.deletedCount} 个文件${r.groupsRemoved?`，${r.groupsRemoved} 个组已清理`:''}`,type:'success'});loadList();if(r.groupsRemoved>0)setSelId(null);onLibraryMutated?.();}else setToast({msg:'清空失败',type:'error'});}
+  async function purgeGroup(id){const r=await api.post('/api/duplicates/'+id+'/purge');if(r.ok){setToast({msg:r.groupRemoved?`已彻底删除并清理该组`:`已彻底删除 ${r.deletedCount} 个文件`,type:'success'});loadList();if(r.groupRemoved){setDetail(null);setSelId(null);}onLibraryMutated?.();}else setToast({msg:'删除失败',type:'error'});}
   async function toggleTrack(gid,fid,keep,reason){const r=await api.put(`/api/duplicates/${gid}/tracks/${fid}/keep`,{keep,reason});if(r.ok){setDetail(r.data);onRetentionChange?.();}}
   // Toggle keep: adds/removes from retention list (manual override).
   function onTrackToggle(groupId,fileId,currentKeep,tracks){

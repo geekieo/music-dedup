@@ -387,7 +387,7 @@ function App(){
   const player=useGlobalPlayer();
 
   function refreshStats(){
-    api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.dupGroups||0);});
+    api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});
     setScanDoneKey(k=>k+1);
     setLibraryKey(k=>k+1);
   }
@@ -563,10 +563,10 @@ function App(){
     // (display:none when inactive) so tab switches don't re-fetch anything.
     e('main',{ref:mainScrollRef,style:{flex:1,overflowY:'auto',scrollbarGutter:'stable',display:'flex',justifyContent:'center'}},
       e('div',{style:{width:'100%',maxWidth:'var(--max-width)',padding:20}},
-        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.dupGroups||0);});}})),
-        e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{setPendingCount:setPending,player:player.lite,scanDoneKey,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.dupGroups||0);});},onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
-        e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onDismissDirChanged:()=>setSettingsState(p=>({...(p||{}),_dirChanged:false})),onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.dupGroups||0);});},onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
+        e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});}})),
+        e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{player:player.lite,scanDoneKey,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLibraryMutated:()=>{setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
+        e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan,hasPlayer:!!player.current})),
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onDismissDirChanged:()=>setSettingsState(p=>({...(p||{}),_dirChanged:false})),onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
