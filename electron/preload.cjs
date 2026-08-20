@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('bridge', {
   },
   // P4 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG → PNG data URL
   readyWindowIcon: (dataUrl) => ipcRenderer.send('win:icon', dataUrl),
+  // 弹窗遮罩联动：主进程按渲染层合成的实际颜色设 titleBarOverlay 控件配色
+  // （titleBarOverlay 绘制于网页之上、CSS 遮罩盖不住，颜色由渲染层按遮罩栈实时合成）
+  setTitlebarOverlay: (colors) => ipcRenderer.send('ui:titlebar-overlay', colors),
   // ── P0 回归用（只读）──
   verify: () => ipcRenderer.invoke('p0:verify'),
   samples: () => ipcRenderer.invoke('p0:samples'),

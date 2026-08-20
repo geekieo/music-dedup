@@ -164,6 +164,12 @@ function registerWindowControls() {
   });
   ipcMain.handle('win:close', () => { if (mainWindow) mainWindow.close(); });
   ipcMain.handle('win:is-maximized', () => (mainWindow ? mainWindow.isMaximized() : false));
+  // 弹窗遮罩联动：titleBarOverlay 由 OS 绘制在网页之上、CSS 遮罩盖不住，只能经
+  // setTitleBarOverlay 改色；颜色由渲染层按实际遮罩栈合成后传入。Windows-only API。
+  ipcMain.on('ui:titlebar-overlay', (_e, colors) => {
+    if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed() || !colors) return;
+    try { mainWindow.setTitleBarOverlay(colors); } catch (e) { /* 平台/窗口态不允许改色时忽略 */ }
+  });
   // 关闭确认通道：置 pendingClose，等扫描中止归位（sendScan done 分支，此时合并已完成）后退出；
   // 中止超时兜底强退，避免任务中止异常时窗口关不掉。超时放宽到 30s——worker 可能在长同步
   // 匹配块（fpMatch 单块曾实测 27s）中，5s 会赶在合并完成前强退 → 临时库孤立、扫描结果丢失。

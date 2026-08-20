@@ -417,6 +417,47 @@ function App(){
     img.src=link.href;
   },[]);
 
+  // 弹窗遮罩 → 标题栏控件颜色实时联动：titleBarOverlay 原生三键由 OS 绘制在网页之上、
+  // CSS 遮罩盖不住，只能经 setTitleBarOverlay 改色。读当前 DOM 里实际的全屏遮罩栈
+  // （fixed + inset:0 + z-index≥1000 + rgba 背景），把 header 底色/符号色逐层与遮罩 alpha
+  // 合成，得到与遮罩实时一致的颜色（嵌套弹窗逐层加深），经 IPC 设回三键。
+  useEffect(()=>{
+    if(!window.bridge?.setTitlebarOverlay)return;
+    const cssVar=v=>(getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+    const parse=s=>{
+      const h=(s||'').match(/#([0-9a-f]{6})/i);
+      if(h)return [0,2,4].map(i=>parseInt(h[1].slice(i,i+2),16));
+      const n=(s||'').match(/rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[\s,]+([\d.]+))?\s*\)/);
+      if(n)return [+n[1],+n[2],+n[3]];
+      return null;
+    };
+    const toHex=c=>'#'+c.map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+    let lastColor=null,lastSym=null;
+    const sync=()=>{
+      const base=parse(cssVar('--bg-base'))||[255,255,255];
+      const sym=parse(cssVar('--tx-muted'))||[107,114,128];
+      const bg=base.slice(), sc=sym.slice();
+      for(const el of document.querySelectorAll('div[style*="position: fixed"][style*="inset: 0px"]')){
+        const z=parseInt(el.style.zIndex,10);
+        if(!(z>=1000))continue;
+        const m=el.style.background.match(/rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[\s,]+([\d.]+))?\s*\)/);
+        if(!m)continue;
+        const a=m[4]===undefined?1:parseFloat(m[4]);
+        for(let i=0;i<3;i++){ bg[i]+=(+m[i+1]-bg[i])*a; sc[i]+=(+m[i+1]-sc[i])*a; }
+      }
+      const color=toHex(bg), symbolColor=toHex(sc);
+      if(color===lastColor&&symbolColor===lastSym)return; // 颜色未变不发 IPC，重渲染不产生多余发送
+      lastColor=color; lastSym=symbolColor;
+      window.bridge.setTitlebarOverlay({ color, symbolColor });
+    };
+    sync();
+    // 观察器回调在微任务/浏览器绘制前触发，同步计算 → 与页面遮罩同帧出现
+    // （requestAnimationFrame 会多等一帧，造成三键比遮罩晚变暗）。
+    const mo=new MutationObserver(sync);
+    mo.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['style']});
+    return ()=>mo.disconnect();
+  },[]);
+
   // 任务进行中关窗：主进程发 app:confirm-close → 弹窗确认；确认后中止扫描并调
   // confirmClose()，主进程等归位后退出。
   useEffect(()=>{

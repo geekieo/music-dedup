@@ -117,7 +117,7 @@ npm run smoke:packaged # 打包版冒烟自测
 
 ## 数据与隐私
 
-- 全部数据存储在本机 `%APPDATA%/MusicDedup/`（SQLite + 日志），无任何云端上传
+- 全部数据存储在本机（SQLite + 日志），无任何云端上传：安装版在 `%APPDATA%/MusicDedup/`，便携版在 exe 旁的 `MusicDedup-data/`（便携不留数据在宿主）
 - **首次启动自动迁移**：检测到 v1（Web 版）数据目录会交互式询问是否迁移，绝不静默覆盖
 - 删除操作一律进系统回收站，可撤销
 
