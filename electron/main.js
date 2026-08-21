@@ -1,8 +1,8 @@
 // electron/main.js — v2 主进程入口
 //
-// P2（当前）：IPC 化 —— server.js 的 Express 路由已迁到 electron/ipc/*，
-//   应用本体（静态资源 / rules-meta / cover / stream）走 musicdedup:// 协议，
-//   HTTP 层彻底移除。数据目录一律 userData（%APPDATA%/MusicDedup/）。
+// IPC 化：server.js 的 Express 路由已迁到 electron/ipc/*；应用本体（静态资源 /
+// rules-meta / cover / stream）走 musicdedup:// 协议，无 HTTP 层。
+// 数据目录一律 userData（%APPDATA%/MusicDedup/）。
 // P0 验证路径：P0_VERIFY=1（npm run p0:verify）跑回归套件 + 展示页。
 // Smoke 自测：V2_SMOKE=1（npm run smoke）——真实库加载后从主进程经 IPC 打关键
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
@@ -103,7 +103,7 @@ function appIcon() {
 function createClientWindow() {
   const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
-  // 窗口状态记忆（存 settings 表，计划 P4）：恢复上次尺寸/位置/最大化。
+  // 窗口状态记忆（存 settings 表）：恢复上次尺寸/位置/最大化。
   // 惰性 getDB()：窗口只在迁移决策（whenReady）后创建，此刻库必已就绪。
   let saved = {};
   try { saved = getSetting(getDB(), 'window_state', null) || {}; } catch (e) { console.log('[v2] 读取窗口状态失败：', e && e.message); }
@@ -117,7 +117,7 @@ function createClientWindow() {
     // （打包版 exe 内嵌图标不受影响；这里统一走 appIcon()）
     icon: appIcon(),
     autoHideMenuBar: true,
-    // ── P4 无边框（路线 A · 保留原生窗口控件）────────────────────────────
+    // ── 无边框（保留原生窗口控件）────────────────────────────
     // Windows: titleBarStyle hidden + titleBarOverlay（原生 min/max/close 悬浮，
     //   Aero Snap 免费）；配色对齐 header（--bg-base #FFFFFF / --tx-muted #6B7280）
     // macOS:   titleBarStyle hidden + trafficLightPosition（原生红绿灯左上避让）
@@ -227,7 +227,7 @@ async function runSmoke(win) {
     // 渲染 ScannerView 测试实例（真实页面全局，不碰真实库），断言三个状态：
     // t1 匹配阶段（子%≠总%→显示，去时间戳）；t2 meta（子%=总%→不重复显示%）；t3 终态→摘要行。
     const progUI = await (async () => {
-      const scan = { status: null, logs: [], setLogs() {}, confirm: null, setConfirm() {}, tryStart() {}, startStep() {} };
+      const scan = { status: null, logs: [], setLogs() {}, confirm: null, setConfirm() {}, startStep() {} };
       const render = (s) => new Promise((res) => {
         const el = document.createElement('div');
         scan.status = s;
@@ -279,7 +279,8 @@ async function runSmoke(win) {
 // ── 启动 ──────────────────────────────────────────────────────────────────
 // 单实例锁（防重复打开 → SQLite 并发写冲突，计划 §七.2）：第二个实例直接退出，
 // 并把已存在的窗口聚焦到前台。P0/smoke 测试模式不抢锁（smoke 只读，可与客户端共存）。
-const isClientMode = !isP0Verify && !isSmoke;if (isClientMode && !app.requestSingleInstanceLock()) {
+const isClientMode = !isP0Verify && !isSmoke;
+if (isClientMode && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   if (isClientMode) {
@@ -301,10 +302,10 @@ const isClientMode = !isP0Verify && !isSmoke;if (isClientMode && !app.requestSin
   }
 
   app.whenReady().then(async () => {
-    // ── P5 数据迁移：决策先于任何 DB 打开 ────────────────────────────────
+    // ── 数据迁移：决策先于任何 DB 打开 ────────────────────────────────
     // protocol.js 与 ipc/*.js 在模块级即 getDB()（打开/创建目标库），必须等迁移
-    // 决策后才动态 import——否则"先建出的空目标库"会让迁移被 target-exists 静默跳过
-    // （P2 引入的排序回归，P5 修复）。P0 为 harness 样本专用，不迁移。
+    // 决策后才动态 import——否则"先建出的空目标库"会让迁移被 target-exists 静默跳过。
+    // P0 为 harness 样本专用，不迁移。
     let mig = null;
     if (!isP0Verify) {
       mig = await runMigrationUX({ interactive: isClientMode });

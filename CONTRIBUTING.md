@@ -5,7 +5,7 @@
 - Node.js ≥ 18，本项目为 ESM（`"type": "module"`）
 - `npm install` 后 `npm run electron` 启动开发客户端
 - 若存在全局 `ELECTRON_RUN_AS_NODE` 环境变量，Electron 会退化为纯 Node 模式（无 GUI）——[scripts/run-electron.mjs](scripts/run-electron.mjs) 会自动清除，请勿手动设置
-- 跨平台：Windows / macOS / Linux 均支持（Electron 客户端）
+- 跨平台：Windows 10/11（macOS/Linux 代码就位，未经实机验证）
 
 ## 反馈 Bug / 建议功能
 

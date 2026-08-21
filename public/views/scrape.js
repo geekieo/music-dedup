@@ -1,7 +1,5 @@
 
-// Client reads scrape_tier from the server (lib/tier.js) — no longer
-// carries its own incomplete CJK folding table. normCmp is kept for
-// autoSelectFields' byte-level equality check (different question from tier).
+// scrape_tier 由服务端（lib/tier.js）计算；normCmp 保留给 autoSelectFields 的字节级相等判断。
 const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
 
 // TIER_COLOR, TIER_LABEL are served by /rules-meta.js (source: lib/rules.js)

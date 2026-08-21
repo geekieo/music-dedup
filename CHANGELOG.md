@@ -330,18 +330,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SQLite 持久化
 - Express Web 服务
 
-[1.15.0]: https://github.com/geekieo/musicdedup/compare/v1.14.1...v1.15.0
-[1.12.2]: https://github.com/geekieo/musicdedup/compare/v1.12.1...HEAD
-[1.12.1]: https://github.com/geekieo/musicdedup/compare/v1.12.0...v1.12.1
-[1.12.0]: https://github.com/geekieo/musicdedup/compare/v1.11.1...v1.12.0
-[1.11.1]: https://github.com/geekieo/musicdedup/compare/v1.11.0...v1.11.1
-[1.11.0]: https://github.com/geekieo/musicdedup/compare/v1.10.1...v1.11.0
-[1.10.1]: https://github.com/geekieo/musicdedup/compare/v1.10.0...v1.10.1
-[1.10.0]: https://github.com/geekieo/musicdedup/compare/v1.9.1...v1.10.0
-[1.9.1]: https://github.com/geekieo/musicdedup/compare/v1.9.0...v1.9.1
-[1.9.0]: https://github.com/geekieo/musicdedup/compare/v1.8.2...v1.9.0
-[1.8.2]: https://github.com/geekieo/musicdedup/compare/v1.8.1...v1.8.2
-[1.8.1]: https://github.com/geekieo/musicdedup/compare/v1.8.0...v1.8.1
-[1.8.0]: https://github.com/geekieo/musicdedup/compare/v1.7.4...v1.8.0
-[1.7.4]: https://github.com/geekieo/musicdedup/compare/v1.7.0...v1.7.4
-[1.7.0]: https://github.com/geekieo/musicdedup/compare/v1.6.0...v1.7.0
+[2.0.0]: https://github.com/geekieo/music-dedup/compare/v1.15.0...v2.0.0
+[1.15.0]: https://github.com/geekieo/music-dedup/compare/v1.14.1...v1.15.0
+[1.14.1]: https://github.com/geekieo/music-dedup/compare/v1.14.0...v1.14.1
+[1.14.0]: https://github.com/geekieo/music-dedup/compare/v1.13.0...v1.14.0
+[1.13.0]: https://github.com/geekieo/music-dedup/compare/v1.12.3...v1.13.0
+[1.12.3]: https://github.com/geekieo/music-dedup/compare/v1.12.2...v1.12.3
+[1.12.2]: https://github.com/geekieo/music-dedup/compare/v1.12.1...v1.12.2
+[1.12.1]: https://github.com/geekieo/music-dedup/compare/v1.12.0...v1.12.1
+[1.12.0]: https://github.com/geekieo/music-dedup/compare/v1.11.1...v1.12.0
+[1.11.1]: https://github.com/geekieo/music-dedup/compare/v1.11.0...v1.11.1
+[1.11.0]: https://github.com/geekieo/music-dedup/compare/v1.10.1...v1.11.0
+[1.10.1]: https://github.com/geekieo/music-dedup/compare/v1.10.0...v1.10.1
+[1.10.0]: https://github.com/geekieo/music-dedup/compare/v1.9.1...v1.10.0
+[1.9.1]: https://github.com/geekieo/music-dedup/compare/v1.9.0...v1.9.1
+[1.9.0]: https://github.com/geekieo/music-dedup/compare/v1.8.2...v1.9.0
+[1.8.2]: https://github.com/geekieo/music-dedup/compare/v1.8.1...v1.8.2
+[1.8.1]: https://github.com/geekieo/music-dedup/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/geekieo/music-dedup/compare/v1.7.4...v1.8.0
+[1.7.4]: https://github.com/geekieo/music-dedup/compare/v1.7.0...v1.7.4
+[1.7.0]: https://github.com/geekieo/music-dedup/compare/v1.6.0...v1.7.0

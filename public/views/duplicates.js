@@ -622,9 +622,7 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
   }
 
   const pending=groups.filter(g=>!g.resolved);
-  // BUG FIX: compute savings from the VISIBLE (filtered) pending groups,
-  // not from all pending groups — so the count/bytes update when the user
-  // applies a tag or search filter (previously showed unfiltered total always).
+  // 节省额只算当前可见（过滤后）的待处理组：随标签/搜索筛选实时更新。
   const visiblePending=visibleGroups.filter(g=>!g.resolved);
   const visibleResolved=visibleGroups.filter(g=>g.resolved);
   const savings=visiblePending.reduce((a,g)=>a+(g.savings_bytes||0),0);

@@ -11,7 +11,6 @@
 // 镜像同步规则：display 字段（phase/pct/message/level/subPct/groups/savings）以 worker
 // 为准；控制位（paused/abortFlag/running）永远以 broker 镜像为准——worker 的 progress
 // 载荷携带自身控制位且落后于 broker 的控制意图，直接覆盖会漂移。
-import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, rmSync, readdirSync } from 'fs';

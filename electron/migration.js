@@ -25,7 +25,7 @@ function fmtSize(n) {
  * 首启数据迁移决策。返回结构同 migrateLegacyData（migrated / reason / source / target）。
  * - interactive=false（smoke 非交互）→ 静默自动迁移（有效默认源才迁，绝不覆盖）。
  * - interactive=true（客户端）→ 目标缺失时弹原生对话框询问；
- *   V2_MIGRATE=yes|no 环境变量自动作答（测试/无头用，先例 P0_AUTORUN）。
+ *   V2_MIGRATE=yes|no 环境变量自动作答（测试/无头用）。
  */
 export async function runMigrationUX({ interactive, targetDb = process.env.DB_PATH }) {
   // 1. 目标已存在（已迁移/已有库）→ 永不打扰（幂等安全契约）

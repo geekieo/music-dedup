@@ -144,13 +144,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   },[flashId]);
   function scrollToRow(fid){
     const el=rowRefs.current[fid];
-    // Defense in depth: the ref-cleanup fix above should mean a stale/
-    // detached entry can no longer linger here, but if one ever does,
-    // treat it the same as "not found" instead of silently no-op'ing a
-    // scrollIntoView on a node that's no longer in the document (which
-    // looks IDENTICAL to success from here — no error, just nothing visibly
-    // happens — and was the actual root cause of "定位在换过排序/筛选后就
-    // 再也不管用了").
+    // 防御：ref 条目可能已脱离文档（stale/detached），一律按"未找到"处理，不静默操作。
     if(!el||!el.isConnected){ delete rowRefs.current[fid]; return false; }
     el.scrollIntoView({behavior:'smooth',block:'center'});
     setFlashId(fid);
@@ -271,11 +265,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
           e('option',{value:''},'全部格式'),
           ...['FLAC','MP3','M4A','OGG','WAV','AIFF'].map(f=>e('option',{key:f,value:f},f))
         ),
-        // 刮削分类筛选 — same tier vocabulary as the 刮削 column icon/tooltip.
-        // Same width/padding/neutral color as the 格式 dropdown right next to
-        // it (previously it auto-sized wider from its longer option text and
-        // changed color per selection, which read as a different control
-        // style rather than a matching pair).
+        // 刮削分类筛选 — 与「刮削」列图标/提示同一套 tier 词汇；宽度/内边距/中性色与旁边「格式」下拉一致。
         e('select',{value:scrapeFilter,onChange:ev=>setScrapeFilter(ev.target.value),
           style:{fontSize:12,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',
             color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',width:125}},

@@ -1,11 +1,10 @@
-// public/components.js — 共享 UI 组件库（自 public/app.js 抽出，P3）
+// public/components.js — 共享 UI 组件库（app.js 与 views/*.js 共用）
 // 经典脚本顶层 const/function 进全局词法环境，app.js 与 views/*.js 均可直接使用。
 // 必须在 rules-meta.js 之后、app.js 之前加载（见 index.html 脚本顺序）。
 'use strict';
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 const e=React.createElement;
 /* ── Helpers ──────────────────────────────────────────────────────────── */
-const fmtN=n=>n==null?'—':n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(n);
 const fmtBytes=b=>{if(!b)return'0 B';if(b>=1e12)return(b/1e12).toFixed(2)+' TB';if(b>=1e9)return(b/1e9).toFixed(2)+' GB';if(b>=1e6)return(b/1e6).toFixed(1)+' MB';return Math.round(b/1e3)+' KB';};
 const fmtBR=(br,fmt)=>{const f=(fmt||'').toUpperCase();return['FLAC','WAV','AIFF','DSF'].includes(f)?f:br?`${f} ${br}k`:(f||'—');};
 const fmtDur=s=>{if(!s)return'—';const m=Math.floor(s/60),sec=Math.floor(s%60);return`${m}:${String(sec).padStart(2,'0')}`;};
@@ -58,8 +57,6 @@ const ICONS={
   'player-stop':{fill:1,els:[['rect',{x:6,y:6,width:12,height:12,rx:1.5}]]},
   x:{els:[['path',{d:'M18 6 6 18'}],['path',{d:'M6 6l12 12'}]]},
   check:{els:[['path',{d:'M5 13l4 4L19 7'}]]},
-  checks:{els:[['path',{d:'M2 12l4 4L14 8'}],['path',{d:'M9 12l4 4L21 8'}]]},
-  plus:{els:[['path',{d:'M12 5v14M5 12h14'}]]},
   search:{els:[['circle',{cx:11,cy:11,r:7}],['path',{d:'M21 21l-4.3-4.3'}]]},
   filter:{els:[['path',{d:'M4 5h16L14 12v6l-4 2v-8z'}]]},
   settings:{els:[['circle',{cx:12,cy:12,r:3}],['path',{d:'M19.4 13a8 8 0 000-2l2-1.6-2-3.4-2.4.6a8 8 0 00-1.7-1l-.4-2.6h-4l-.4 2.6a8 8 0 00-1.7 1l-2.4-.6-2 3.4L4.6 11a8 8 0 000 2l-2 1.6 2 3.4 2.4-.6a8 8 0 001.7 1l.4 2.6h4l.4-2.6a8 8 0 001.7-1l2.4.6 2-3.4z'}]]},
@@ -93,14 +90,12 @@ const ICONS={
   'circle-check':{els:[['circle',{cx:12,cy:12,r:9}],['path',{d:'M8.5 12.5l2 2 4.5-5'}]]},
   'circle-dashed':{els:[['circle',{cx:12,cy:12,r:9,strokeDasharray:'4 3'}]]},
   loader:{els:[['circle',{cx:12,cy:12,r:9,strokeDasharray:'14 50'}]]},
-  shield:{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}]]},
   'shield-check':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9 12l2 2 4-4'}]]},
-  'shield-filled':{fill:1,els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}]]},
-  'shield-plus':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M12 9v5M9.5 11.5h5'}]]},
-  // 刮削确认 — same cloud silhouette as the "刮削操作" action icon
-  // (cloud-download), but with a checkmark instead of the download arrow,
-  // so the status reads as "data fetched & confirmed" rather than
-  // "protected" (that meaning is reserved for shield-check/保留名单).
+  // 刮削未确认 — plain cloud silhouette; cloud-check / cloud-download add a status glyph
+  cloud:{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}]]},
+  // 刮削确认 — same cloud silhouette as cloud, but with a checkmark instead
+  // of the download arrow, so the status reads as "data fetched & confirmed"
+  // rather than "protected" (that meaning is reserved for shield-check/保留名单).
   'cloud-check':{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}],['path',{d:'M8.5 14.3l2.3 2.3 4.7-4.9'}]]},
   // 音质优先级 — a 3-band audio equalizer (vertical tracks + slider knobs),
   // reads as "sound quality levels" rather than a generic gem/rating mark.
@@ -144,35 +139,22 @@ const ICONS={
   'device-floppy':{els:[['path',{d:'M5 4h11l3 3v13H5z'}],['path',{d:'M9 4v5h7V4'}],['path',{d:'M8 14h8v6H8z'}]]},
   'chevron-up':{els:[['path',{d:'M6 15l6-6 6 6'}]]},
   'chevron-down':{els:[['path',{d:'M6 9l6 6 6-6'}]]},
-  'chevron-left':{els:[['path',{d:'M15 6l-6 6 6 6'}]]},
-  'chevron-right':{els:[['path',{d:'M9 6l6 6-6 6'}]]},
   'skip-back':{fill:1,els:[['rect',{x:4,y:5,width:2.5,height:14,rx:1}],['path',{d:'M18 5v14l-10-7z'}]]},
   'skip-forward':{fill:1,els:[['rect',{x:17.5,y:5,width:2.5,height:14,rx:1}],['path',{d:'M6 5v14l10-7z'}]]},
-  'arrow-up':{els:[['path',{d:'M12 19V5'}],['path',{d:'M6 11l6-6 6 6'}]]},
-  'arrow-down':{els:[['path',{d:'M12 5v14'}],['path',{d:'M6 13l6 6 6-6'}]]},
   click:{els:[['path',{d:'M9 9l11 4-4.5 1.8L14 19z'}],['path',{d:'M5 3v3'}],['path',{d:'M3 9h3'}],['path',{d:'M5.6 5.6l1.8 1.8'}]]},
-  'chart-bar':{els:[['rect',{x:4,y:11,width:3,height:8}],['rect',{x:10.5,y:6,width:3,height:13}],['rect',{x:17,y:14,width:3,height:5}]]},
-  sparkles:{els:[['path',{d:'M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z'}],['path',{d:'M19 14l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z'}]]},
   'terminal-2':{els:[['path',{d:'M5 7l5 5-5 5'}],['path',{d:'M12 19h7'}]]},
   tag:{els:[['path',{d:'M3 11V5a2 2 0 012-2h6l10 10-8 8z'}],['circle',{cx:8,cy:8,r:1.3,fill:'currentColor'}]]},
-  adjustments:{els:[['path',{d:'M4 6h8'}],['path',{d:'M16 6h4'}],['circle',{cx:14,cy:6,r:2}],['path',{d:'M4 12h4'}],['path',{d:'M12 12h8'}],['circle',{cx:10,cy:12,r:2}],['path',{d:'M4 18h12'}],['circle',{cx:16,cy:18,r:2}]]},
   'wave-sine':{els:[['path',{d:'M2 12c2-6 4-6 6 0s4 6 6 0 4-6 6 0'}]]},
   'cloud-download':{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}],['path',{d:'M12 11v8'}],['path',{d:'M9 16l3 3 3-3'}]]},
   download:{els:[['path',{d:'M12 4v12'}],['path',{d:'M7 11l5 5 5-5'}],['path',{d:'M5 20h14'}]]},
-  diamond:{els:[['path',{d:'M12 3l5 5-5 13-5-13z'}]]},
-  'git-merge':{els:[['path',{d:'M6 8.2V15.8'}],['path',{d:'M6 12c0 3.3 2.7 6 6 6h3.8'}],['circle',{cx:6,cy:6,r:2.2}],['circle',{cx:18,cy:18,r:2.2}],['circle',{cx:6,cy:18,r:2.2}]]},
-  dots:{fill:1,els:[['circle',{cx:5,cy:12,r:1.6}],['circle',{cx:12,cy:12,r:1.6}],['circle',{cx:19,cy:12,r:1.6}]]},
   // Volume / speaker icons
   'volume':     {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M19.07 4.93a10 10 0 010 14.14'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
   'volume-2':   {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
   'volume-off': {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M23 9l-6 6'}],['path',{d:'M17 9l6 6'}]]},
-  wand:{els:[['path',{d:'M4 20L20 4'}],['path',{d:'M7 4l1.5 1.5L7 7'}],['path',{d:'M17 14l1.5 1.5-1.5 1.5'}],['path',{d:'M4 4l.5.5'}],['path',{d:'M20 20l-.5-.5'}]]},
-  'stack-2':{els:[['path',{d:'M16 16v-4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v4'}],['path',{d:'M8 12h8'}],['path',{d:'M16 8v-4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v4'}],['path',{d:'M8 4h8'}]]},
   edit:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
   pencil:{els:[['path',{d:'M7 20H4v-3L15.5 5.5a2.12 2.12 0 013 3z'}],['path',{d:'M13.5 7.5l3 3'}]]},
   'arrow-back-up':{els:[['path',{d:'M9 13l-4-4 4-4'}],['path',{d:'M5 9h9a5 5 0 010 10h-2'}]]},
   'arrows-exchange':{els:[['path',{d:'M20 7H8'}],['path',{d:'M12 4l-4 3 4 3'}],['path',{d:'M4 17h12'}],['path',{d:'M12 14l4 3-4 3'}]]},
-  books:{els:[['path',{d:'M5 4a1 1 0 011-1h3a1 1 0 011 1v16a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M11 6h3a1 1 0 011 1v13a1 1 0 01-1 1h-3'}],['path',{d:'M17.3 5.2l2.4.7a1 1 0 01.7 1.2l-3.6 13a1 1 0 01-1.2.7l-1.9-.5'}]]},
   'shield-x':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9.5 9.5l5 5'}],['path',{d:'M14.5 9.5l-5 5'}]]},
   'toggle-left':{els:[['path',{d:'M4 12a6 6 0 016-6h4a6 6 0 010 12H10a6 6 0 01-6-6z'}],['circle',{cx:9.5,cy:12,r:2.6,fill:'currentColor'}]]},
   'file-music':{els:[['path',{d:'M14 3v4a1 1 0 001 1h4'}],['path',{d:'M5 4a1 1 0 011-1h7l5 5v11a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M9.5 17v-4.5l4-1v4.5'}],['circle',{cx:8.7,cy:17,r:1.2,fill:'currentColor'}],['circle',{cx:12.7,cy:15.5,r:1.2,fill:'currentColor'}]]},
@@ -193,7 +175,7 @@ function Icon(name,style={},className){
   return e('svg',svgProps,spec.els.map(([tag,props],i)=>e(tag,{key:i,...props})));
 }
 
-/* ── Brand mark（P4 重设计 v6）— 多方法音乐去重：
+/* ── Brand mark — 多方法音乐去重：
    雷达环+扫描扇区 = 多通道检测；标准四分音符前方实心（居中略偏左上，保留），
    阴影空心音符投射在右斜下方（被去重的副本）。与 assets/icon.svg 同一设计。 */
 function Logo({size=28,radius=7}={}){
@@ -299,10 +281,10 @@ function SettingStatus({state='idle',message,onClick,busy}){
     Icon(busy?'loader':C.ic,{fontSize:13,color:C.col},busy?'spin':undefined)
   );
 }
-function Btn({children,onClick,variant='primary',small,disabled,icon,style:sx={}}){
+function Btn({children,onClick,variant='primary',small,disabled,icon,title,style:sx={}}){
   const base={display:'flex',alignItems:'center',gap:5,borderRadius:'var(--r-md)',fontFamily:'var(--font-sans)',fontWeight:500,cursor:disabled?'not-allowed':'pointer',fontSize:small?11:12,padding:small?'4px 10px':'7px 14px',transition:'all .12s',border:'none',opacity:disabled?.6:1,whiteSpace:'nowrap',...sx};
   const V={primary:{...base,background:'var(--amber)',color:'#fff'},ghost:{...base,background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'},danger:{...base,background:'var(--red-bg)',color:'var(--red)',border:'0.5px solid var(--red-bd)'},success:{...base,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}};
-  return e('button',{onClick:disabled?undefined:onClick,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
+  return e('button',{onClick:disabled?undefined:onClick,title,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
 }
 // Icon-only action button — bigger touch target + a real fill color when
 // active, so the three per-track actions (打开/属性/保留名单) read as buttons

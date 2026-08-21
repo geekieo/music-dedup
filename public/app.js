@@ -2,8 +2,7 @@
 const APP_VERSION='2.0.0';
 
 /* ── API ─────────────────────────────────────────────────────────────── */
-// v2（P2）：经 preload 暴露的 window.bridge.request 走 IPC（electron/ipc/index.js
-// 路由表），不再 fetch HTTP。调用签名与 v1 的 fetch 封装保持一致，业务代码零改动。
+// window.bridge.request 走 IPC（electron/ipc/index.js 路由表），调用签名同 fetch 封装。
 const api={
   get: u=>window.bridge.request('GET', u),
   post:(u,b={})=>window.bridge.request('POST', u, b),
@@ -328,8 +327,7 @@ function useScanStream(onDone){
 
   useEffect(()=>{
     if(!window.bridge?.onScanProgress)return;
-    // v2（P2）：SSE → IPC 事件（scan:progress）。事件 payload 与 v1 SSE 的
-    // JSON 消息同构（{phase,pct,running,message,level,type}），此消费逻辑不变。
+    // onScanProgress 事件：payload 同构 {phase,pct,running,message,level,type}，更新进度卡与日志
     const off=window.bridge.onScanProgress(d=>{
       // merged（分阶段合并完成）只触发刷新，不更新进度卡状态/日志——payload 无 phase/message，
       // 交给 setStatus 会把进度卡抹掉。
@@ -360,13 +358,9 @@ function useScanStream(onDone){
     addSeparator(`${label||'扫描'} · ${force?'全量重新执行':extra.retryMissed?'未命中重新执行':'智能模式'}`);
     api.post('/api/scan/start',{steps,force,...extra}).then(r=>{if(!r.ok)addSeparator(`⚠ 启动失败：${r.error||''}`);});
   }
-  function tryStart(steps,force,label){
-    if(force){setConfirm({steps,force,label});return;}
-    startStep(steps,force,label);
-  }
   function pause(){api.post('/api/scan/pause');}
   function resume(){api.post('/api/scan/resume');}
-  return{status,logs,setLogs,confirm,setConfirm,addSeparator,startStep,tryStart,pause,resume};
+  return{status,logs,setLogs,confirm,setConfirm,addSeparator,startStep,pause,resume};
 }
 
 /* ══════════════════════════════════════════════════════════════════════

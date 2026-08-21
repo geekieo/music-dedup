@@ -6,9 +6,9 @@
 // （删除目标）保证可重迁。首启自动迁移（electron/migration.js 交互式 UX）与
 // 手动 `npm run migrate-data` 共用本文件，避免两处实现漂移。
 //
-// P5 修正（相对 v1 脚本）：① probeSourceDb 区分"无源/非 SQLite/非 MusicDedup 库/
-// 损坏"；② 只复制 .db + -wal（-shm 是 WAL 索引，SQLite 打开即重建，复制陈旧
-// -shm 有假锁风险）；③ 复制后目标 PRAGMA quick_check，失败 unlink 回滚。
+// 行为规则：① probeSourceDb 区分"无源/非 SQLite/非 MusicDedup 库/损坏"；
+// ② 只复制 .db + -wal（-shm 是 WAL 索引，SQLite 打开即重建，复制陈旧 -shm 有假锁风险）；
+// ③ 复制后目标 PRAGMA quick_check，失败 unlink 回滚。
 
 import {
   closeSync, copyFileSync, existsSync, mkdirSync, openSync,

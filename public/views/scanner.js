@@ -3,7 +3,7 @@
    bundles its own prerequisites (enum/meta) and always finishes with a
    global match — no more standalone "文件枚举" / "相似度匹配" buttons.
    "全量重新执行" is collapsed behind an advanced toggle + confirm dialog.
-   `scan` (status/logs/tryStart/...) is owned by App so it survives tab
+   `scan` (status/logs/...) is owned by App so it survives tab
    switches — see useScanStream().
    ══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
@@ -15,7 +15,7 @@ const LANE_META={
   scrape: {label:'刮削匹配',  sub:'',  desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
 };
 function ScannerView({scan,hasPlayer}){
-  const{status,logs,setLogs,confirm,setConfirm,tryStart,startStep}=scan;
+  const{status,logs,setLogs,confirm,setConfirm,startStep}=scan;
   const[runningLane,setRunningLane]=useState(null);
   const[advanced,setAdvanced]=useState({});
   const logRef=useRef(null);

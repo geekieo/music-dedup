@@ -1,11 +1,9 @@
-// electron/ipc/scrape.js — 刮削域：scrape-single / 双源候选 / 选择落库 / scraped CRUD / exiftool / AcoustID key 校验
-// 注：scrape-single 与 scraped(GET) 原本各有一份 ~30 行 overallTier 计算（server.js 两处重复），
-// P2 迁移时抽出共享 helper overallTierOf()，行为不变（v2-arch-review 步骤 5 决策 9 顺带项）。
+// electron/ipc/scrape.js — 刮削域：scrape-single / 双源候选 / 选择落库 / scraped CRUD / AcoustID key 校验
+// 注：scrape-single 与 scraped(GET) 共用 overallTierOf() 计算整体 tier。
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
 import { getFileById } from '../../lib/db/files.js';
 import { getScrapedMeta, upsertScrapedMeta } from '../../lib/db/scrape.js';
-import { getExiftoolStatus } from '../../lib/tagger.js';
 import { scrapeSingleFile, getMbCandidates, getAcoustidCandidates, setHttpFetch } from '../../lib/scraper.js';
 import { computeScrapeTier, mergeDualScrapeShape } from '../../lib/tier.js';
 import { createRequire } from 'module';
@@ -96,8 +94,6 @@ export const routes = [
     db.run('DELETE FROM scraped_meta WHERE file_id=?', [+p.id]);
     return { ok: true };
   } },
-  // exiftool 可用性（ScrapeDialog 写入区展示）
-  { method: 'GET', path: '/api/system/exiftool', handler: async () => ({ ok: true, data: await getExiftoolStatus() }) },
   // AcoustID API Key 校验
   { method: 'POST', path: '/api/validate-acoustid', handler: async (_p, _q, body) => {
     const { key } = body;

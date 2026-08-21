@@ -1,9 +1,8 @@
 // electron/ipc/duplicates.js — 重复组域：列表/详情 / resolve / unresolve / purge / trash / keep / retention-list
-// 共享 helper（trashFile / computeKeepSet / purgeGroupFiles / LRC_EXTS）原在 server.js，
-// 唯一消费者都在本域，随迁移单点归属（v2-arch-review 步骤 5 决策 5）。
+// 共享 helper（trashFile / computeKeepSet / purgeGroupFiles / LRC_EXTS）单点归属本域。
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
-import { getFileById, setFileDeleted } from '../../lib/db/files.js';
+import { setFileDeleted } from '../../lib/db/files.js';
 import { getGroups, getGroupDetail, resolveGroup } from '../../lib/db/groups.js';
 import { addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds } from '../../lib/db/retention.js';
 import { tagTracks } from '../../lib/rules.js';
@@ -91,12 +90,6 @@ function purgeGroupFiles(g) {
 export const routes = [
   // ── 保留名单 ──
   { method: 'GET', path: '/api/retention-list', handler: () => ({ ok: true, data: getRetentionList(db) }) },
-  { method: 'POST', path: '/api/retention-list/:fileId', handler: (p) => {
-    const f = getFileById(db, +p.fileId);
-    if (!f) return { ok: false };
-    addRetentionList(db, +p.fileId);
-    return { ok: true };
-  } },
   { method: 'DELETE', path: '/api/retention-list/:fileId', handler: (p) => {
     removeRetentionList(db, +p.fileId);
     return { ok: true };

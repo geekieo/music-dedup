@@ -1,5 +1,5 @@
 // electron/ipc/library.js — 音乐库域：stats / library / locate
-// 自 server.js 移植（逐行对应），db 为 lib/db.js 单例。
+// db 为 lib/db/index.js 单例。
 import { getDB } from '../../lib/db/index.js';
 import { getAllSettings } from '../../lib/db/settings.js';
 import { statsQuery, queryLibrary, locateFileInLibrary, libraryStats } from '../../lib/db/library.js';
@@ -7,7 +7,6 @@ import { statsQuery, queryLibrary, locateFileInLibrary, libraryStats } from '../
 const db = getDB();
 
 // /api/library —— sort=scrape_tier / scrapeTier 过滤的 tier 路径已并入 queryLibrary
-//（P3 合并 queryLibrary 三件套后，ipc 层不再分支）
 function libraryHandler(_params, query) {
   const { search = '', sort = 'title', order = 'asc', page = 1, limit = 100, format = '', libFilter = 'all', scrapeTier = '' } = query;
   // 繁简忽略 (settings.ignore_script_variant, default true) — 见 lib/tier.js。
