@@ -2,7 +2,7 @@
 // 经典脚本顶层 const/function 进全局词法环境，app.js 与 views/*.js 均可直接使用。
 // 必须在 rules-meta.js 之后、app.js 之前加载（见 index.html 脚本顺序）。
 'use strict';
-const {useState,useEffect,useRef,useMemo,useCallback}=React;
+const {useState,useEffect,useRef,useMemo,useCallback,useLayoutEffect}=React;
 const e=React.createElement;
 /* ── Helpers ──────────────────────────────────────────────────────────── */
 const fmtBytes=b=>{if(!b)return'0 B';if(b>=1e12)return(b/1e12).toFixed(2)+' TB';if(b>=1e9)return(b/1e9).toFixed(2)+' GB';if(b>=1e6)return(b/1e6).toFixed(1)+' MB';return Math.round(b/1e3)+' KB';};

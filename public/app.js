@@ -483,7 +483,7 @@ function App(){
       if(cur.includes(dir))return p;
       const next=[...cur,dir];
       api.put('/api/settings',{scan_dirs:next});
-      return{...(p||{}),scan_dirs:next,_dirChanged:true};
+      return{...(p||{}),scan_dirs:next,_dirChanged:(p?._dirChanged||0)+1}; // 计数递增，重复加目录也能重新触发执行卡滑动
     });
   },[scan]);
   const removeScanDir=useCallback(i=>{
@@ -496,8 +496,9 @@ function App(){
   },[]);
   // onMatchAffectingChange only fires from a manual button — no auto-fire
   // on Settings keystrokes. Also jumps to 扫描 page for progress visibility.
-  const onMatchAffectingChange=useCallback(()=>{
-    scan.startStep(['basicMatch','fpMatch','scrapeMatch'],false,'设置变更后重新匹配');
+  // steps 由设置页按改动设置对应模块传入（基础匹配卡→['basicMatch']，声纹匹配卡→['fpMatch']）。
+  const onMatchAffectingChange=useCallback((steps)=>{
+    scan.startStep(steps||['basicMatch','fpMatch','scrapeMatch'],false,'设置变更后重新匹配');
     setView('scanner');
   },[scan]);
   const onScrapeReapply=useCallback(()=>{
@@ -601,7 +602,7 @@ function App(){
         e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});}})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{player:player.lite,scanDoneKey,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLibraryMutated:()=>{setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan,hasPlayer:!!player.current})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,onEnumOnly:()=>{refreshLibrary();setSettingsState(p=>({...(p||{}),_dirChanged:false}));},onDismissDirChanged:()=>setSettingsState(p=>({...(p||{}),_dirChanged:false})),onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{active:view==='settings',dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,dirSeq:settings?._dirChanged||0,onEnumOnly:()=>{refreshLibrary();},onDismissDirChanged:()=>setSettingsState(p=>({...(p||{}),_dirChanged:0})),onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.

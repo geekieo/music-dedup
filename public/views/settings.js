@@ -4,9 +4,10 @@
    A sticky left rail jumps to each anchor. Explanatory text that used to
    sit as an always-visible box is now a hover-revealed Hint next to the
    heading it explains, except 重复组标签 which IS the reference itself
-   and stays visible. F8: changes auto-SAVE, but applying a match-affecting
-   change (声纹阈值/时长容差/音质优先级) is a manual, explicit click on the
-   reapply banner — it only re-runs matching, never re-extracts fp/scrape.
+   and stays visible. F8: changes auto-SAVE; a match-affecting change
+   (时长容差/声纹阈值/排除规则/音质优先级/AcoustID Key) lights the corresponding
+   执行模块卡 (基础匹配/声纹匹配/更新音乐库/保留优先级/刮削匹配) at the top of the
+   column — the button re-runs that module only, never re-extracts fp/scrape.
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
   {id:'sec-dirs',    label:'音乐目录',   icon:'folders'},
@@ -19,6 +20,40 @@ const SETTINGS_SECTIONS=[
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 // DEFAULT_Q, DEFAULT_PICK, mergePickOrder are served by /rules-meta.js (source: lib/rules.js)
+
+// 每张设置卡可恢复默认的键与默认值。仅覆盖「有默认值且可选范围广」的设置
+// （滑块、优先级排序）；输入框与二值开关不做恢复默认。quality_tiers/pick_tag_order
+// 需新鲜数组，避免与全局 DEFAULT_* 共享引用。恢复默认只改本卡的键，不动其他卡。
+// 音乐目录卡不放按钮：其主体（scan_dirs）是用户数据，无默认值。
+const CARD_DEFAULTS={
+  'sec-scan-perf': ()=>({ threads:null }),
+  'sec-basic':     ()=>({ duration_tolerance:5 }),
+  'sec-fp':        ()=>({ threshold:90 }),
+  'sec-quality':   ()=>({ quality_tiers:[...DEFAULT_Q] }),
+  'sec-pick':      ()=>({ pick_tag_order:[...DEFAULT_PICK] }),
+};
+// 恢复默认按钮的悬停说明：告诉用户该卡具体重置什么。
+const RESET_HINT={
+  'sec-scan-perf': '恢复默认：并发数回到自动（按 CPU 核数）',
+  'sec-basic':     '恢复默认：时长容差回到 5 秒',
+  'sec-fp':        '恢复默认：相似度阈值回到 90%',
+  'sec-quality':   '恢复默认：音质优先级回到默认顺序',
+  'sec-pick':      '恢复默认：保留优先级回到默认顺序',
+};
+// 撤销快照与当前值比较时归一化：字符串"90"与数字 90 视为相同，数组按内容比较。
+const sameVal=(a,b)=>Array.isArray(a)||Array.isArray(b)?JSON.stringify(a)===JSON.stringify(b):String(a)===String(b);
+
+// 左栏保存状态指示。必须是模块级组件：内联在 SettingsView 里每次父重渲染都是新函数
+// 标识，React 视为新组件类型而卸载重挂载子树，其内 className:'fade' 的「已保存」span
+// 会反复重放淡入动画（滚动/任意重渲染时闪烁）。提为模块级后 span 只在状态真正变
+// 成 'saved' 时挂载一次，fade 只播一次。
+function SaveStatus({saveState}){
+  return e('div',{style:{fontSize:11,height:26,display:'flex',alignItems:'center',gap:5}},
+    saveState==='saving'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'保存中...'),
+    saveState==='saved'&&e('span',{className:'fade',style:{color:'var(--green)',display:'flex',alignItems:'center',gap:4}},Icon('circle-check',{fontSize:12}),'已保存'),
+    saveState==='idle'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},Icon('device-floppy',{fontSize:12}),'修改后自动保存')
+  );
+}
 
 function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates,onTagsWritten}){
   const[rows,setRows]=useState(null);
@@ -85,7 +120,8 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
     r=>(r.file_path||'')
   ]);
 
-  const COLS=['播放','标题','艺术家','修改字段','修改时间','剩余天数','操作'];
+  // [列名, 固定布局列宽] — 列宽总和 100%，fixed 布局下表格恒等于容器宽，不撑破设置列
+  const COLS=[['播放','6%'],['标题','16%'],['艺术家','13%'],['修改字段','14%'],['修改时间','15%'],['剩余天数','14%'],['操作','22%']];
 
   return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
@@ -110,9 +146,9 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
         : e('div',null,
             e(SearchInput,{value:search,onChange:setSearch,style:{marginBottom:8}}),
             e('div',{style:{maxHeight:'calc(100vh - 340px)',minHeight:60,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
-              e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+              e('table',{style:{width:'100%',tableLayout:'fixed',borderCollapse:'collapse',fontSize:12}},
                 e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
-                  ...COLS.map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11}},h))
+                  ...COLS.map(([h,w])=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11,width:w,overflow:'hidden'}},h))
                 )),
                 e('tbody',null,filtered.length===0
                   ? e('tr',null,e('td',{colSpan:COLS.length,style:{padding:'14px',textAlign:'center',color:'var(--tx-faint)'}},'无匹配结果'))
@@ -135,8 +171,8 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
                         e('td',{style:{padding:'6px 10px',fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:180}},title||'—'),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:130}},artist||'—'),
                         e('td',{style:{padding:'6px 10px',color:'var(--tx-muted)',fontSize:11}},fields.map(f=>FIELD_LABELS[f]||f).join('、')||'—'),
-                        e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap'}},dtStr),
-                        e('td',{style:{padding:'6px 10px',color:daysColor,fontFamily:'var(--font-mono)',fontSize:10,textAlign:'center',whiteSpace:'nowrap'}},`${daysLeft}天`),
+                        e('td',{style:{padding:'6px 10px',color:'var(--tx-faint)',fontFamily:'var(--font-mono)',fontSize:10,whiteSpace:'nowrap',overflow:'hidden'}},dtStr),
+                        e('td',{style:{padding:'6px 10px',color:daysColor,fontFamily:'var(--font-mono)',fontSize:10,textAlign:'center',whiteSpace:'nowrap',overflow:'hidden'}},`${daysLeft}天`),
                         e('td',{style:{padding:'4px 8px'}},
                           e('div',{style:{display:'flex',gap:3,alignItems:'center'}},
                             onLocateFile&&e(IconAction,{icon:'music-locate',title:'在音乐库中查看',onClick:()=>onLocateFile(r.file_id)}),
@@ -225,9 +261,9 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
       : e('div',null,
           e(SearchInput,{value:search,onChange:setSearch,style:{marginBottom:8}}),
           e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
-            e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
+            e('table',{style:{width:'100%',tableLayout:'fixed',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
-                ...['','标题','艺术家','专辑','格式','操作'].map(h=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11}},h))
+                ...[['','7%'],['标题','23%'],['艺术家','17%'],['专辑','17%'],['格式','16%'],['操作','20%']].map(([h,w])=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11,width:w,overflow:'hidden'}},h))
               )),
               e('tbody',null,filtered.length===0
                 ? e('tr',null,e('td',{colSpan:6,style:{padding:'18px',textAlign:'center',color:'var(--tx-faint)',fontSize:12}},'无匹配结果'))
@@ -268,36 +304,156 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten}){
+// 常驻执行卡：设置列顶部（音乐目录卡上方）的常驻琥珀卡，无滑动动画。滑动卡
+// （ExecuteToast）消失后在此就地显现；visible=false 时仍占位（visibility:hidden），
+// 保证滑动卡展示期间下方内容零位移——卡显现只翻转显隐、不动布局。
+function ExecutePinnedCard({visible,message,btnLabel,btnIcon='refresh',onAction,onClose,disabled,disabledLabel}){
+  return e('div',{style:{visibility:visible?'visible':'hidden',display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-md)'}},
+    Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
+    e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1,minWidth:0}},message),
+    btnLabel&&e(Btn,{small:true,icon:btnIcon,disabled,onClick:onAction},disabled?disabledLabel:btnLabel),
+    e('button',{onClick:onClose,title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+  );
+}
+
+// 滑动执行卡：系统通知式固定层（position:fixed，锚定视口、不随内容页滚动、不触发滚动条），
+// 停在设置内容页顶部位置（顶栏 54 + main 内边距 20 = 74）。从视口上方下滑出现，停留 holdMs
+// 后上滑消失，消失完成后回调 onDone（父级据此放行对应常驻卡显现）。key 变化（新卡触发 /
+// 同卡再次修改）即重挂载重播动画。只在有按钮的卡触发（无按钮卡不设此层）。
+function ExecuteToast({config,pos,onDone}){
+  const[phase,setPhase]=useState('entering'); // entering|shown|leaving|hidden
+  useEffect(()=>{
+    const raf=requestAnimationFrame(()=>requestAnimationFrame(()=>setPhase('shown')));
+    const hold=setTimeout(()=>setPhase('leaving'),config.holdMs||4000);
+    return ()=>{cancelAnimationFrame(raf);clearTimeout(hold);};
+  },[]);
+  // active=false（如值回到已应用基线）时提前上滑退出，不必等 hold 结束
+  useEffect(()=>{
+    if(phase!=='hidden'&&phase!=='leaving'&&config.active===false)setPhase('leaving');
+  },[config.active,phase]);
+  useEffect(()=>{
+    if(phase==='leaving'){
+      const t=setTimeout(()=>{setPhase('hidden');onDone?.();},300);
+      return ()=>clearTimeout(t);
+    }
+  },[phase]);
+  if(phase==='hidden')return null;
+  // 初始/退出时整卡上移出视口（锚点上方），shown 时落到锚点
+  const y=phase==='shown'?'0':'calc(-100% - 90px)';
+  return e('div',{style:{position:'fixed',top:pos.top,left:pos.left,width:pos.width,zIndex:50,
+    display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',
+    border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-md)',
+    transform:`translateY(${y})`,transition:'transform .3s ease'}},
+    Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
+    e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1,minWidth:0}},config.message),
+    config.btnLabel&&e(Btn,{small:true,icon:config.btnIcon,disabled:config.disabled,onClick:()=>{config.onAction?.();setPhase('leaving');}},config.disabled?config.disabledLabel:config.btnLabel),
+    e('button',{onClick:()=>setPhase('leaving'),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+  );
+}
+
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,dirSeq,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten,active}){
   // 并发默认值 = 自动 min(12, 物理核)（主进程经 /api/system/info 查询；非 SMT 机型也能用满物理核）
   const [autoThreads,setAutoThreads]=useState(Math.min(12, Math.round((navigator.hardwareConcurrency||8)/2)));
   const[s,setS]=useState(null);
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
-  const[needsReapply,setNeedsReapply]=useState(false);
+  // 各执行模块的「待重新应用」触发态：只有影响最终结果的设置变更才点亮对应模块的卡。
+  // 扫描性能（threads）不影响最终结果，不触发任何卡。每张卡独立 show + seq（再次修改重新滑动）。
+  const[basicPending,setBasicPending]=useState(false); // 基础匹配模块 ← duration_tolerance
+  const[basicSeq,setBasicSeq]=useState(0);
+  const[fpPending,setFpPending]=useState(false);       // 声纹匹配模块 ← threshold
+  const[fpSeq,setFpSeq]=useState(0);
+  const[keepPending,setKeepPending]=useState(false);   // 保留优先级模块 ← quality_tiers/pick_tag_order（实时生效，仅提示）
+  const[excludePending,setExcludePending]=useState(false); // 音乐库更新模块 ← exclude_patterns（与 scan_dirs 同卡）
+  const[excludeSeq,setExcludeSeq]=useState(0);
   const[reapplying,setReapplying]=useState(false);
   const[acoustidValidating,setAcoustidValidating]=useState(false);
   const[acoustidValidResult,setAcoustidValidResult]=useState(null); // null|{ok,error}
   const[acoustidValidatedKey,setAcoustidValidatedKey]=useState(''); // last key that passed validation
   const[acoustidKeyDirty,setAcoustidKeyDirty]=useState(false);
   const[needsScrapeReapply,setNeedsScrapeReapply]=useState(false);
+  const[scrapeSeq,setScrapeSeq]=useState(0); // 每次 AcoustID Key 变更验证通过递增，驱动刮削卡重新滑动
   const[fpcalc,setFpcalc]=useState(null);
   const[fpcalcPathDirty,setFpcalcPathDirty]=useState(false);
   const[fpcalcChecking,setFpcalcChecking]=useState(false);
+  const[browsingFpcalc,setBrowsingFpcalc]=useState(false);
+  const[undoSnapshots,setUndoSnapshots]=useState({}); // {[cardId]: 该卡最近一次修改（恢复默认/手动调整）前的各键值} — 撤销快照按卡一份
   const saveTimer=useRef(null);
   const draggingRange=useRef(false); // 滑块拖动中不保存（松开时一次提交，见 commitRange）
   useEffect(()=>{api.get('/api/system/fpcalc').then(r=>{if(r.ok)setFpcalc(r.data);});},[]);
   useEffect(()=>{api.get('/api/system/info').then(r=>{if(r.ok&&r.data?.physicalCores)setAutoThreads(Math.min(12, r.data.physicalCores));});},[]);
-  async function recheckFpcalc(){
+  async function recheckFpcalc(pathOverride){
     setFpcalcChecking(true);
     try{
-      const p=(s?.fpcalc_path||'').trim();
+      // 仅字符串视为显式路径；onClick 直接透传会收到事件对象，此时回退到当前设置值。
+      const p=(typeof pathOverride==='string'?pathOverride:(s?.fpcalc_path||'')).trim();
       const r=await api.get('/api/system/fpcalc?path='+encodeURIComponent(p));
       if(r.ok){setFpcalc(r.data);setFpcalcPathDirty(false);}
     } finally { setFpcalcChecking(false); }
   }
+  // 浏览选择 fpcalc 所在目录：选中后写回设置并标记 dirty，交由下方自动重检生效。
+  async function browseFpcalc(){
+    setBrowsingFpcalc(true);
+    try{
+      const r=await api.post('/api/browse-folder?title='+encodeURIComponent('选择 fpcalc 所在目录'));
+      if(r.ok&&r.path){setS(p=>({...p,fpcalc_path:r.path}));setFpcalcPathDirty(true);}
+    } catch {} finally { setBrowsingFpcalc(false); }
+  }
+  // 自定义路径变更后防抖自动重新检测（与自动保存节奏一致），改完即有反馈。
+  useEffect(()=>{
+    if(!s||!fpcalcPathDirty)return;
+    const p=(s.fpcalc_path||'').trim();
+    const t=setTimeout(()=>recheckFpcalc(p),700);
+    return ()=>clearTimeout(t);
+  },[s?.fpcalc_path]);
+  // 捕获该卡当前值为撤销快照（覆盖旧快照）。skipIfDefault：已默认时跳过——
+  // 重复按恢复默认不会用默认值覆盖快照，撤销目标始终是恢复/修改前的保存数值。
+  function captureSnapshot(cardId,{skipIfDefault=false}={}){
+    if(!s)return;
+    const def=CARD_DEFAULTS[cardId];
+    if(!def)return;
+    const defaults=def();
+    const keys=Object.keys(defaults);
+    if(skipIfDefault&&keys.every(k=>sameVal(s[k],defaults[k])))return;
+    const snap={};for(const k of keys)snap[k]=s[k];
+    setUndoSnapshots(prev=>({...prev,[cardId]:snap}));
+  }
+  // 当前值是否偏离快照：相等或快照不存在即无可撤销内容（撤销按钮置灰）。
+  const hasUndo=(cardId)=>{
+    const snap=undoSnapshots[cardId];
+    if(!snap)return false;
+    return Object.keys(CARD_DEFAULTS[cardId]()).some(k=>!sameVal(s[k],snap[k]));
+  };
+  // 滑块变化入口：拖动中（pointerdown 已捕获拖前值）不重复捕获；键盘/点击单次变化即捕获。
+  function rangeChange(cardId,key){
+    return ev=>{
+      if(!draggingRange.current)captureSnapshot(cardId);
+      setS(p=>({...p,[key]:+ev.target.value}));
+    };
+  }
+  // 恢复默认：先捕获恢复前数值作为撤销目标，再套用默认值；只改本卡键，不影响其他设置。
+  function restoreDefaults(cardId){
+    if(!s)return;
+    const def=CARD_DEFAULTS[cardId];
+    if(!def)return;
+    captureSnapshot(cardId,{skipIfDefault:true});
+    setS(p=>({...p,...def(p)}));
+  }
+  // 撤销：恢复快照数值并清除快照（无快照或无偏离时空操作，此时按钮已置灰）。
+  function undoRestore(cardId){
+    const snap=undoSnapshots[cardId];
+    if(!snap)return;
+    if(!hasUndo(cardId))return;
+    setUndoSnapshots(prev=>{const{[cardId]:_,...rest}=prev;return rest;});
+    setS(p=>({...p,...snap}));
+  }
   const isFirst=useRef(true);
-  const lastApplied=useRef(null); // {threshold, duration_tolerance, quality_tiers} snapshot as of the last manual reapply
+  // 各模块的「已应用/已确认」基线：模块重跑或卡关闭时同步为当前设置值。
+  // 保留优先级模块实时生效、无重跑步骤，基线只在加载时设置（用于「值回到基线自动收起」）。
+  const moduleBaseline=useRef(null); // {duration_tolerance,threshold,quality_tiers,pick_tag_order,exclude_patterns}
+  // 上次持久化的模块值快照：本次保存真的改动了某模块才递增该模块 seq / 重算 pending，
+  // 避免改动无关设置（如 threads）时已显示的卡被重复触发。
+  const lastPersisted=useRef(null);
 
   // Scroll-spy: track which settings section is most visible in the main scroll area
   const sidebarRef=useRef(null);
@@ -324,7 +480,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       d.pick_tag_order=mergePickOrder(d.pick_tag_order);
       delete d.scan_dirs; // owned by App/props, not local state — avoid stale overwrite races
       setS(d);
-      lastApplied.current={threshold:d.threshold,duration_tolerance:d.duration_tolerance,quality_tiers:JSON.stringify(d.quality_tiers),pick_tag_order:JSON.stringify(d.pick_tag_order)};
+      const snap={duration_tolerance:d.duration_tolerance,threshold:d.threshold,quality_tiers:JSON.stringify(d.quality_tiers),pick_tag_order:JSON.stringify(d.pick_tag_order),exclude_patterns:JSON.stringify(d.exclude_patterns||[])};
+      moduleBaseline.current={...snap};lastPersisted.current={...snap};
       // validate stored AcoustID key against the actual API (not just assume valid)
       const key=(d.acoustid_key||'').trim();
       const lastValidated = localStorage.getItem('acoustid_validated_key') || '';
@@ -341,16 +498,28 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     if(!s)return;
     api.put('/api/settings',s).then(r=>{
       if(!r.ok){setSaveState('error');return;}
-      setSaveState('saved');setTimeout(()=>setSaveState('idle'),2200);
-      const qj=JSON.stringify(s.quality_tiers||[]);
-      const pj=JSON.stringify(s.pick_tag_order||[]);
-      const changed = lastApplied.current && (
-        lastApplied.current.threshold!==s.threshold ||
-        lastApplied.current.duration_tolerance!==s.duration_tolerance ||
-        lastApplied.current.quality_tiers!==qj ||
-        lastApplied.current.pick_tag_order!==pj
-      );
-      if(changed)setNeedsReapply(true);
+      // 复用 saveTimer：连续保存时先清旧的「已保存→空闲」定时器，避免多个叠加、较早的
+      // 提前把状态翻回 idle，造成 saved→idle→saved 抖动。
+      setSaveState('saved');clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>setSaveState('idle'),2200);
+      const cur={duration_tolerance:s.duration_tolerance,threshold:s.threshold,quality_tiers:JSON.stringify(s.quality_tiers||[]),pick_tag_order:JSON.stringify(s.pick_tag_order||[]),exclude_patterns:JSON.stringify(s.exclude_patterns||[])};
+      // 各模块 seq 只在「本次保存真的改动了该模块」时递增（对比上次持久化快照）：
+      // 改动无关设置（如 threads）不会让已显示的卡重新滑动。threads 不在任何模块的
+      // 跟踪范围内，永不触发任何卡。
+      const prev=lastPersisted.current;
+      if(prev){
+        if(prev.duration_tolerance!==cur.duration_tolerance)setBasicSeq(k=>k+1);
+        if(prev.threshold!==cur.threshold)setFpSeq(k=>k+1);
+        if(prev.exclude_patterns!==cur.exclude_patterns)setExcludeSeq(k=>k+1);
+      }
+      lastPersisted.current=cur;
+      // 各模块 pending = 当前值偏离该模块已应用基线（值回到基线自动收起）。threads 不跟踪。
+      const b=moduleBaseline.current;
+      if(b){
+        setBasicPending(b.duration_tolerance!==cur.duration_tolerance);
+        setFpPending(b.threshold!==cur.threshold);
+        setKeepPending(b.quality_tiers!==cur.quality_tiers||b.pick_tag_order!==cur.pick_tag_order);
+        setExcludePending(b.exclude_patterns!==cur.exclude_patterns);
+      }
     });
   }
   function commitRange(){
@@ -368,18 +537,85 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     return()=>clearTimeout(saveTimer.current);
   },[s]);
 
-  function reapply(){
+  // 按执行模块重跑。steps 只含该卡对应模块（基础匹配卡→basicMatch，声纹匹配卡→fpMatch），
+  // 保留优先级卡无步骤（实时生效）。应用后把该模块基线同步为当前值，并清 pending（卡消失）——
+  // 变更已交到执行通道，不再需要常驻提醒。
+  function applyBasic(){
     setReapplying(true);
-    onMatchAffectingChange?.();
-    lastApplied.current={threshold:s.threshold,duration_tolerance:s.duration_tolerance,quality_tiers:JSON.stringify(s.quality_tiers||[]),pick_tag_order:JSON.stringify(s.pick_tag_order||[])};
-    setNeedsReapply(false);
+    onMatchAffectingChange?.(['basicMatch']);
+    moduleBaseline.current.duration_tolerance=s.duration_tolerance;
+    setBasicPending(false);
     setTimeout(()=>setReapplying(false),1500);
   }
+  function applyFp(){
+    setReapplying(true);
+    onMatchAffectingChange?.(['fpMatch']);
+    moduleBaseline.current.threshold=s.threshold;
+    setFpPending(false);
+    setTimeout(()=>setReapplying(false),1500);
+  }
+  function applyEnum(){
+    onEnumOnly?.();
+    moduleBaseline.current.exclude_patterns=JSON.stringify(s.exclude_patterns||[]);
+    setExcludePending(false);
+    onDismissDirChanged?.();
+  }
+  // 关闭卡 = 确认，把该模块基线同步为当前值，避免后续改动无关设置时重新点亮
+  const closeBasic=()=>{moduleBaseline.current.duration_tolerance=s.duration_tolerance;setBasicPending(false);};
+  const closeFp=()=>{moduleBaseline.current.threshold=s.threshold;setFpPending(false);};
+  const closeKeep=()=>{moduleBaseline.current.quality_tiers=JSON.stringify(s.quality_tiers||[]);moduleBaseline.current.pick_tag_order=JSON.stringify(s.pick_tag_order||[]);setKeepPending(false);};
+  const closeExclude=()=>{moduleBaseline.current.exclude_patterns=JSON.stringify(s.exclude_patterns||[]);setExcludePending(false);onDismissDirChanged?.();};
 
-  const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
-  const resetQ=()=>setS(p=>({...p,quality_tiers:[...DEFAULT_Q]}));
-  const movePick=(i,d)=>{const q=[...(s.pick_tag_order||DEFAULT_PICK)];const j=i+d;if(j<0||j>=q.length)return;[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,pick_tag_order:q}));};
-  const resetPick=()=>setS(p=>({...p,pick_tag_order:[...DEFAULT_PICK]}));
+  // ── 执行卡编排：滑动卡（ExecuteToast，固定层）+ 常驻卡（ExecutePinnedCard，设置列顶部槽）──
+  // 只有带按钮的卡（需要点击重新执行）才触发滑动卡；无按钮卡（保留优先级，实时生效）直接常驻
+  // 显现。toast 只存 {key,seq}，配置渲染期从 EXEC_CARDS 现取（disabled 等跟随最新状态）；seq
+  // 递增（同卡再次修改）或换 key（新卡触发）都会重挂载滑动卡重播动画。
+  const EXEC_CARDS=[
+    {key:'basic',  message:'时长容差已修改，尚未重新应用到现有重复组',  btnLabel:'立即重新匹配', btnIcon:reapplying?'loader':'refresh', disabled:scanRunning||reapplying, disabledLabel:'扫描进行中...'},
+    {key:'fp',     message:'频谱声纹阈值已修改，尚未重新应用到现有重复组', btnLabel:'立即重新匹配', btnIcon:reapplying?'loader':'refresh', disabled:scanRunning||reapplying, disabledLabel:'扫描进行中...'},
+    {key:'keep',   message:'音质优先级 / 保留优先级 已修改，已实时应用到现有重复组'},
+    {key:'enum',   message:(dirChanged&&excludePending)?'音乐目录 / 排除规则已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）':dirChanged?'音乐目录已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）':'排除规则已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）', btnLabel:'立即更新音乐库', disabled:scanRunning, disabledLabel:'扫描进行中...'},
+    {key:'scrape', message:'AcoustID Key 已验证，建议重新执行「刮削匹配」以应用声纹查询', btnLabel:'立即刮削匹配', disabled:scanRunning, disabledLabel:'扫描进行中...'},
+  ];
+  const cardPending={basic:basicPending,fp:fpPending,keep:keepPending,enum:dirChanged||excludePending,scrape:needsScrapeReapply};
+  const cardAction={basic:applyBasic,fp:applyFp,enum:applyEnum,scrape:()=>onScrapeReapply?.()};
+  const cardClose={basic:closeBasic,fp:closeFp,keep:closeKeep,enum:closeExclude,scrape:()=>setNeedsScrapeReapply(false)};
+
+  // 固定层锚点：滑动卡定位在设置内容页顶部（main 顶栏 54 + 内边距 20 = 74），水平范围与设置
+  // 右列对齐（测量 data-hint-boundary 容器）。窗口 resize / 设置页激活时重测。
+  const colRef=useRef(null);
+  const[colRect,setColRect]=useState(null);
+  const[toast,setToast]=useState(null); // {key,seq}——触发滑动卡的模块与本次触发序号
+  const measureCol=useCallback(()=>{
+    if(!colRef.current)return;
+    const r=colRef.current.getBoundingClientRect();
+    setColRect(prev=>prev&&prev.left===r.left&&prev.width===r.width&&prev.top===74?prev:{top:74,left:r.left,width:r.width});
+  },[]);
+  useEffect(()=>{ if(active)measureCol(); },[active]);
+  useEffect(()=>{
+    measureCol();
+    window.addEventListener('resize',measureCol);
+    return ()=>window.removeEventListener('resize',measureCol);
+  },[measureCol]);
+  const fireToast=key=>{
+    measureCol();
+    setToast(t=>t&&t.key===key?{key,seq:t.seq+1}:{key,seq:1});
+  };
+  // seq 递增即「该模块设置被修改」——点亮 pending 的同时触发滑动卡。useLayoutEffect 在绘制前
+  // 设好 toast，避免常驻卡先闪现一帧。keep 无按钮，永不触发滑动卡。
+  useLayoutEffect(()=>{ if(basicPending&&basicSeq>0)fireToast('basic'); },[basicSeq]);
+  useLayoutEffect(()=>{ if(fpPending&&fpSeq>0)fireToast('fp'); },[fpSeq]);
+  useLayoutEffect(()=>{ if((dirChanged||excludePending)&&(dirSeq>0||excludeSeq>0))fireToast('enum'); },[dirSeq,excludeSeq]);
+  useLayoutEffect(()=>{ if(needsScrapeReapply&&scrapeSeq>0)fireToast('scrape'); },[scrapeSeq]);
+
+  // 渲染期派生：当前滑动卡配置（按 toast.key 从 EXEC_CARDS 现取；btnLabel 为空则无滑动卡）
+  const toastCard=toast?EXEC_CARDS.find(c=>c.key===toast.key):null;
+  const toastConfig=toast&&toastCard&&toastCard.btnLabel
+    ? {...toastCard,key:toast.key,seq:toast.seq,active:cardPending[toast.key],onAction:()=>cardAction[toast.key]?.()}
+    : null;
+
+  const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;captureSnapshot('sec-quality');[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
+  const movePick=(i,d)=>{const q=[...(s.pick_tag_order||DEFAULT_PICK)];const j=i+d;if(j<0||j>=q.length)return;captureSnapshot('sec-pick');[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,pick_tag_order:q}));};
 
   async function validateAcoustidKey(key,silent=false){
     if(!key)return;
@@ -392,7 +628,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         setAcoustidKeyDirty(false);
         setAcoustidValidatedKey(key);
         localStorage.setItem('acoustid_validated_key', key);
-        if(!silent && keyChanged) setNeedsScrapeReapply(true);
+        if(!silent && keyChanged){setNeedsScrapeReapply(true);setScrapeSeq(k=>k+1);}
       }
     }catch(e){setAcoustidValidResult({ok:false,error:'网络错误'});}
     finally{setAcoustidValidating(false);}
@@ -401,10 +637,11 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     await validateAcoustidKey((s?.acoustid_key||'').trim());
   }
 
-  const SI=()=>e('div',{style:{fontSize:11,height:26,display:'flex',alignItems:'center',gap:5}},
-    saveState==='saving'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'保存中...'),
-    saveState==='saved'&&e('span',{className:'fade',style:{color:'var(--green)',display:'flex',alignItems:'center',gap:4}},Icon('circle-check',{fontSize:12}),'已保存'),
-    saveState==='idle'&&e('span',{style:{color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},Icon('device-floppy',{fontSize:12}),'修改后自动保存')
+  // 设置卡头部的「恢复默认 / 撤销」按钮组：撤销常驻显示，无可撤销内容（无快照或
+  // 当前值等于快照）时置灰；恢复默认始终可用。
+  const ResetBar=({cardId})=>e('div',{style:{display:'flex',alignItems:'center',gap:4,flexShrink:0}},
+    e(Btn,{small:true,variant:'ghost',icon:'arrow-back-up',disabled:!hasUndo(cardId),onClick:()=>undoRestore(cardId),title:'撤销最近一次修改（恢复默认或手动调整），回到修改前的数值'},'撤销'),
+    e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:()=>restoreDefaults(cardId),title:RESET_HINT[cardId]},'恢复默认')
   );
 
   function jump(id){document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});}
@@ -414,39 +651,28 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   const q=s.quality_tiers||DEFAULT_Q;
   const pick=mergePickOrder(s.pick_tag_order);
 
-  return e('div',{className:'fade',style:{display:'grid',gridTemplateColumns:'150px 1fr',gap:18,alignItems:'start'}},
+  return e('div',{className:'fade',style:{display:'grid',gridTemplateColumns:'128px 1fr',gap:14,alignItems:'start'}},
 
     // Left rail — sticky, no overflow mask; whitespace is natural layout.
     e('div',{ref:sidebarRef,style:{position:'sticky',top:20,display:'flex',flexDirection:'column',gap:1}},
       SETTINGS_SECTIONS.map(sec=>e('button',{key:sec.id,'data-section':sec.id,onClick:()=>jump(sec.id),style:{display:'flex',alignItems:'center',gap:7,padding:'7px 9px',background:'none',border:'none',borderRadius:'var(--r-md)',cursor:'pointer',color:'var(--tx-secondary)',fontSize:12,textAlign:'left',flexShrink:0},onMouseEnter:ev=>ev.currentTarget.style.background='var(--bg-muted)',onMouseLeave:ev=>ev.currentTarget.style.background='none'},
         Icon(sec.icon,{fontSize:14,color:'var(--tx-faint)'}),sec.label)),
-      e('div',{style:{marginTop:8,paddingTop:8,borderTop:'0.5px solid var(--bd-subtle)'}},e(SI))
+      e('div',{style:{marginTop:8,paddingTop:8,borderTop:'0.5px solid var(--bd-subtle)'}},e(SaveStatus,{saveState}))
     ),
 
     // Right — all sections concatenated, scrollable as part of <main>
-    e('div',{'data-hint-boundary':'',style:{display:'flex',flexDirection:'column',gap:14,paddingBottom:14}},
+    e('div',{ref:colRef,'data-hint-boundary':'',style:{position:'relative',display:'flex',flexDirection:'column',gap:14,paddingBottom:14}},
 
-      // Unified prompt layout for "设置已修改，需要重新扫描" — jumps to 扫描 page.
-      needsReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
-        Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1}},'频谱声纹阈值 / 时长容差 / 音质优先级 / 保留优先级 已修改，尚未重新应用到现有重复组'),
-        e(Btn,{small:true,icon:reapplying?'loader':'refresh',disabled:scanRunning||reapplying,onClick:reapply},scanRunning?'扫描进行中...':'立即重新匹配'),
-        e('button',{onClick:()=>setNeedsReapply(false),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+      // 顶部执行卡槽：按设置项影响的执行模块各一张，常驻于音乐目录卡上方（文档流内，不覆盖设置卡）。
+      // 只对「影响最终结果」的设置点亮对应卡：threads（扫描性能）不影响结果，永不触发任何卡。
+      // 槽为每张卡保留固定高度——滑动卡展示期间对应常驻卡以 visibility:hidden 占位，卡显现时
+      // 下方内容零位移；槽随待处理集合增减而增减（发生在点亮/关闭时）。带按钮的卡先播滑动卡
+      // （ExecuteToast，固定层），消失后才显现常驻卡；无按钮卡（keep）直接常驻。
+      (basicPending||fpPending||keepPending||dirChanged||excludePending||needsScrapeReapply)&&e('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+        EXEC_CARDS.filter(c=>cardPending[c.key]).map(c=>e(ExecutePinnedCard,{key:c.key,visible:toastConfig?.key!==c.key,message:c.message,btnLabel:c.btnLabel,btnIcon:c.btnIcon,disabled:c.disabled,disabledLabel:c.disabledLabel,onAction:cardAction[c.key],onClose:cardClose[c.key]})),
       ),
-
-      dirChanged&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
-        Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1}},'音乐目录已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）'),
-        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:onEnumOnly},scanRunning?'扫描进行中...':'立即更新音乐库'),
-        e('button',{onClick:onDismissDirChanged,title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
-      ),
-
-      needsScrapeReapply&&e('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--amber-bg)',border:'0.5px solid var(--amber-bd)',borderRadius:'var(--r-lg)'}},
-        Icon('alert-circle',{fontSize:15,color:'var(--amber)',flexShrink:0}),
-        e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1}},'AcoustID Key 已验证，建议重新执行「刮削匹配」以应用声纹查询'),
-        e(Btn,{small:true,icon:'refresh',disabled:scanRunning,onClick:()=>{onScrapeReapply?.();setNeedsScrapeReapply(false);}},scanRunning?'扫描进行中...':'立即刮削匹配'),
-        e('button',{onClick:()=>setNeedsScrapeReapply(false),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
-      ),
+      // 滑动执行卡：固定层，锚定设置内容页顶部，不随内容页滚动、永远可见
+      toastConfig&&colRect&&e(ExecuteToast,{key:toast.key+':'+toast.seq,config:toastConfig,pos:colRect,onDone:()=>setToast(null)}),
 
       e(Card,{id:'sec-dirs'},
         e(SH,{title:'音乐目录',sub:'添加包含音乐文件的文件夹到音乐库'}),
@@ -473,38 +699,50 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       // threads 未设置（自动）时由 scan-worker 按逻辑核数计算 min(12, 逻辑核/2)；滑块上限 12
       // 与并发上限一致（更高只加内存无收益）。
       e(Card,{id:'sec-scan-perf'},
-        e(SH,{title:'扫描性能'}),
+        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
+          e('div',{style:{flex:1}},e(SH,{title:'扫描性能'})),
+          e(ResetBar,{cardId:'sec-scan-perf'})
+        ),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'并发解码的文件数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:'自动 ('+autoThreads+')')),
-          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:ev=>setS(p=>({...p,threads:+ev.target.value})),onPointerDown:()=>draggingRange.current=true,onPointerUp:commitRange,onBlur:commitRange})
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'并发解码的文件数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:autoThreads)),
+          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:rangeChange('sec-scan-perf','threads'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-scan-perf');},onPointerUp:commitRange,onBlur:commitRange})
         )
       ),
 
       e(Card,{id:'sec-basic'},
-        e(SH,{title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'}),
+        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
+          e('div',{style:{flex:1}},e(SH,{title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
+          e(ResetBar,{cardId:'sec-basic'})
+        ),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},'时长容差',e(Hint,{text:'两个文件标题、艺术家一致时，时长相差在此范围内仍视为同一首歌——不同来源的同一首歌常有 1-5 秒的掐头去尾差异。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.duration_tolerance??5)+' 秒')),
-          e('input',{type:'range',min:1,max:15,value:s.duration_tolerance??5,onChange:ev=>setS(p=>({...p,duration_tolerance:+ev.target.value})),onPointerDown:()=>draggingRange.current=true,onPointerUp:commitRange,onBlur:commitRange})
+          e('input',{type:'range',min:1,max:15,value:s.duration_tolerance??5,onChange:rangeChange('sec-basic','duration_tolerance'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-basic');},onPointerUp:commitRange,onBlur:commitRange})
         )
       ),
 
       // 声纹匹配 — 技术细节：内置 Goertzel 声纹（无需配置）；Chromaprint（CP）可选，需 fpcalc
       // 可执行文件，配置后在频谱声纹之外独立再比对一遍；同一份声纹数据也被刮削匹配的 AcoustID 使用。
       e(Card,{id:'sec-fp'},
-        e(SH,{title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'}),
+        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
+          e('div',{style:{flex:1}},e(SH,{title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'})),
+          e(ResetBar,{cardId:'sec-fp'})
+        ),
         e('div',null,
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'相似度达到此值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。标题、艺术家、时长近似的歌曲，即使低于此值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
-          e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:ev=>setS(p=>({...p,threshold:+ev.target.value})),onPointerDown:()=>draggingRange.current=true,onPointerUp:commitRange,onBlur:commitRange}),
+          e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:rangeChange('sec-fp','threshold'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-fp');},onPointerUp:commitRange,onBlur:commitRange}),
           e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
         ),
 
         e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2,display:'flex',alignItems:'center'}},'CP 声纹（可选）',e(Hint,{text:'默认声纹无需配置。CP 声纹是可选第二种，配置后会额外检查一遍，通常能发现默认声纹漏掉的重复，结果会分开标注。同一份数据也会被「刮削匹配」用到。'})),
           e('div',{style:{display:'flex',gap:6,maxWidth:460}},
-            e('input',{value:s.fpcalc_path||'',
+            e('input',{value:s.fpcalc_path||fpcalc?.path||'',
               onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
-              placeholder:fpcalc?.available?`已自动检测：${fpcalc.path}`:'留空则自动检测（项目根目录 / PATH）',
-              style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)'}}),
+              placeholder:'留空则自动检测（项目根目录 / PATH）',
+              title:'可填 fpcalc 所在目录或完整路径；留空时显示自动检测结果，可直接选择复制',
+              style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)',minWidth:0,color:s.fpcalc_path?'var(--tx-primary)':'var(--tx-muted)'}}),
+            e('button',{onClick:browseFpcalc,disabled:browsingFpcalc,title:'浏览选择 fpcalc 所在目录',style:{padding:'6px 10px',background:'var(--bg-muted)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',cursor:browsingFpcalc?'wait':'pointer',fontSize:11,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap',flexShrink:0}},
+              Icon('folders',{fontSize:12}),'浏览'),
             e(SettingStatus,{
               state:!fpcalc?'idle':fpcalc.available?'ok':'warn',
               busy:fpcalcChecking,
@@ -560,15 +798,15 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
             // see sec-fp) rather than a second input for the same setting.
             e('div',{style:{flex:'1 1 260px',minWidth:240}},
               e('div',{style:{fontSize:11,color:'var(--tx-secondary)',marginBottom:4,fontWeight:500}},'② CP 声纹'),
-              e('button',{onClick:()=>jump('sec-fp'),style:{display:'flex',alignItems:'center',gap:6,width:'100%',padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',cursor:'pointer',fontSize:11,color:fpcalc?.available?'var(--green)':'var(--tx-faint)',textAlign:'left'}},
+              e('button',{onClick:()=>jump('sec-fp'),title:fpcalc?.path,style:{display:'flex',alignItems:'center',gap:6,width:'100%',padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',cursor:'pointer',fontSize:11,color:fpcalc?.available?'var(--green)':'var(--tx-faint)',textAlign:'left'}},
                 Icon(fpcalc?.available?'circle-check':'alert-circle',{fontSize:12,flexShrink:0}),
-                e('span',{style:{flex:1}},fpcalc?.available?`已配置：${fpcalc.path}`:'未配置'),
-                e('span',{style:{color:'var(--tx-faint)',textDecoration:'underline'}},'去「声纹匹配」配置')
+                e('span',{style:{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},fpcalc?.available?`已配置：${fpcalc.path}`:'未配置'),
+                e('span',{style:{color:'var(--tx-faint)',textDecoration:'underline',whiteSpace:'nowrap',flexShrink:0}},'去「声纹匹配」配置')
               )
             )
           ),
-          e('div',{style:{marginTop:10,padding:'8px 12px',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-subtle)',borderRadius:'var(--r-md)',fontSize:11,color:'var(--tx-faint)'}},
-            '两个条件都满足后，重新运行一次「刮削匹配」，AcoustID 即可生效。'
+          e('div',{style:{marginTop:4,fontSize:11,color:'var(--tx-faint)'}},
+            '在 acoustid.org 注册应用即可免费获取 API Key。需同时满足两个条件才生效：① 上方 API Key 有效；② 在「声纹匹配」中配置好 CP 声纹（fpcalc）。'
           )
         )
       ),
@@ -576,7 +814,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       e(Card,{id:'sec-quality'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
           e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'拖动调整不同音质条件的优先顺序，越靠上越视为音质更优。'})),
-          e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetQ},'恢复默认')
+          e(ResetBar,{cardId:'sec-quality'})
         ),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<3?'var(--green)':i<6?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
@@ -592,7 +830,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       e(Card,{id:'sec-pick'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
           e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件，越靠上越优先。某文件缺少对应数据时，该轮不参与、也不会被淘汰。各维度含义见重复组详情「维度对比」旁的说明按钮。'})),
-          e(Btn,{small:true,variant:'ghost',icon:'refresh',onClick:resetPick},'恢复默认')
+          e(ResetBar,{cardId:'sec-pick'})
         ),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<2?'var(--green)':i<4?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),

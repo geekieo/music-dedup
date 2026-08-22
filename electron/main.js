@@ -110,6 +110,9 @@ function createClientWindow() {
   const win = new BrowserWindow({
     width: saved.width || 1280,
     height: saved.height || 840,
+    // 各页复合行的固有最小宽决定最终冻结尺寸，窗口不得压到其下。
+    minWidth: 900,
+    minHeight: 620,
     x: saved.x,
     y: saved.y,
     title: 'MusicDedup',

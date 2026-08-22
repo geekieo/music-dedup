@@ -52,10 +52,13 @@ function ScannerView({scan,hasPlayer}){
   // 内联子进度%仅在与总%明显不同时显示——meta/fp 阶段二者相同，避免冗余
   const showInlineSub=status.subPct!=null&&status.subPct>0&&Math.abs(status.subPct-(status.pct||0))>1;
   const LC={ok:'var(--amber)',done:'var(--green)',err:'var(--red)',info:'var(--tx-secondary)',sep:'var(--amber)'};
-  // 播放器出现时（底部固定高度的 PlayerBar ~64px），日志高度相应收缩，避免被其覆盖产生滚动条。
+  // PlayerBar 在普通流中（存在时占 ~64px），日志用 flex:1 吃掉剩余高度，精确适配所有窗口尺寸，
+  // 日志正文永不超出 main 可视区，底部最新行不会被播放器遮住。
   const PLAYER_H=hasPlayer?64:0;
+  // 顶栏 54 + main 上下内边距 40：扫描页根高度钉在 main 可视区（100vh - 顶栏 - 播放器）。
+  const CHROME_H=54+40;
 
-  return e('div',{className:'fade'},
+  return e('div',{className:'fade',style:{display:'flex',flexDirection:'column',height:`calc(100vh - ${CHROME_H+PLAYER_H}px)`,minHeight:0}},
     confirm&&e(ConfirmModal,{
       title:'确认全量重新执行',
       message:e('span',null,'将对「',e('b',null,confirm.label),'」执行全量重提取，忽略智能跳过逻辑（按修改时间/是否存在判断），所有相关文件会被重新处理，耗时会明显更长。'),
@@ -183,14 +186,12 @@ function ScannerView({scan,hasPlayer}){
     })(),
 
     // Log — progressive, never cleared mid-session
-    e('div',{style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',overflow:'hidden',boxShadow:'var(--sh-xs)'}},
-      e('div',{style:{padding:'8px 14px',borderBottom:'0.5px solid var(--bd-subtle)',background:'var(--bg-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}},
+    e('div',{style:{flex:1,minHeight:0,display:'flex',flexDirection:'column',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',overflow:'hidden',boxShadow:'var(--sh-xs)'}},
+      e('div',{style:{flexShrink:0,padding:'8px 14px',borderBottom:'0.5px solid var(--bd-subtle)',background:'var(--bg-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}},
         e('div',{style:{display:'flex',alignItems:'center',gap:6}},Icon('terminal-2',{fontSize:13,color:'var(--tx-faint)'}),e('span',{style:{fontSize:11,fontWeight:500,color:'var(--tx-muted)'}},'运行日志')),
         e('button',{onClick:()=>setLogs([]),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4}},Icon('trash',{fontSize:12}),'清空')
       ),
-      e('div',{ref:logRef,style:{padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,
-        height:`calc(100vh - ${430+PLAYER_H}px)`,minHeight:180,maxHeight:`calc(100vh - ${300+PLAYER_H}px)`,
-        overflowY:'auto'}},
+      e('div',{ref:logRef,style:{flex:1,minHeight:0,overflowY:'auto',padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85}},
         logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始...'),
         logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:((m=>{const ts=m[1],txt=m[2];return e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),ts&&e('span',{style:{color:'var(--tx-faint)',marginRight:6,userSelect:'none',fontWeight:400}},ts),e('span',null,txt))})(l.msg.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)/)||['',null,l.msg])))),
         status.running&&e('span',{className:'blink',style:{color:'var(--amber)'}},'█')

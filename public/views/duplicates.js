@@ -628,9 +628,13 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
   const savings=visiblePending.reduce((a,g)=>a+(g.savings_bytes||0),0);
   const resolvedSavings=visibleResolved.reduce((a,g)=>a+(g.savings_bytes||0),0);
 
-  const GH='calc(100vh - 260px)';
+  // PlayerBar 在普通流中（存在时占 ~64px），网格用 flex:1 吃满剩余高度，精确适配所有窗口尺寸：
+  // 播放器出现时不溢出出滚动条，消失时不留空白；标签换行抬高上方内容时网格自适应收缩。
+  const PLAYER_H=player.current?64:0;
+  // 顶栏 54 + main 上下内边距 40：重复组页根高度钉在 main 可视区（100vh - 顶栏 - 播放器）。
+  const CHROME_H=54+40;
 
-  return e('div',{className:'fade'},
+  return e('div',{className:'fade',style:{display:'flex',flexDirection:'column',height:`calc(100vh - ${CHROME_H+PLAYER_H}px)`,minHeight:0}},
     scrapeId&&e(ScrapeDialog,{fileId:scrapeId,onClose:()=>setScrapeId(null),
       onUpdated:()=>{loadList();if(selId){api.get('/api/duplicates/'+selId).then(r=>{if(r.ok)setDetail(r.data);});}},
       onTagsWritten:onTagsWritten}),
@@ -674,16 +678,15 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
     propsId&&e(PropsModal,{fileId:propsId,onClose:()=>setPropsId(null)}),
 
     // Filter bar: matching-method tags (how the group was discovered)
-    e('div',{style:{marginBottom:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18,justifyContent:'space-between'}},
-      e('span',{style:{display:'flex',alignItems:'center',gap:8}},
-        e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
-        e('span',{style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-          filterTags.map(tag=>{
+    e('div',{style:{marginBottom:6,display:'flex',alignItems:'flex-start',gap:8,paddingRight:18,justifyContent:'space-between'}},
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0,padding:'3px 0'}},Icon('filter',{fontSize:12}),'匹配方法筛选：'),
+      // 胶囊独立成折行容器：换行时对齐第一个胶囊的左缘（悬挂缩进），标签保持在第一行
+      e('span',{style:{display:'flex',flexWrap:'wrap',gap:8,flex:1,minWidth:0}},
+        filterTags.map(tag=>{
             const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
             const active=tagFilter.has(tag);
-            return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
+            return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s',whiteSpace:'nowrap'}},GROUP_TAG_LABELS[tag]||tag);
           }),
-        ),
       ),
       e('button',{
         onClick:()=>setShowTagLegend(true),
@@ -691,13 +694,14 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
       }, Icon('info-circle',{fontSize:12}), '标签说明'),
     ),
     // Second row: characteristic tags (what the group looks like) + clear button
-    e('div',{style:{marginBottom:10,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',paddingRight:18,justifyContent:'space-between'}},
-      e('span',{style:{display:'flex',alignItems:'center',gap:8}},
-        e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}},Icon('tag',{fontSize:12}),'其他组内特征：'),
+    e('div',{style:{marginBottom:10,display:'flex',alignItems:'flex-start',gap:8,paddingRight:18,justifyContent:'space-between'}},
+      e('span',{style:{fontSize:11,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap',flexShrink:0,padding:'3px 0'}},Icon('tag',{fontSize:12}),'其他组内特征：'),
+      // 胶囊独立成折行容器：换行时对齐第一个胶囊的左缘（悬挂缩进），标签保持在第一行
+      e('span',{style:{display:'flex',flexWrap:'wrap',gap:8,flex:1,minWidth:0}},
         charTags.map(tag=>{
           const[col,bg,bd]=GROUP_TAG_COLORS[tag]||['#6B7280','#F3F4F6','#E5E7EB'];
           const active=tagFilter.has(tag);
-          return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s'}},GROUP_TAG_LABELS[tag]||tag);
+          return e('button',{key:tag,onClick:()=>toggleTagFilter(tag),style:{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:active?600:400,cursor:'pointer',border:`1px solid ${active?col:bd}`,background:active?bg:'var(--bg-base)',color:active?col:'var(--tx-muted)',transition:'all .12s',whiteSpace:'nowrap'}},GROUP_TAG_LABELS[tag]||tag);
         }),
       ),
       e('button',{
@@ -714,11 +718,11 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
     ),
 
     // Toolbar
-    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:8,flexWrap:'wrap',paddingRight:18}},
-      e('div',{style:{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',flex:1,minWidth:0}},
-        e('div',{style:{display:'flex',background:'var(--bg-muted)',padding:2,borderRadius:'var(--r-md)',gap:2}},
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,gap:8,paddingRight:18}},
+      e('div',{style:{display:'flex',gap:6,alignItems:'center',flex:1,minWidth:0}},
+        e('div',{style:{display:'flex',background:'var(--bg-muted)',padding:2,borderRadius:'var(--r-md)',gap:2,flexShrink:0}},
           ...[['pending','待处理'],['done','已处理'],['all','全部']].map(([f,l])=>
-            e('button',{key:f,onClick:()=>{setFilter(f);setSelId(null);},style:{padding:'4px 10px',fontSize:11,fontWeight:filter===f?600:400,cursor:'pointer',borderRadius:'var(--r-sm)',background:filter===f?'var(--bg-base)':'transparent',color:filter===f?'var(--tx-primary)':'var(--tx-muted)',border:'none',boxShadow:filter===f?'var(--sh-xs)':'none',transition:'all .15s'}},l))
+            e('button',{key:f,onClick:()=>{setFilter(f);setSelId(null);},style:{padding:'4px 10px',fontSize:11,fontWeight:filter===f?600:400,cursor:'pointer',borderRadius:'var(--r-sm)',background:filter===f?'var(--bg-base)':'transparent',color:filter===f?'var(--tx-primary)':'var(--tx-muted)',border:'none',boxShadow:filter===f?'var(--sh-xs)':'none',transition:'all .15s',whiteSpace:'nowrap'}},l))
         ),
         e('select',{value:sort,onChange:ev=>setSort(ev.target.value),style:{fontSize:12,padding:'5px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'}},
           e('option',{value:'savings'},'按可释放空间'),e('option',{value:'sim'},'按相似度'),e('option',{value:'files'},'按文件数')
@@ -776,7 +780,7 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
       danger:true,
     }),
 
-    e('div',{style:{display:'grid',gridTemplateColumns:'240px 1fr',gap:12,height:GH}},
+    e('div',{style:{display:'grid',gridTemplateColumns:'240px 1fr',gap:12,flex:1,minHeight:0}},
 
       e('div',{style:{overflowY:'auto',height:'100%',paddingRight:2}},
         listLoading?e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):

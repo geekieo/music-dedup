@@ -21,8 +21,9 @@ export const routes = [
     for (const [k, v] of Object.entries(body)) setSetting(db, k, v);
     return { ok: true };
   } },
-  { method: 'POST', path: '/api/browse-folder', handler: async () => {
-    const r = await dialog.showOpenDialog({ properties: ['openDirectory'], title: '选择要添加到音乐库的文件夹' });
+  { method: 'POST', path: '/api/browse-folder', handler: async (_p, query) => {
+    const title = query.title || '选择要添加到音乐库的文件夹';
+    const r = await dialog.showOpenDialog({ properties: ['openDirectory'], title });
     return { ok: true, path: r.canceled ? null : (r.filePaths[0] || null) };
   } },
   // ?path=... 允许客户端先测候选路径再保存；不传则回退到已保存配置
