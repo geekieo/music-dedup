@@ -335,7 +335,8 @@ function useScanStream(onDone){
       // 相位切换时清 subPct：新相位首个 emit 常不带 subPct，残留上一相位的值会让
       // 内联子% 卡在旧值（如上一相位结束的 100%）。
       setStatus(prev=>(d.phase!==prevPhaseRef.current?{...d,subPct:undefined}:d));
-      if(d.message){
+      // 正常完成的终态 done 复用最后一步完成消息（已入日志），跳过以免重复
+      if(d.message&&!(d.type==='done'&&d.phase==='done')){
         setLogs(p=>{
           if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
           const ty=d.level||'ok';
@@ -365,7 +366,7 @@ function useScanStream(onDone){
 
 /* ══════════════════════════════════════════════════════════════════════
    APP SHELL — F4: tab order is 音乐库 → 重复组 → 扫描 → 设置 (重复组 and
-   扫描 swapped from before); 手动保留名单 folded into 设置, no longer a top tab.
+   扫描 swapped from before); 手动保留 folded into 设置, no longer a top tab.
    扫描目录 (scan_dirs) is lifted here so LibraryView's empty state and
    Settings' 扫描目录 section are reading/writing the exact same data.
    ══════════════════════════════════════════════════════════════════════ */
@@ -528,7 +529,7 @@ function App(){
   },[player.current?.id]);
 
   // Refs for the locate-scroll functions registered by each view/section —
-  // one per possible "播放来源": 音乐库, 重复组, 设置→手动保留名单, 设置→最近写入.
+  // one per possible "播放来源": 音乐库, 重复组, 设置→手动保留, 设置→最近写入.
   const locateInLibraryRef=useRef(null);
   const locateInDuplicatesRef=useRef(null);
   const locateInRetentionListRef=useRef(null);
@@ -545,7 +546,7 @@ function App(){
   const mainScrollRef=useRef(null); // ref to the <main> scroll container, shared with LibraryView
   // Called when user clicks the info panel in PlayerBar — jumps back to
   // whichever list the currently-playing track was played from (音乐库、
-  // 重复组、或设置→手动保留名单/最近写入), scrolled to that track's exact row.
+  // 重复组、或设置→手动保留/最近写入), scrolled to that track's exact row.
   const handleLocate=useCallback(track=>{
     if(!track)return;
     if(track.src==='duplicates'||track.groupId){

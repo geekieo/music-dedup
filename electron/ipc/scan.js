@@ -131,7 +131,8 @@ function onWorkerMessage(msg) {
   if (msg.type === 'start' || msg.type === 'progress') {
     const { paused, abortFlag, running, ...rest } = msg;
     Object.assign(scanState, rest); // 只合并 display 字段，控制位保留镜像
-    broadcast({ type: msg.type, ...scanState });
+    // start 已由 startScanInWorker 广播过，worker 的 start 回执只更新镜像，不重复转发
+    if (msg.type !== 'start') broadcast({ type: msg.type, ...scanState });
   } else if (msg.type === 'phase') {
     // 分阶段增量合并（P5.2）：每完成一个阶段，把该阶段成果合并进主库并广播 merged，
     // 渲染层据此刷新（"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的阶段数据）。

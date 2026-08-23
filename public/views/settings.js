@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════════════
    SETTINGS VIEW — F6: single scrollable page, anchored sections:
-   扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 智能保留 → 手动保留名单 → 最近写入.
+   扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 智能保留 → 手动保留 → 最近写入.
    A sticky left rail jumps to each anchor. Explanatory text that used to
    sit as an always-visible box is now a hover-revealed Hint next to the
    heading it explains, except 重复组标签 which IS the reference itself
@@ -16,7 +16,7 @@ const SETTINGS_SECTIONS=[
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
   {id:'sec-smartkeep', label:'智能保留', icon:'priority-podium'},
-  {id:'sec-wl',      label:'手动保留名单', icon:'shield-check'},
+  {id:'sec-wl',      label:'手动保留', icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 // DEFAULT_Q, DEFAULT_PICK, mergePickOrder are served by /rules-meta.js (source: lib/rules.js)
@@ -250,7 +250,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     confirmDialog,
-    e(SH,{title:`手动保留名单（${rows.length} 个文件）`,sub:'你手动标记保留的文件，参与重复检测但不会被删除'}),
+    e(SH,{title:`手动保留（${rows.length} 个文件）`,sub:'你手动标记保留的文件，参与重复检测但不会被删除'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
       ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
