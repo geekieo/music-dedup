@@ -318,9 +318,9 @@ function DimensionTable({tracks}){
           e('td',{style:{padding:'3px '+GAP_FIRST+'px 3px 0',whiteSpace:'nowrap'}},
             e('div',{style:{display:'flex',alignItems:'center',gap:6}},
               e('div',{style:{flex:1,height:6,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden',minWidth:50}},
-                e('div',{style:{width:(t.size/mxSize*100).toFixed(1)+'%',height:'100%',background:t._keepWinner?'var(--green)':'var(--red)',opacity:t._keepWinner?.85:.3,borderRadius:99}})
+                e('div',{style:{width:(t.size/mxSize*100).toFixed(1)+'%',height:'100%',background:t._retained?'var(--green)':'var(--red)',opacity:t._retained?.85:.3,borderRadius:99}})
               ),
-              e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:t._keepWinner?'var(--green)':'var(--tx-faint)',fontWeight:t._keepWinner?600:400}},fmtBytes(t.size))
+              e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:t._retained?'var(--green)':'var(--tx-faint)',fontWeight:t._retained?600:400}},fmtBytes(t.size))
             )
           ),
           ...DIMENSION_COLUMNS.map(c=>{
@@ -344,7 +344,7 @@ function DimensionTable({tracks}){
 }
 
 function TrackRow({track,onToggle,canToggle,onProps,onScrape,onCrossFill,player,queue,isKept}){
-  const keep=!!track._keepWinner;
+  const keep=!!track._retained;
   const isCur=player?.current?.id===track.id;
   const[coverErr,setCoverErr]=useState(false);
   const bd=keep?'var(--green-bd)':'var(--red-bd)';
@@ -616,9 +616,9 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
   async function emptyTrash(){setShowEmptyTrash(false);const ids=visibleResolved.map(g=>g.id);const r=await api.post('/api/trash/empty',{ids});if(r.ok){setToast({msg:`已永久删除 ${r.deletedCount} 个文件${r.groupsRemoved?`，${r.groupsRemoved} 个组已清理`:''}`,type:'success'});loadList();if(r.groupsRemoved>0)setSelId(null);onLibraryMutated?.();}else setToast({msg:'清空失败',type:'error'});}
   async function purgeGroup(id){const r=await api.post('/api/duplicates/'+id+'/purge');if(r.ok){setToast({msg:r.groupRemoved?`已彻底删除并清理该组`:`已彻底删除 ${r.deletedCount} 个文件`,type:'success'});loadList();if(r.groupRemoved){setDetail(null);setSelId(null);}onLibraryMutated?.();}else setToast({msg:'删除失败',type:'error'});}
   async function toggleTrack(gid,fid,keep,reason){const r=await api.put(`/api/duplicates/${gid}/tracks/${fid}/keep`,{keep,reason});if(r.ok){setDetail(r.data);onRetentionChange?.();}}
-  // Toggle keep: adds/removes from retention list (manual override).
+  // Toggle keep: adds/removes from 手动保留名单; deleting a kept winner writes a 强制删除 override.
   function onTrackToggle(groupId,fileId,currentKeep,tracks){
-    toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动指定保留':'移除手动保留');
+    toggleTrack(groupId,fileId,!currentKeep,!currentKeep?'手动保留':'移除手动保留');
   }
 
   const pending=groups.filter(g=>!g.resolved);
@@ -789,8 +789,8 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
           visibleGroups.slice(0,displayCount).map(g=>{
           const isSel=g.id===selId;
           const tags=(g.group_tags||'').split(',').filter(Boolean).map(t=>t.trim()).slice(0,2);
-          const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.title:null)||`组 #${g.id}`;
-          const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t._keepWinner)?.artist:null)||'';
+          const title=g.keep_title||(detail?.id===g.id?detail.tracks?.find(t=>t._retained)?.title:null)||`组 #${g.id}`;
+          const artist=g.keep_artist||(detail?.id===g.id?detail.tracks?.find(t=>t._retained)?.artist:null)||'';
           return e('div',{key:g.id,ref:el=>{if(el)groupRefs.current[g.id]=el;else delete groupRefs.current[g.id];},className:g.id===flashGroupId?'locate-flash':undefined,onClick:()=>setSelId(g.id),style:{padding:'10px 12px',borderRadius:'var(--r-lg)',cursor:'pointer',background:isSel?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${isSel?'var(--amber-bd)':'var(--bd-default)'}`,boxShadow:'var(--sh-xs)',opacity:g.resolved?.6:1,transition:'all .12s',marginBottom:4}},
             e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:3}},
               e('span',{style:{fontSize:12,fontWeight:600,color:isSel?'#92400E':'var(--tx-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,maxWidth:160}},title),
@@ -817,12 +817,12 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
             e('div',{style:{marginBottom:14}},
               e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10}},
                 e('div',{style:{flex:1,minWidth:0}},
-                  e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t._keepWinner)?.title||'—'),
-                  e('div',{style:{fontSize:12,color:'var(--tx-muted)'}},detail.tracks?.find(t=>t._keepWinner)?.artist||'')
+                  e('div',{style:{fontSize:15,fontWeight:700,color:'var(--tx-primary)',marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},detail.tracks?.find(t=>t._retained)?.title||'—'),
+                  e('div',{style:{fontSize:12,color:'var(--tx-muted)'}},detail.tracks?.find(t=>t._retained)?.artist||'')
                 ),
                 detail.resolved?
                   (()=>{
-                    const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];
+                    const dels=detail.tracks?.filter(t=>!t._retained)||[];
                     return e('div',{style:{display:'flex',gap:6}},
                       e('span',{style:{fontSize:11,fontWeight:500,color:'var(--green)',background:'var(--green-bg)',border:'0.5px solid var(--green-bd)',borderRadius:'var(--r-md)',padding:'4px 10px',display:'inline-flex',alignItems:'center',gap:4}},e('i',{className:'ti ti-circle-check',style:{fontSize:13}}),dels.length?'已处理':'已清理'),
                       dels.length>0&&e(Btn,{variant:'ghost',icon:'arrow-back-up',small:true,onClick:()=>unresolve(detail.id)},'撤销'),
@@ -830,7 +830,7 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
                     );
                   })()
                 :
-                  (()=>{const dels=detail.tracks?.filter(t=>!t._keepWinner)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
+                  (()=>{const dels=detail.tracks?.filter(t=>!t._retained)||[];return e(Btn,{icon:'trash',onClick:()=>resolve(detail.id)},`放入回收站 ${dels.length} 个`);})()
               ),
               e('div',{style:{display:'flex',gap:5,flexWrap:'wrap',marginTop:6}},
                 ...(detail.group_tags||'').split(',').filter(Boolean).map(t=>t.trim()).map(t=>e(GroupTag,{key:t,tag:t}))
@@ -841,9 +841,9 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
             e(DimensionTable,{tracks:detail.tracks||[]}),
 
             (detail.tracks||[]).map(t=>e(TrackRow,{key:t.id,track:t,player,
-              isKept:!!t._keepWinner,
+              isKept:!!t._retained,
               queue:(detail.tracks||[]).filter(x=>x.fingerprint).map(x=>({id:x.id,title:x.title,artist:x.artist,src:'duplicates',groupId:detail.id})),
-              onToggle:()=>onTrackToggle(detail.id,t.id,t._keepWinner,detail.tracks||[]),
+              onToggle:()=>onTrackToggle(detail.id,t.id,t._retained,detail.tracks||[]),
               canToggle:!detail.resolved,
               onProps:()=>setPropsId(t.id),
               onScrape:()=>setScrapeId(t.id),

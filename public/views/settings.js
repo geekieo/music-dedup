@@ -1,22 +1,22 @@
 /* ══════════════════════════════════════════════════════════════════════
    SETTINGS VIEW — F6: single scrollable page, anchored sections:
-   扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 音质优先级 → 重复组标签 → 保留名单.
+   扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 智能保留 → 手动保留名单 → 最近写入.
    A sticky left rail jumps to each anchor. Explanatory text that used to
    sit as an always-visible box is now a hover-revealed Hint next to the
    heading it explains, except 重复组标签 which IS the reference itself
    and stays visible. F8: changes auto-SAVE; a match-affecting change
    (时长容差/声纹阈值/排除规则/音质优先级/AcoustID Key) lights the corresponding
-   执行模块卡 (基础匹配/声纹匹配/更新音乐库/保留优先级/刮削匹配) at the top of the
+   执行模块卡 (基础匹配/声纹匹配/更新音乐库/智能保留/刮削匹配) at the top of the
    column — the button re-runs that module only, never re-extracts fp/scrape.
+   智能保留优先级修改只点亮「智能保留」卡，点「立即重新计算」才应用到现有重复组。
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
   {id:'sec-dirs',    label:'音乐目录',   icon:'folders'},
   {id:'sec-basic',   label:'基础匹配',   icon:'tag'},
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
-  {id:'sec-quality', label:'音质优先级', icon:'audio-levels'},
-  {id:'sec-pick',    label:'保留优先级', icon:'priority-podium'},
-  {id:'sec-wl',      label:'保留名单',     icon:'shield-check'},
+  {id:'sec-smartkeep', label:'智能保留', icon:'priority-podium'},
+  {id:'sec-wl',      label:'手动保留名单', icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
 // DEFAULT_Q, DEFAULT_PICK, mergePickOrder are served by /rules-meta.js (source: lib/rules.js)
@@ -29,16 +29,14 @@ const CARD_DEFAULTS={
   'sec-scan-perf': ()=>({ threads:null }),
   'sec-basic':     ()=>({ duration_tolerance:5 }),
   'sec-fp':        ()=>({ threshold:90 }),
-  'sec-quality':   ()=>({ quality_tiers:[...DEFAULT_Q] }),
-  'sec-pick':      ()=>({ pick_tag_order:[...DEFAULT_PICK] }),
+  'sec-smartkeep': ()=>({ quality_tiers:[...DEFAULT_Q], pick_tag_order:[...DEFAULT_PICK] }),
 };
 // 恢复默认按钮的悬停说明：告诉用户该卡具体重置什么。
 const RESET_HINT={
   'sec-scan-perf': '恢复默认：并发数回到自动（按 CPU 核数）',
   'sec-basic':     '恢复默认：时长容差回到 5 秒',
   'sec-fp':        '恢复默认：相似度阈值回到 90%',
-  'sec-quality':   '恢复默认：音质优先级回到默认顺序',
-  'sec-pick':      '恢复默认：保留优先级回到默认顺序',
+  'sec-smartkeep': '恢复默认：音质与保留优先级回到默认顺序',
 };
 // 撤销快照与当前值比较时归一化：字符串"90"与数字 90 视为相同，数组按内容比较。
 const sameVal=(a,b)=>Array.isArray(a)||Array.isArray(b)?JSON.stringify(a)===JSON.stringify(b):String(a)===String(b);
@@ -225,7 +223,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   }
   useEffect(()=>{load();},[]);
   useEffect(()=>{if(retentionListKey>0)load();},[retentionListKey]);
-  async function remove(id){await api.del(`/api/retention-list/${id}`);setToast({msg:'已从保留名单移除',type:'success'});load();}
+  async function remove(id){await api.del(`/api/retention-list/${id}`);setToast({msg:'已从手动保留名单移除',type:'success'});load();}
 
   // Locate-in-此列表 — same pattern as WriteHistorySection.
   const rowRefs=useRef({});
@@ -252,12 +250,12 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     confirmDialog,
-    e(SH,{title:`保留名单（${rows.length} 个文件）`,sub:'名单中的文件参与重复检测，但受保护不被删除'}),
+    e(SH,{title:`手动保留名单（${rows.length} 个文件）`,sub:'你手动标记保留的文件，参与重复检测但不会被删除'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
       ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
           Icon('shield-check',{fontSize:28,display:'block',margin:'0 auto 8px'}),
-          '保留名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件加入保留名单'))
+          '手动保留名单为空',e('br'),e('span',{style:{fontSize:11}},'在"音乐库"或"重复组"中可将文件标记为保留'))
       : e('div',null,
           e(SearchInput,{value:search,onChange:setSearch,style:{marginBottom:8}}),
           e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
@@ -287,10 +285,10 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
                             onClick:inGroupMap[f.id]?()=>onLocateInDuplicates&&onLocateInDuplicates(inGroupMap[f.id]):undefined,
                             disabled:!inGroupMap[f.id]
                           }),
-                          e(IconAction,{icon:'shield-x',title:'移除保留名单',danger:true,
+                          e(IconAction,{icon:'shield-x',title:'移除手动保留',danger:true,
                             onClick:()=>confirmAction('retention-remove',{
-                              title:'移除保留名单',
-                              message:e('span',null,'确定要将「',e('b',null,f.title||'未知文件'),'」从保留名单中移除吗？移除后该文件将在重复处理时不再受保护。'),
+                              title:'移除手动保留',
+                              message:e('span',null,'确定要将「',e('b',null,f.title||'未知文件'),'」从手动保留名单中移除吗？移除后该文件将在重复处理时不再受保护。'),
                               danger:true,
                             },()=>remove(f.id))})
                         )
@@ -363,7 +361,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   const[basicSeq,setBasicSeq]=useState(0);
   const[fpPending,setFpPending]=useState(false);       // 声纹匹配模块 ← threshold
   const[fpSeq,setFpSeq]=useState(0);
-  const[keepPending,setKeepPending]=useState(false);   // 保留优先级模块 ← quality_tiers/pick_tag_order（实时生效，仅提示）
+  const[keepPending,setKeepPending]=useState(false);   // 智能保留模块 ← quality_tiers/pick_tag_order（与 applied 快照比对，执行后才收起）
+  const[keepSeq,setKeepSeq]=useState(0);               // 智能保留参数再次修改时递增，驱动琥珀卡重新滑动
   const[excludePending,setExcludePending]=useState(false); // 音乐库更新模块 ← exclude_patterns（与 scan_dirs 同卡）
   const[excludeSeq,setExcludeSeq]=useState(0);
   const[reapplying,setReapplying]=useState(false);
@@ -449,7 +448,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   }
   const isFirst=useRef(true);
   // 各模块的「已应用/已确认」基线：模块重跑或卡关闭时同步为当前设置值。
-  // 保留优先级模块实时生效、无重跑步骤，基线只在加载时设置（用于「值回到基线自动收起」）。
+  // 智能保留基线 = 上次执行时的 applied 优先级快照（加载时设置，执行后同步为当前值）——
+  // 当前值偏离基线即点亮琥珀卡，回到基线自动收起。
   const moduleBaseline=useRef(null); // {duration_tolerance,threshold,quality_tiers,pick_tag_order,exclude_patterns}
   // 上次持久化的模块值快照：本次保存真的改动了某模块才递增该模块 seq / 重算 pending，
   // 避免改动无关设置（如 threads）时已显示的卡被重复触发。
@@ -478,10 +478,19 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       const d=r.data;
       if(!d.quality_tiers||!Array.isArray(d.quality_tiers))d.quality_tiers=[...DEFAULT_Q];
       d.pick_tag_order=mergePickOrder(d.pick_tag_order);
+      // applied 快照（后端执行「智能保留」时写入）仅用于 pending 比对，剥离出可编辑对象，
+      // 避免 PUT /api/settings 把只读快照原样回写。缺省回退默认顺序（与后端一致），
+      // 不回退到当前草稿值——未执行前改优先级应点亮琥珀卡而非视为已应用。
+      const appliedQ = Array.isArray(d.quality_tiers_applied) && d.quality_tiers_applied.length ? d.quality_tiers_applied : DEFAULT_Q;
+      const appliedPick = mergePickOrder(Array.isArray(d.pick_tag_order_applied) && d.pick_tag_order_applied.length ? d.pick_tag_order_applied : DEFAULT_PICK);
       delete d.scan_dirs; // owned by App/props, not local state — avoid stale overwrite races
+      delete d.quality_tiers_applied;
+      delete d.pick_tag_order_applied;
       setS(d);
-      const snap={duration_tolerance:d.duration_tolerance,threshold:d.threshold,quality_tiers:JSON.stringify(d.quality_tiers),pick_tag_order:JSON.stringify(d.pick_tag_order),exclude_patterns:JSON.stringify(d.exclude_patterns||[])};
-      moduleBaseline.current={...snap};lastPersisted.current={...snap};
+      const curSnap={duration_tolerance:d.duration_tolerance,threshold:d.threshold,quality_tiers:JSON.stringify(d.quality_tiers),pick_tag_order:JSON.stringify(d.pick_tag_order),exclude_patterns:JSON.stringify(d.exclude_patterns||[])};
+      // 基线用 applied（偏离即未应用）；lastPersisted 用当前值（只有真正改动才触发滑动卡）
+      moduleBaseline.current={...curSnap, quality_tiers:JSON.stringify(appliedQ), pick_tag_order:JSON.stringify(appliedPick)};
+      lastPersisted.current={...curSnap};
       // validate stored AcoustID key against the actual API (not just assume valid)
       const key=(d.acoustid_key||'').trim();
       const lastValidated = localStorage.getItem('acoustid_validated_key') || '';
@@ -510,6 +519,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         if(prev.duration_tolerance!==cur.duration_tolerance)setBasicSeq(k=>k+1);
         if(prev.threshold!==cur.threshold)setFpSeq(k=>k+1);
         if(prev.exclude_patterns!==cur.exclude_patterns)setExcludeSeq(k=>k+1);
+        if(prev.quality_tiers!==cur.quality_tiers||prev.pick_tag_order!==cur.pick_tag_order)setKeepSeq(k=>k+1);
       }
       lastPersisted.current=cur;
       // 各模块 pending = 当前值偏离该模块已应用基线（值回到基线自动收起）。threads 不跟踪。
@@ -537,14 +547,22 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     return()=>clearTimeout(saveTimer.current);
   },[s]);
 
-  // 按执行模块重跑。steps 只含该卡对应模块（基础匹配卡→basicMatch，声纹匹配卡→fpMatch），
-  // 保留优先级卡无步骤（实时生效）。应用后把该模块基线同步为当前值，并清 pending（卡消失）——
+  // 按执行模块重跑。steps 只含该卡对应模块（基础匹配卡→basicMatch，声纹匹配卡→fpMatch，
+  // 智能保留卡→smartKeep）。应用后把该模块基线同步为当前值，并清 pending（卡消失）——
   // 变更已交到执行通道，不再需要常驻提醒。
   function applyBasic(){
     setReapplying(true);
     onMatchAffectingChange?.(['basicMatch']);
     moduleBaseline.current.duration_tolerance=s.duration_tolerance;
     setBasicPending(false);
+    setTimeout(()=>setReapplying(false),1500);
+  }
+  function applyKeep(){
+    setReapplying(true);
+    onMatchAffectingChange?.(['smartKeep']);
+    moduleBaseline.current.quality_tiers=JSON.stringify(s.quality_tiers||[]);
+    moduleBaseline.current.pick_tag_order=JSON.stringify(s.pick_tag_order||[]);
+    setKeepPending(false);
     setTimeout(()=>setReapplying(false),1500);
   }
   function applyFp(){
@@ -567,18 +585,18 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   const closeExclude=()=>{moduleBaseline.current.exclude_patterns=JSON.stringify(s.exclude_patterns||[]);setExcludePending(false);onDismissDirChanged?.();};
 
   // ── 执行卡编排：滑动卡（ExecuteToast，固定层）+ 常驻卡（ExecutePinnedCard，设置列顶部槽）──
-  // 只有带按钮的卡（需要点击重新执行）才触发滑动卡；无按钮卡（保留优先级，实时生效）直接常驻
-  // 显现。toast 只存 {key,seq}，配置渲染期从 EXEC_CARDS 现取（disabled 等跟随最新状态）；seq
-  // 递增（同卡再次修改）或换 key（新卡触发）都会重挂载滑动卡重播动画。
+  // 只有带按钮的卡（需要点击重新执行）才触发滑动卡；toast 只存 {key,seq}，配置渲染期从
+  // EXEC_CARDS 现取（disabled 等跟随最新状态）；seq 递增（同卡再次修改）或换 key（新卡
+  // 触发）都会重挂载滑动卡重播动画。
   const EXEC_CARDS=[
     {key:'basic',  message:'时长容差已修改，尚未重新应用到现有重复组',  btnLabel:'立即重新匹配', btnIcon:reapplying?'loader':'refresh', disabled:scanRunning||reapplying, disabledLabel:'扫描进行中...'},
     {key:'fp',     message:'频谱声纹阈值已修改，尚未重新应用到现有重复组', btnLabel:'立即重新匹配', btnIcon:reapplying?'loader':'refresh', disabled:scanRunning||reapplying, disabledLabel:'扫描进行中...'},
-    {key:'keep',   message:'音质优先级 / 保留优先级 已修改，已实时应用到现有重复组'},
+    {key:'keep',   message:'音质优先级 / 保留优先级 已修改，尚未重新应用到现有重复组', btnLabel:'立即重新计算', btnIcon:reapplying?'loader':'refresh', disabled:scanRunning||reapplying, disabledLabel:'扫描进行中...'},
     {key:'enum',   message:(dirChanged&&excludePending)?'音乐目录 / 排除规则已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）':dirChanged?'音乐目录已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）':'排除规则已修改，建议更新音乐库（只枚举文件树，不做声纹/刮削）', btnLabel:'立即更新音乐库', disabled:scanRunning, disabledLabel:'扫描进行中...'},
     {key:'scrape', message:'AcoustID Key 已验证，建议重新执行「刮削匹配」以应用声纹查询', btnLabel:'立即刮削匹配', disabled:scanRunning, disabledLabel:'扫描进行中...'},
   ];
   const cardPending={basic:basicPending,fp:fpPending,keep:keepPending,enum:dirChanged||excludePending,scrape:needsScrapeReapply};
-  const cardAction={basic:applyBasic,fp:applyFp,enum:applyEnum,scrape:()=>onScrapeReapply?.()};
+  const cardAction={basic:applyBasic,fp:applyFp,keep:applyKeep,enum:applyEnum,scrape:()=>onScrapeReapply?.()};
   const cardClose={basic:closeBasic,fp:closeFp,keep:closeKeep,enum:closeExclude,scrape:()=>setNeedsScrapeReapply(false)};
 
   // 固定层锚点：滑动卡定位在设置内容页顶部（main 顶栏 54 + 内边距 20 = 74），水平范围与设置
@@ -602,9 +620,10 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     setToast(t=>t&&t.key===key?{key,seq:t.seq+1}:{key,seq:1});
   };
   // seq 递增即「该模块设置被修改」——点亮 pending 的同时触发滑动卡。useLayoutEffect 在绘制前
-  // 设好 toast，避免常驻卡先闪现一帧。keep 无按钮，永不触发滑动卡。
+  // 设好 toast，避免常驻卡先闪现一帧。
   useLayoutEffect(()=>{ if(basicPending&&basicSeq>0)fireToast('basic'); },[basicSeq]);
   useLayoutEffect(()=>{ if(fpPending&&fpSeq>0)fireToast('fp'); },[fpSeq]);
+  useLayoutEffect(()=>{ if(keepPending&&keepSeq>0)fireToast('keep'); },[keepSeq]);
   useLayoutEffect(()=>{ if((dirChanged||excludePending)&&(dirSeq>0||excludeSeq>0))fireToast('enum'); },[dirSeq,excludeSeq]);
   useLayoutEffect(()=>{ if(needsScrapeReapply&&scrapeSeq>0)fireToast('scrape'); },[scrapeSeq]);
 
@@ -614,8 +633,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     ? {...toastCard,key:toast.key,seq:toast.seq,active:cardPending[toast.key],onAction:()=>cardAction[toast.key]?.()}
     : null;
 
-  const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;captureSnapshot('sec-quality');[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
-  const movePick=(i,d)=>{const q=[...(s.pick_tag_order||DEFAULT_PICK)];const j=i+d;if(j<0||j>=q.length)return;captureSnapshot('sec-pick');[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,pick_tag_order:q}));};
+  const moveQ=(i,d)=>{const q=[...(s.quality_tiers||DEFAULT_Q)];const j=i+d;if(j<0||j>=q.length)return;captureSnapshot('sec-smartkeep');[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,quality_tiers:q}));};
+  const movePick=(i,d)=>{const q=[...(s.pick_tag_order||DEFAULT_PICK)];const j=i+d;if(j<0||j>=q.length)return;captureSnapshot('sec-smartkeep');[q[i],q[j]]=[q[j],q[i]];setS(p=>({...p,pick_tag_order:q}));};
 
   async function validateAcoustidKey(key,silent=false){
     if(!key)return;
@@ -811,11 +830,12 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         )
       ),
 
-      e(Card,{id:'sec-quality'},
+      e(Card,{id:'sec-smartkeep'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'audio-levels',title:'音质优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'拖动调整不同音质条件的优先顺序，越靠上越视为音质更优。'})),
-          e(ResetBar,{cardId:'sec-quality'})
+          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'智能保留',sub:'上下移动调整 — 顶部优先级最高',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。修改后需点击顶部琥珀卡「立即重新计算」（或到扫描页执行「智能保留」），才会重新应用到现有重复组。'})),
+          e(ResetBar,{cardId:'sec-smartkeep'})
         ),
+        e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'2px 0 4px'}},Icon('audio-levels',{fontSize:13}),'音质优先级'),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<3?'var(--green)':i<6?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
           e('span',{style:{flex:1,fontSize:12,color:i<6?'var(--tx-secondary)':'var(--tx-faint)'}},f),
@@ -824,14 +844,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
             e('button',{onClick:()=>moveQ(i,-1),disabled:i===0,style:{background:'none',border:'none',cursor:i===0?'default':'pointer',padding:'1px 4px',opacity:i===0?.2:1,color:'var(--tx-muted)'}},Icon('chevron-up',{fontSize:13})),
             e('button',{onClick:()=>moveQ(i,1),disabled:i===q.length-1,style:{background:'none',border:'none',cursor:i===q.length-1?'default':'pointer',padding:'1px 4px',opacity:i===q.length-1?.2:1,color:'var(--tx-muted)'}},Icon('chevron-down',{fontSize:13}))
           )
-        ))
-      ),
-
-      e(Card,{id:'sec-pick'},
-        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'保留优先级',sub:'上下移动调整 — 顶部优先级最高',hint:'决定重复组中保留哪个文件，越靠上越优先。某文件缺少对应数据时，该轮不参与、也不会被淘汰。各维度含义见重复组详情「维度对比」旁的说明按钮。'})),
-          e(ResetBar,{cardId:'sec-pick'})
-        ),
+        )),
+        e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'14px 0 4px'}},Icon('priority-podium',{fontSize:13}),'保留优先级',e(Hint,{text:'决定重复组中保留哪个文件，越靠上越优先。某文件缺少对应数据时，该轮不参与、也不会被淘汰。各维度含义见重复组详情「维度对比」旁的说明按钮。'})),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<2?'var(--green)':i<4?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
           e('span',{style:{flex:1,fontSize:12,color:i<pick.length?'var(--tx-secondary)':'var(--tx-faint)'}},PICK_TAG_LABEL[key]||key),

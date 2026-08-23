@@ -15,7 +15,7 @@ import os from 'os';
 import { openDB } from '../lib/db/index.js';
 import { forceStripLaneTags } from '../lib/db/groups.js';
 import { runEnumerate, runMetadata, runFingerprint } from '../lib/scanner.js';
-import { runScrapeMatcher, runBasicMatcher, runFpMatcher } from '../lib/matcher.js';
+import { runScrapeMatcher, runBasicMatcher, runFpMatcher, runSmartKeep } from '../lib/matcher.js';
 import { runScrape } from '../lib/scraper.js';
 import { killActiveFpcalc } from '../lib/chromaprint-bridge.js';
 import { createDecodePool } from './fp-decode-pool.mjs';
@@ -64,6 +64,7 @@ function estimateStepWeights(db, steps, { force, acoustidKey }) {
         costs[s] = aidN * 0.45 + mbN * 1.15 + 1; break;
       }
       case 'scrapeMatch': costs[s] = Math.max(1, withTitle) * 0.02 + 1; break;
+      case 'smartKeep':   costs[s] = Math.max(1, (db.get("SELECT COUNT(*) n FROM dup_groups WHERE resolved=0") || { n: 0 }).n) * 0.02 + 1; break;
       default: costs[s] = 1;
     }
   }
@@ -186,6 +187,14 @@ async function runScanPipeline(options) {
       await runScrapeMatcher(db, { onProgress: wrapProg('scrapeMatch'), onAbort: abort, onPause: pause });
       advanceWeight('scrapeMatch');
       await gatePhase('scrapeMatch');
+    }
+    // 步骤9: 智能保留 —— 用 applied 优先级快照重算未处理组的推荐保留（纯列更新，
+    // 不清除组；快照已由主进程 /api/scan/start 在扫描开始时写入）。
+    if (steps.includes('smartKeep') && !abort()) {
+      wrapProg('smartKeep')({ phase: 'smartKeep', pct: 0, level: 'info', message: '开始重新计算智能保留...' });
+      await runSmartKeep(db, { onProgress: wrapProg('smartKeep'), onAbort: abort, onPause: pause });
+      advanceWeight('smartKeep');
+      await gatePhase('smartKeep');
     }
   } catch (e) {
     prog({ phase: 'error', pct: 0, level: 'err', message: `失败: ${e.message}` });

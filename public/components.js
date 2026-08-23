@@ -95,7 +95,7 @@ const ICONS={
   cloud:{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}]]},
   // 刮削确认 — same cloud silhouette as cloud, but with a checkmark instead
   // of the download arrow, so the status reads as "data fetched & confirmed"
-  // rather than "protected" (that meaning is reserved for shield-check/保留名单).
+  // rather than "protected" (that meaning is reserved for shield-check/手动保留名单).
   'cloud-check':{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}],['path',{d:'M8.5 14.3l2.3 2.3 4.7-4.9'}]]},
   // 音质优先级 — a 3-band audio equalizer (vertical tracks + slider knobs),
   // reads as "sound quality levels" rather than a generic gem/rating mark.
@@ -287,7 +287,7 @@ function Btn({children,onClick,variant='primary',small,disabled,icon,title,style
   return e('button',{onClick:disabled?undefined:onClick,title,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
 }
 // Icon-only action button — bigger touch target + a real fill color when
-// active, so the three per-track actions (打开/属性/保留名单) read as buttons
+// active, so the three per-track actions (打开/属性/手动保留) read as buttons
 // at a glance instead of being lost as small grey text links.
 function IconAction({icon,title,onClick,active,activeColor='var(--amber)',activeBg,color='var(--tx-muted)',size=15,danger,disabled}){
   const ac=danger?'var(--red)':activeColor;

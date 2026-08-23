@@ -1,7 +1,7 @@
 // electron/ipc/duplicates.js — 重复组域：列表/详情 / resolve / unresolve / purge / trash / keep / retention-list
 // 共享 helper（trashFile / computeKeepSet / purgeGroupFiles / LRC_EXTS）单点归属本域。
 import { getDB } from '../../lib/db/index.js';
-import { getAllSettings } from '../../lib/db/settings.js';
+import { getAppliedPickSettings } from '../../lib/db/settings.js';
 import { setFileDeleted } from '../../lib/db/files.js';
 import { getGroups, getGroupDetail, resolveGroup } from '../../lib/db/groups.js';
 import { addRetentionList, removeRetentionList, getRetentionList, getRetentionFileIds, getExcludeFileIds } from '../../lib/db/retention.js';
@@ -29,33 +29,32 @@ async function trashFile(fp) {
   return results;
 }
 
-// 组内"应保留"的文件 id 集合（智能冠军 ∪ 保留名单）—— 与 evaluateGroup 的 OR 逻辑
-// 保持一致，使 resolve/unresolve/purge 与级联判定结果一致。
+// 组内"应保留"的文件 id 集合（推荐保留 ∪ 手动保留）—— 与 evaluateGroup 的 OR 逻辑
+// 保持一致，使 resolve/unresolve/purge 与级联判定结果一致。级联用 applied 优先级快照
+// （非当前设置）：未执行"智能保留"前，改优先级不影响任何已有结果。
 function computeKeepSet(tracks) {
-  const s = getAllSettings(db);
-  const tierOrder = Array.isArray(s.quality_tiers) && s.quality_tiers.length ? s.quality_tiers : null;
-  const pickTagOrder = Array.isArray(s.pick_tag_order) && s.pick_tag_order.length ? s.pick_tag_order : null;
+  const { quality_tiers, pick_tag_order } = getAppliedPickSettings(db);
   const retentionFileIds = getRetentionFileIds(db);
   const excludeFileIds = getExcludeFileIds(db);
-  const annotated = tagTracks(tracks, tierOrder, pickTagOrder, retentionFileIds, excludeFileIds);
-  return new Set(annotated.filter((t) => t._keepWinner).map((t) => t.id));
+  const annotated = tagTracks(tracks, quality_tiers, pick_tag_order, retentionFileIds, excludeFileIds);
+  return new Set(annotated.filter((t) => t._retained).map((t) => t.id));
 }
 
 function annotatedGroup(g) {
-  const s = getAllSettings(db);
-  const tierOrder = Array.isArray(s.quality_tiers) && s.quality_tiers.length ? s.quality_tiers : null;
-  const pickTagOrder = Array.isArray(s.pick_tag_order) && s.pick_tag_order.length ? s.pick_tag_order : null;
+  const { quality_tiers, pick_tag_order } = getAppliedPickSettings(db);
   const retentionFileIds = getRetentionFileIds(db);
   const excludeFileIds = getExcludeFileIds(db);
-  return tagTracks(g.tracks, tierOrder, pickTagOrder, retentionFileIds, excludeFileIds);
+  return tagTracks(g.tracks, quality_tiers, pick_tag_order, retentionFileIds, excludeFileIds);
 }
 
 // 彻底删除已处理组的 .deleted 文件 + 清理数据库（无组引用则移除文件及关联表）
+// 只清理真实进回收站的轨道（deleted=1 或磁盘存在 .deleted）：purge 与设置解耦，
+// 不重算智能保留——磁盘上有什么就清什么。
 function purgeGroupFiles(g) {
   let deleted = 0, failed = 0;
   const purgeIds = [];
-  const keepSet = computeKeepSet(g.tracks);
-  for (const t of g.tracks.filter((t) => !keepSet.has(t.id))) {
+  const toPurge = g.tracks.filter((t) => t.deleted === 1 || existsSync(t.path + '.deleted'));
+  for (const t of toPurge) {
     const delPath = t.path + '.deleted';
     if (existsSync(delPath)) { try { unlinkSync(delPath); deleted++; } catch (e) { failed++; } }
     const dir = path.dirname(t.path);
@@ -88,7 +87,7 @@ function purgeGroupFiles(g) {
 }
 
 export const routes = [
-  // ── 保留名单 ──
+  // ── 手动保留名单 ──
   { method: 'GET', path: '/api/retention-list', handler: () => ({ ok: true, data: getRetentionList(db) }) },
   { method: 'DELETE', path: '/api/retention-list/:fileId', handler: (p) => {
     removeRetentionList(db, +p.fileId);
@@ -104,6 +103,8 @@ export const routes = [
     const g = getGroupDetail(db, +p.id);
     if (!g) return { ok: false };
     g.tracks = annotatedGroup(g);
+    // 已处理组保留状态以回收站实际状态为准（deleted 列），不随设置/重算变化
+    if (g.resolved) for (const t of g.tracks) t._retained = !t.deleted;
     return { ok: true, data: g };
   } },
 
@@ -150,13 +151,14 @@ export const routes = [
   } },
 
   // ── 撤销：恢复 .deleted 文件，标记组为未处理 ──
+  // 只恢复实际进回收站的轨道（deleted=1 或磁盘存在 .deleted），不重算智能保留——
+  // 与设置解耦，恢复的永远是 resolve 时真正放进回收站的那批。
   { method: 'POST', path: '/api/duplicates/:id/unresolve', handler: (p) => {
     const g = getGroupDetail(db, +p.id);
     if (!g) return { ok: false };
-    const keepSet = computeKeepSet(g.tracks);
     const restored = [], failed = [];
     const restoredIds = [];
-    for (const t of g.tracks.filter((t) => !keepSet.has(t.id))) {
+    for (const t of g.tracks.filter((t) => t.deleted === 1 || existsSync(t.path + '.deleted'))) {
       const delPath = t.path + '.deleted';
       let didRestore = false;
       if (existsSync(delPath)) { try { renameSync(delPath, t.path); restored.push(t.path); didRestore = true; } catch (e) { failed.push({ path: t.path, error: e.message }); } }
@@ -180,9 +182,8 @@ export const routes = [
     for (const g of groups) {
       const d = getGroupDetail(db, g.id);
       if (!d) continue;
-      const keepSet = computeKeepSet(d.tracks);
       let restored = [];
-      for (const t of d.tracks.filter((t) => !keepSet.has(t.id))) {
+      for (const t of d.tracks.filter((t) => t.deleted === 1 || existsSync(t.path + '.deleted'))) {
         const delPath = t.path + '.deleted';
         let didRestore = false;
         if (existsSync(delPath)) { try { renameSync(delPath, t.path); restored.push(t.path); didRestore = true; } catch (e) {} }
@@ -224,27 +225,27 @@ export const routes = [
     return { ok: true, deletedCount: totalDeleted, failedCount: totalFailed, groupsRemoved: totalRemoved, totalGroups: groups.length };
   } },
 
-  // ── 单曲保留切换（手动保留 / 智能冠军 override）──
+  // ── 单曲保留切换（手动保留 / 覆盖推荐保留）──
   { method: 'PUT', path: '/api/duplicates/:id/tracks/:fid/keep', handler: (p, _q, body) => {
     const gid = +p.id, fid = +p.fid;
     const { keep, reason } = body;
     const g = getGroupDetail(db, gid);
     if (!g) return { ok: false };
     if (keep) {
-      // 先移除任何 exclude override；若该曲本就是智能冠军则回归智能保留，
+      // 先移除任何强制删除 override；若该曲本就是推荐保留则回归智能保留，
       // 否则需要手动保留
       removeRetentionList(db, fid);
       const annotated = annotatedGroup(g);
       const track = annotated.find((t) => t.id === fid);
-      if (!track || !track._keepWinner) {
+      if (!track || !track._retained) {
         addRetentionList(db, fid, reason || '手动保留', 1);
       }
     } else {
-      // 移除手动保留项，再加 exclude override，使智能冠军也可切到"删除"态
+      // 移除手动保留项，再加强制删除 override，使推荐保留也可切到"删除"态
       removeRetentionList(db, fid);
       const annotated = annotatedGroup(g);
       const track = annotated.find((t) => t.id === fid);
-      if (track && track._keepWinner) {
+      if (track && track._retained) {
         addRetentionList(db, fid, null, 0);
       }
     }

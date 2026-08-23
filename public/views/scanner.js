@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   SCANNER VIEW — F5: simplified to 3 auto lanes (basic/fp/scrape), each
-   bundles its own prerequisites (enum/meta) and always finishes with a
+   SCANNER VIEW — F5: 5 lanes (音乐库更新/基础匹配/声纹匹配/刮削匹配/智能保留),
+   each bundles its own prerequisites (enum/meta) and always finishes with a
    global match — no more standalone "文件枚举" / "相似度匹配" buttons.
    "全量重新执行" is collapsed behind an advanced toggle + confirm dialog.
    `scan` (status/logs/...) is owned by App so it survives tab
@@ -13,6 +13,7 @@ const LANE_META={
   // 因此声纹匹配不单独作为判定唯一依据（阈值 + 基础匹配兜底）。
   fp:     {label:'声纹匹配',  sub:'',  desc:'对比音频声纹找出重复。声纹匹配不作为判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
   scrape: {label:'刮削匹配',  sub:'',  desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
+  smartKeep:{label:'智能保留',sub:'',desc:'按当前应用的保留优先级，计算所有未处理重复组的推荐保留。',icon:'star',steps:['smartKeep']},
 };
 function ScannerView({scan,hasPlayer}){
   const{status,logs,setLogs,confirm,setConfirm,startStep}=scan;
@@ -30,7 +31,7 @@ function ScannerView({scan,hasPlayer}){
     startStep(lm.steps,false,lm.label);
   }
   function runAll(force=false){
-    const steps=['enum','meta','basicMatch','fp','fpMatch','scrape','scrapeMatch'];
+    const steps=['enum','meta','basicMatch','fp','fpMatch','scrape','scrapeMatch','smartKeep'];
     if(force){setConfirm({steps,force:true,label:'完整扫描',lane:'all'});return;}
     setRunningLane('all');
     startStep(steps,false,'完整扫描');
@@ -67,8 +68,8 @@ function ScannerView({scan,hasPlayer}){
       danger:true,
     }),
 
-    // 4 lanes — "执行" + "高级" side by side; dropdown on "高级".
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:12}},
+    // 5 lanes — "执行" + "高级" side by side; dropdown on "高级".
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:12}},
       Object.entries(LANE_META).map(([key,lm])=>{
         const isActive=status.running&&(runningLane===key||runningLane==='all');
         return e(Card,{key,style:{border:`0.5px solid ${isActive?'var(--amber)':'var(--bd-default)'}`}},
@@ -109,8 +110,8 @@ function ScannerView({scan,hasPlayer}){
     }),
 
     // Full pipeline control — label left, button group right.  Width
-    // calc(25% - 37.5px) exactly equals a single lane card's content
-    // width at any viewport, so the "执行" button matches the 4 above.
+    // calc(20% - 37.5px) exactly equals a single lane card's content
+    // width at any viewport, so the "执行" button matches the 5 above.
     e(Card,{style:{marginBottom:12}},
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
         e('div',{style:{flex:1,minWidth:0}},
@@ -120,7 +121,7 @@ function ScannerView({scan,hasPlayer}){
             ),
             '全部扫描操作',e(Hint,{text:'按顺序执行全部扫描步骤，完成从发现文件到判定重复的完整流程。'})),
         ),
-        e('div',{style:{width:'calc(25% - 37.5px)',flexShrink:0}},
+        e('div',{style:{width:'calc(20% - 37.5px)',flexShrink:0}},
           e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
             e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
               e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'执行'),
@@ -145,7 +146,7 @@ function ScannerView({scan,hasPlayer}){
     // 必须用 isTerminal（done/error/aborted 且 !running）区分"单步完成"与"整轮扫描结束"。
     (()=>{
       const TERM_LABEL={done:'运行完成',error:'错误',aborted:'已中止'};
-      const RUN_LABEL={idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配'};
+      const RUN_LABEL={idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',smartKeep:'智能保留'};
       const phaseLabel=isTerminal
         ?(TERM_LABEL[status.phase]||'完成')
         :(status.phase==='done'?'匹配完成':(RUN_LABEL[status.phase]||status.phase));

@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import { existsSync, rmSync, readdirSync } from 'fs';
 import { Worker } from 'node:worker_threads';
 import { getDB, openDB } from '../../lib/db/index.js';
-import { getAllSettings } from '../../lib/db/settings.js';
+import { getAllSettings, setAppliedPickSettings } from '../../lib/db/settings.js';
 import { detectFpcalc } from '../../lib/chromaprint-bridge.js';
 import { getPhysicalCores } from '../cpuinfo.js';
 
@@ -264,6 +264,11 @@ export const routes = [
     const force = body?.force === true;
     const retryMissed = body?.retryMissed === true;
     if (steps.includes('enum') && !dirs.length) return { ok: false, error: '未配置扫描目录' };
+    // 显式执行点：任何包含匹配/智能保留步骤的扫描都会把当前优先级固化为 applied 快照，
+    // 之后的详情展示与放入回收站都读它——未执行前改优先级不影响任何已有结果（所见即所得）。
+    if (steps.some(x => ['basicMatch', 'fpMatch', 'scrapeMatch', 'smartKeep'].includes(x))) {
+      setAppliedPickSettings(db, { quality_tiers: s.quality_tiers, pick_tag_order: s.pick_tag_order });
+    }
     const acoustidKey = s.acoustid_key || '';
     // fpcalc 在主进程预解析（worker 线程无 process.resourcesPath，打包版无法自行检测）；
     // 解析出的绝对路径传给 worker（computeChromaprint 内 detectFpcalc(绝对路径) 直命中）。

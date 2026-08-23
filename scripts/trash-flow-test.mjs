@@ -25,7 +25,7 @@ const check = (label, cond, detail = '') => {
 try {
   const { openDB } = await import(pathToFileURL(path.join(repoRoot, 'lib', 'db', 'index.js')).href);
   const db = openDB();
-  // 两个同歌名同歌手文件：A 音质高（320k）→ 智能保留冠军；B 音质低 → 应被删除
+  // 两个同歌名同歌手文件：A 音质高（320k）→ 智能推荐保留；B 音质低 → 应被删除
   const tracksDir = path.join(tmp, 'tracks');
   mkdirSync(tracksDir, { recursive: true });
   const pA = path.join(tracksDir, 'song-a.flac');

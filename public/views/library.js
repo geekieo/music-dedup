@@ -156,7 +156,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   }
 
   // Expose locate function upward — used by the player bar's "定位到歌曲"
-  // click and by 设置 → 保留名单/最近写入 → "在音乐库中查看".
+  // click and by 设置 → 手动保留名单/最近写入 → "在音乐库中查看".
   // Locate a file in library: if not on current page, ask server for its
   // position in the unfiltered library, reset filters, and fetch to its page.
   useEffect(()=>{
