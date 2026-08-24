@@ -1,9 +1,8 @@
-// electron/main.js — v2 主进程入口
+// electron/main.js — 主进程入口
 //
 // IPC 化：server.js 的 Express 路由已迁到 electron/ipc/*；应用本体（静态资源 /
 // rules-meta / cover / stream）走 musicdedup:// 协议，无 HTTP 层。
 // 数据目录一律 userData（%APPDATA%/MusicDedup/）。
-// P0 验证路径：P0_VERIFY=1（npm run p0:verify）跑回归套件 + 展示页。
 // Smoke 自测：V2_SMOKE=1（npm run smoke）——真实库加载后从主进程经 IPC 打关键
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
 import { createRequire } from 'module';
@@ -24,38 +23,24 @@ import { getDB } from '../lib/db/index.js';
 import { getSetting, setSetting } from '../lib/db/settings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const isP0Verify = process.env.P0_VERIFY === '1';
 const isSmoke = process.env.V2_SMOKE === '1';
 
 // 全局兜底：主进程未捕获异常不弹 Electron 崩溃对话框，改为打印堆栈后继续
 //（便于定位并发锁等运行时错误，避免打断用户操作）。
 process.on('uncaughtException', (e) => {
-  console.error('[v2] 未捕获异常：', e && e.stack ? e.stack : e);
+  console.error('[main] 未捕获异常：', e && e.stack ? e.stack : e);
 });
 // unhandledRejection 同理：Node 15+ 默认 throw 会让未处理的 promise 拒绝直接崩掉
 // 主进程（扫描刮削并发 + 手动操作时易触发），这里打印堆栈后继续。
 process.on('unhandledRejection', (e) => {
-  console.error('[v2] 未处理的 Promise 拒绝：', e && e.stack ? e.stack : e);
+  console.error('[main] 未处理的 Promise 拒绝：', e && e.stack ? e.stack : e);
 });
-
-// P0 自测需要渲染进程无手势直接 play()；真实播放器走用户手势
-if (isP0Verify) app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'musicdedup', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
 ]);
 
-// ── P0 回归路径：渲染进程可用的测试样本（只读信息，播放走 musicdedup://）──────
-function getSampleFiles() {
-  const base = path.join(__dirname, '..', '.p0-tmp', 'samples');
-  return [
-    { kind: 'FLAC', path: path.join(base, 'BarroomBallet.flac') },
-    { kind: 'M4A', path: path.join(base, 'sample.m4a') },
-    { kind: 'MP3', path: path.join(base, 'sample.mp3') },
-  ].filter((s) => fs.existsSync(s.path));
-}
-
-// ── P4 客户端路径 ─────────────────────────────────────────────────────────
+// ── 客户端路径 ─────────────────────────────────────────────────────────
 let mainWindow = null;
 // 关闭行为：任务进行中关窗 → 程序内弹窗确认（渲染层），确认后中止任务再退出；
 // 空闲关窗直接退出。forceQuit 由确认关闭路径置位。
@@ -73,20 +58,20 @@ function sendScan(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
 }
 
-// P4 统一图标：窗口/任务栏图标由渲染进程首启栅格化 favicon SVG 送达（不提交图片资产）
+// 统一图标：窗口/任务栏图标由渲染进程首启栅格化 favicon SVG 送达（不提交图片资产）
 // Windows/Linux: win.setIcon 更新任务栏+标题栏；macOS: Dock 图标走 app.dock
 function applyWindowIcon(dataUrl) {
   try {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const icon = nativeImage.createFromDataURL(dataUrl);
-    if (icon.isEmpty()) { console.log('[v2] 警告：窗口图标（dataURL）为空'); return; }
+    if (icon.isEmpty()) { console.log('[main] 警告：窗口图标（dataURL）为空'); return; }
     if (process.platform === 'darwin' && app.dock) {
       app.dock.setIcon(icon);
     } else {
       mainWindow.setIcon(icon);
     }
   } catch (e) {
-    console.log('[v2] 设置窗口图标失败：', e.message);
+    console.log('[main] 设置窗口图标失败：', e.message);
   }
 }
 
@@ -106,7 +91,7 @@ function createClientWindow() {
   // 窗口状态记忆（存 settings 表）：恢复上次尺寸/位置/最大化。
   // 惰性 getDB()：窗口只在迁移决策（whenReady）后创建，此刻库必已就绪。
   let saved = {};
-  try { saved = getSetting(getDB(), 'window_state', null) || {}; } catch (e) { console.log('[v2] 读取窗口状态失败：', e && e.message); }
+  try { saved = getSetting(getDB(), 'window_state', null) || {}; } catch (e) { console.log('[main] 读取窗口状态失败：', e && e.message); }
   const win = new BrowserWindow({
     width: saved.width || 1280,
     height: saved.height || 840,
@@ -137,7 +122,7 @@ function createClientWindow() {
     // 存窗口状态失败（如扫描合并期的临时锁冲突）不阻断关闭——关窗路径不容许抛未捕获异常
     // 触发 Electron 崩溃对话框（实测：merge 撞锁时此处 setSetting 抛 database is locked）。
     try { setSetting(getDB(), 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() }); }
-    catch (err) { console.log('[v2] 保存窗口状态失败：', err && err.message); }
+    catch (err) { console.log('[main] 保存窗口状态失败：', err && err.message); }
     // 任务进行中 → 程序内弹窗确认（渲染层），确认后中止任务再退出；空闲直接退出。
     // 渲染层不可达时回退直接退出。
     if (!forceQuit && scanRunning) {
@@ -226,7 +211,7 @@ async function runSmoke(win) {
     }
     out.push({ m: 'JS', u: '/rules-meta.js globals', ok: typeof GROUP_TAG_LABELS !== 'undefined' && typeof computeScrapeMatch === 'function', err: null });
     out.push({ m: 'UI', u: 'React app rendered', ok: document.body.innerText.includes('MusicDedup') && !!document.querySelector('button'), err: null });
-    // 进度 UI 重设计回归（P5）：单进度条+活动行（内联子%仅在与总%不同时出现）+ 终态摘要
+    // 进度 UI 回归：单进度条+活动行（内联子%仅在与总%不同时出现）+ 终态摘要
     // 渲染 ScannerView 测试实例（真实页面全局，不碰真实库），断言三个状态：
     // t1 匹配阶段（子%≠总%→显示，去时间戳）；t2 meta（子%=总%→不重复显示%）；t3 终态→摘要行。
     const progUI = await (async () => {
@@ -274,15 +259,15 @@ async function runSmoke(win) {
   const res = await win.webContents.executeJavaScript(script);
   const list = JSON.parse(res);
   const failed = list.filter((r) => !r.ok);
-  for (const r of list) console.log(`[v2-smoke] ${r.ok ? 'PASS' : 'FAIL'} ${r.m} ${r.u}${r.err ? ' — ' + r.err : ''}`);
-  console.log(`[v2-smoke] ${list.length - failed.length}/${list.length} 通过`);
+  for (const r of list) console.log(`[smoke] ${r.ok ? 'PASS' : 'FAIL'} ${r.m} ${r.u}${r.err ? ' — ' + r.err : ''}`);
+  console.log(`[smoke] ${list.length - failed.length}/${list.length} 通过`);
   app.exit(failed.length ? 1 : 0);
 }
 
 // ── 启动 ──────────────────────────────────────────────────────────────────
-// 单实例锁（防重复打开 → SQLite 并发写冲突，计划 §七.2）：第二个实例直接退出，
-// 并把已存在的窗口聚焦到前台。P0/smoke 测试模式不抢锁（smoke 只读，可与客户端共存）。
-const isClientMode = !isP0Verify && !isSmoke;
+// 单实例锁（防重复打开 → SQLite 并发写冲突）：第二个实例直接退出，
+// 并把已存在的窗口聚焦到前台。smoke 测试模式不抢锁（smoke 只读，可与客户端共存）。
+const isClientMode = !isSmoke;
 if (isClientMode && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -295,7 +280,7 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
     });
     // 清理 node-sqlite3-wasm 的陈旧 .lock 目录（强杀/崩溃后残留）：拿到单实例锁即证明
     // 无其他 MusicDedup 进程存活，此刻的 .lock 必为陈旧——不清的话 getDB() 的 read-write
-    // 打开会报 database is locked，应用无法启动（P5.1 联调实测）。必须在 getDB 前执行。
+    // 打开会报 database is locked，应用无法启动。必须在 getDB 前执行。
     try {
       if (process.env.DB_PATH) {
         const lockDir = process.env.DB_PATH + '.lock';
@@ -308,55 +293,19 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
     // ── 数据迁移：决策先于任何 DB 打开 ────────────────────────────────
     // protocol.js 与 ipc/*.js 在模块级即 getDB()（打开/创建目标库），必须等迁移
     // 决策后才动态 import——否则"先建出的空目标库"会让迁移被 target-exists 静默跳过。
-    // P0 为 harness 样本专用，不迁移。
-    let mig = null;
-    if (!isP0Verify) {
-      mig = await runMigrationUX({ interactive: isClientMode });
-      if (mig.migrated) console.log(`[v2] 已迁移旧数据 → ${mig.target}`);
-      else if (mig.reason === 'target-exists')
-        console.log(`[v2] 数据库已存在，跳过迁移: ${process.env.DB_PATH}`);
-      else if (mig.reason === 'skipped') console.log('[v2] 用户选择全新开始（未迁移旧数据）');
-      else if (mig.reason === 'no-legacy-source') console.log('[v2] 未检测到旧数据，使用全新库');
-      else if (mig.reason === 'copy-failed')
-        console.error(`[v2] 迁移失败（已回滚目标，可重试）：${mig.error}`);
-      else console.log(`[v2] 未迁移（${mig.reason}）`);
-    }
+    const mig = await runMigrationUX({ interactive: isClientMode });
+    if (mig.migrated) console.log(`[main] 已迁移旧数据 → ${mig.target}`);
+    else if (mig.reason === 'target-exists')
+      console.log(`[main] 数据库已存在，跳过迁移: ${process.env.DB_PATH}`);
+    else if (mig.reason === 'skipped') console.log('[main] 用户选择全新开始（未迁移旧数据）');
+    else if (mig.reason === 'no-legacy-source') console.log('[main] 未检测到旧数据，使用全新库');
+    else if (mig.reason === 'copy-failed')
+      console.error(`[main] 迁移失败（已回滚目标，可重试）：${mig.error}`);
+    else console.log(`[main] 未迁移（${mig.reason}）`);
 
     // 协议处理（先于任何窗口加载；protocol.js 动态 import 才打开目标库——已在迁移后）
     const { registerProtocol } = await import('./protocol.js');
     registerProtocol();
-
-    if (isP0Verify) {
-      // P0 回归套件：主进程跑验证 + P0 渲染页展示
-      const { runVerification } = await import('./p0/verify.js');
-      const cachedVerify = await runVerification();
-      for (const r of cachedVerify) {
-        console.log(`[P0] ${r.pass ? 'PASS' : 'FAIL'}  ${r.label}  —  ${r.detail}`);
-      }
-      const passed = cachedVerify.filter((r) => r.pass).length;
-      console.log(`[P0] 验证完成：${passed}/${cachedVerify.length} 通过`);
-
-      ipcMain.handle('p0:verify', () => cachedVerify);
-      ipcMain.handle('p0:samples', () => getSampleFiles());
-      ipcMain.on('p0:stream-result', (_e, r) => {
-        console.log(`[P0] ${r && r.pass ? 'PASS' : 'FAIL'}  自定义协议流式播放  —  ${r && r.detail}`);
-        if (process.env.P0_AUTORUN) setTimeout(() => app.quit(), 800);
-      });
-
-      const win = new BrowserWindow({
-        width: 960,
-        height: 840,
-        title: 'MusicDedup v2 — P0 技术验证',
-        autoHideMenuBar: true,
-        webPreferences: {
-          preload: path.join(__dirname, 'preload.cjs'),
-          contextIsolation: true,
-          sandbox: true,
-        },
-      });
-      win.loadFile(path.join(__dirname, 'renderer.html'));
-      return;
-    }
 
     // 默认：客户端（IPC + 自定义协议，无 HTTP）
     // ipc/index.js 在模块级即 getDB()，动态 import 放在迁移决策之后（见上方注释）
@@ -367,13 +316,13 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
     // 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG 后经 win:icon 送达（不提交图片资产）
     ipcMain.on('win:icon', (_e, dataUrl) => { if (dataUrl) applyWindowIcon(dataUrl); });
     await mainWindow.loadURL('musicdedup://app/index.html');
-    console.log('[v2-P4] 客户端就绪（单实例锁生效，IPC 化，无 HTTP 层）');
+    console.log('[main] 客户端就绪（单实例锁生效，IPC 化，无 HTTP 层）');
 
     if (isSmoke) await runSmoke(mainWindow);
   });
 
   app.on('activate', () => {
-    if (!isP0Verify && BrowserWindow.getAllWindows().length === 0) {
+    if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createClientWindow();
     }
   });

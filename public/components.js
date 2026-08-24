@@ -158,7 +158,7 @@ const ICONS={
   'shield-x':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9.5 9.5l5 5'}],['path',{d:'M14.5 9.5l-5 5'}]]},
   'toggle-left':{els:[['path',{d:'M4 12a6 6 0 016-6h4a6 6 0 010 12H10a6 6 0 01-6-6z'}],['circle',{cx:9.5,cy:12,r:2.6,fill:'currentColor'}]]},
   'file-music':{els:[['path',{d:'M14 3v4a1 1 0 001 1h4'}],['path',{d:'M5 4a1 1 0 011-1h7l5 5v11a1 1 0 01-1 1H6a1 1 0 01-1-1z'}],['path',{d:'M9.5 17v-4.5l4-1v4.5'}],['circle',{cx:8.7,cy:17,r:1.2,fill:'currentColor'}],['circle',{cx:12.7,cy:15.5,r:1.2,fill:'currentColor'}]]},
-  // P4 无边框：Linux 自绘窗口控制三键（Win/mac 用原生控件，用不到）
+  // 无边框：Linux 自绘窗口控制三键（Win/mac 用原生控件，用不到）
   'minus':{els:[['path',{d:'M5 12h14'}]]},
   'maximize':{els:[['rect',{x:5,y:5,width:14,height:14,rx:1}]]},
   'restore':{els:[['rect',{x:6,y:9,width:10,height:10,rx:1}],['path',{d:'M9 9V6a1 1 0 011-1h8a1 1 0 011 1v8a1 1 0 01-1 1h-3'}]]},
@@ -179,7 +179,7 @@ function Icon(name,style={},className){
    雷达环+扫描扇区 = 多通道检测；标准四分音符前方实心（居中略偏左上，保留），
    阴影空心音符投射在右斜下方（被去重的副本）。与 assets/icon.svg 同一设计。 */
 function Logo({size=28,radius=7}={}){
-  // 标准四分音符（v1 同款 NOTE_PATH）
+  // 标准四分音符（品牌图标同款路径）
   const NOTE_PATH='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z';
   return e('svg',{width:size,height:size,viewBox:'0 0 64 64',style:{display:'inline-block',verticalAlign:'middle',flexShrink:0,borderRadius:radius,boxShadow:'0 1px 3px rgba(217,119,6,.25)'}},
     e('defs',null,e('linearGradient',{id:'logoGrad',x1:0,y1:0,x2:0,y2:1},e('stop',{offset:0,stopColor:'#FDE68A'}),e('stop',{offset:1,stopColor:'#D97706'}))),
@@ -370,7 +370,7 @@ function useConfirmAction(){
 
 
 
-/* ── P4 无边框：Linux 自绘窗口控制三键（frame:false 无原生按钮；Win/mac 不渲染）── */
+/* ── 无边框：Linux 自绘窗口控制三键（frame:false 无原生按钮；Win/mac 不渲染）── */
 function WindowControls() {
   const [maximized, setMaximized] = useState(false);
   useEffect(() => {

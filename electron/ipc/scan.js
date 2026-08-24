@@ -1,4 +1,4 @@
-// electron/ipc/scan.js — 扫描域薄 broker（P5 扫描隔离）
+// electron/ipc/scan.js — 扫描域薄 broker（扫描隔离）
 //
 // 扫描的 8 步流水线整体移入 electron/scan-worker.js（worker 线程），主进程不再跑任何
 // 扫描 CPU 活——窗口其他功能（播放/导航/IPC 读库）不再被占用。本模块职责：
@@ -39,17 +39,17 @@ export function setSend(fn) { send = fn; }
 function broadcast(data) {
   // 关键：type 不能并入 scanState —— broadcast({type:'done', ...scanState}) 时若
   // scanState 已带 type:'progress'（被 Object.assign 污染），会把 done 覆盖成 progress，
-  // 渲染进程的 onDone / 主进程 sendScan 的 scanRunning=false 全部失效（P5 联调复现：
+  // 渲染进程的 onDone / 主进程 sendScan 的 scanRunning=false 全部失效（曾复现：
   // "扫描后重复组不刷新"、关闭流程异常同源）。type 仅走事件载荷。
   const { type, ...rest } = data;
   Object.assign(scanState, rest);
   send({ ...data });
 }
 
-// ── 临时库（P5.1 锁冲突修复）────────────────────────────────────────────
+// ── 临时库（锁冲突修复）────────────────────────────────────────────
 // 根因：node-sqlite3-wasm 不支持 WAL（PRAGMA journal_mode=WAL 静默回退 delete），主进程与
 // worker 双连接在 DELETE 模式下读写互锁，busy_timeout=10s 是同步忙等 → 主进程冻结 +
-// "database is locked" 崩溃（P5 复验实测）。方案：worker 用主库的 VACUUM INTO 快照副本，
+// "database is locked" 崩溃。方案：worker 用主库的 VACUUM INTO 快照副本，
 // 全程独享（与主进程零冲突）；结束后主进程单连接 ATTACH 合并回主库，再删临时库。
 function snapshotDbForScan() {
   const dbDir = path.dirname(process.env.DB_PATH);
@@ -134,7 +134,7 @@ function onWorkerMessage(msg) {
     // start 已由 startScanInWorker 广播过，worker 的 start 回执只更新镜像，不重复转发
     if (msg.type !== 'start') broadcast({ type: msg.type, ...scanState });
   } else if (msg.type === 'phase') {
-    // 分阶段增量合并（P5.2）：每完成一个阶段，把该阶段成果合并进主库并广播 merged，
+    // 分阶段增量合并：每完成一个阶段，把该阶段成果合并进主库并广播 merged，
     // 渲染层据此刷新（"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的阶段数据）。
     // 合并完再放行 worker 进下一阶段（gatePhase 等待）。临时库此刻由 worker 持有但空闲，
     // 无写事务 → 无 .lock → ATTACH 只读零冲突；合并失败不影响 worker 继续，终态 settle 兜底。
@@ -215,7 +215,7 @@ function startScanInWorker(options) {
   scanState = { running: true, abortFlag: false, paused: false, phase: 'starting', pct: 0, level: 'info', message: `[${now()}] 准备中...`, startTime: Date.now() };
   settled = false;
   cleanupStaleTempDbs(); // 清上次残留临时库（快照前，防陈旧文件堆积）
-  // 快照主库 → 临时库副本（worker 全程只读写副本，与主进程零锁冲突；P5.1）
+  // 快照主库 → 临时库副本（worker 全程只读写副本，与主进程零锁冲突）
   let tempDbPath;
   try {
     tempDbPath = snapshotDbForScan();

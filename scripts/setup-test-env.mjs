@@ -1,4 +1,4 @@
-// scripts/setup-test-env.mjs — P5 真实库复验的隔离测试环境搭建
+// scripts/setup-test-env.mjs — 隔离测试环境搭建
 //
 // 用途：不碰生产数据（%APPDATA%/MusicDedup，即 Electron userData）的前提下，
 // ① 把当前重复组涉及的全部音轨复制到独立测试目录（保留目录结构）

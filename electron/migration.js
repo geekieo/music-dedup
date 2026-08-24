@@ -1,10 +1,10 @@
-// electron/migration.js — P5 交互式数据迁移 UX
+// electron/migration.js — 交互式数据迁移 UX
 //
 // 依赖 scripts/migrate-data.mjs 的纯逻辑（probeSourceDb / migrateLegacyData），
 // 在此叠加主进程原生对话框。本模块刻意不 import lib/db —— 自身绝不打开目标库，
 // 使"迁移决策先于任何 DB 打开"可成立（main.js 启动顺序的关键前提，见主进程注释）。
 //
-// 场景（v2_plan §三.2"宁可多问一步也不要静默覆盖"）：
+// 场景（宁可多问一步也不要静默覆盖）：
 //   目标库不存在（首启/全新 userData）+ 检测到旧数据 → 询问是否迁移；
 //   目标已存在（已迁移/已有库）→ 永不打扰。
 import { createRequire } from 'module';
@@ -37,7 +37,7 @@ export async function runMigrationUX({ interactive, targetDb = process.env.DB_PA
 
   const def = probeSourceDb();
 
-  // 2. 非交互（smoke）：沿用 v1 自动迁移语义（现在顺序正确，真正生效）
+  // 2. 非交互（smoke）：自动迁移旧版源数据
   if (!interactive) {
     if (!def.valid) return { migrated: false, reason: 'no-legacy-source' };
     return migrateLegacyData({ targetDb });

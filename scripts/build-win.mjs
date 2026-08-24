@@ -1,10 +1,10 @@
-// scripts/build-win.mjs — v2 打包脚本（Windows NSIS 安装包 + portable 便携版，双产物）
+// scripts/build-win.mjs — 打包脚本（Windows NSIS 安装包 + portable 便携版，双产物）
 //
-// 背景：GitHub 直连被墙（P0 记录），electron-builder 下载 electron 二进制与
-// 辅助二进制（NSIS 等）都会失败。本脚本沿用 run-electron.mjs "先设环境变量再
-// 执行"的模式，注入 npmmirror 镜像后调 electron-builder 的 build() API。
+// 背景：electron-builder 需从 GitHub 下载 electron 二进制与辅助二进制（NSIS 等），
+// 网络不稳时易失败。本脚本沿用 run-electron.mjs "先设环境变量再执行"的模式，
+// 注入 npmmirror 镜像（下载缓慢/失败的备用渠道）后调 electron-builder 的 build() API。
 //
-//   ELECTRON_MIRROR                → electron 二进制（npmmirror，P0 已验证链路）
+//   ELECTRON_MIRROR                → electron 二进制（npmmirror）
 //   ELECTRON_BUILDER_BINARIES_MIRROR → NSIS / winCodeSign 等辅助二进制
 //
 // 打包配置取 package.json "build"（appId/files/asarUnpack/extraResources/win.target/nsis）。

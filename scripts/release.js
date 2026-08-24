@@ -1,4 +1,4 @@
-// scripts/release.js — v2 一键发布（版本号同步 → CHANGELOG 占位 → 构建 → 打包版冒烟 → 产物清单）
+// scripts/release.js — 一键发布（版本号同步 → CHANGELOG 占位 → 构建 → 打包版冒烟 → 产物清单）
 //
 // 单条命令完成发布全流程（合并原 release.js 的版本管理与 build-and-verify 的打包验证）：
 //   1. 版本号同步：package.json + package-lock.json + public/app.js（APP_VERSION，UI 头部徽标）

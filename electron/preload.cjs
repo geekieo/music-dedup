@@ -1,6 +1,5 @@
 // electron/preload.cjs — 渲染进程 ↔ 主进程 IPC 桥（contextBridge）
-// P2：暴露单通道 request(method,url,body)（前端 api.get/post/put/del 桥）+
-// scan:progress 事件订阅。P0 回归只读接口保留（verify/samples/streamResult）。
+// 暴露单通道 request(method,url,body)（前端 api.get/post/put/del 桥）+ scan:progress 事件订阅。
 // 命名注意：全局名用 window.bridge 而非 window.api —— 渲染进程 app.js 顶层声明了
 // `const api={...}`，而 contextBridge 暴露的全局属性不可配置，同名会把该声明判为
 // 重复声明（V8 SyntaxError: Identifier 'api' has already been declared）。
@@ -16,7 +15,7 @@ contextBridge.exposeInMainWorld('bridge', {
     ipcRenderer.on('scan:progress', listener);
     return () => ipcRenderer.removeListener('scan:progress', listener);
   },
-  // P4 无边框：平台标识 + 窗口控制（Linux 自绘按钮用；Win/mac 走原生控件）
+  // 无边框：平台标识 + 窗口控制（Linux 自绘按钮用；Win/mac 走原生控件）
   platform: process.platform,
   // 关闭确认：主进程发 app:confirm-close → 渲染层弹窗；确认后调 confirmClose()，
   // 主进程等任务中止归位后退出。
@@ -40,13 +39,9 @@ contextBridge.exposeInMainWorld('bridge', {
       return () => ipcRenderer.removeListener('win:maximized', listener);
     },
   },
-  // P4 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG → PNG data URL
+  // 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG → PNG data URL
   readyWindowIcon: (dataUrl) => ipcRenderer.send('win:icon', dataUrl),
   // 弹窗遮罩联动：主进程按渲染层合成的实际颜色设 titleBarOverlay 控件配色
   // （titleBarOverlay 绘制于网页之上、CSS 遮罩盖不住，颜色由渲染层按遮罩栈实时合成）
   setTitlebarOverlay: (colors) => ipcRenderer.send('ui:titlebar-overlay', colors),
-  // ── P0 回归用（只读）──
-  verify: () => ipcRenderer.invoke('p0:verify'),
-  samples: () => ipcRenderer.invoke('p0:samples'),
-  streamResult: (r) => ipcRenderer.send('p0:stream-result', r),
 });

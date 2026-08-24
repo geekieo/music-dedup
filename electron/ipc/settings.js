@@ -1,6 +1,5 @@
 // electron/ipc/settings.js — 设置域：settings / browse-folder（原生对话框）/ fpcalc 探针
-// browse-folder 用 Electron dialog.showOpenDialog 替换 server.js 的 powershell/osascript
-// spawn 黑客（v2-arch-review 步骤 5 决策 6，删 ~20 行）。
+// browse-folder 用 Electron dialog.showOpenDialog，替换了旧版 powershell/osascript 子进程实现。
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);

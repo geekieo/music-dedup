@@ -1,8 +1,8 @@
-// electron/protocol.js — musicdedup:// 自定义协议（P2 应用本体承载）
+// electron/protocol.js — musicdedup:// 自定义协议（应用本体承载）
 //
-// host 路由（v2-arch-review 步骤 5 决策 3）：
+// host 路由：
 //   musicdedup://app/...      → 应用本体：静态资源 + /rules-meta.js（生成）+ /cover/<id>
-//   musicdedup://stream/...   → 音频流（id 优先，非数字段回退为路径——兼容 P0 样本直读）
+//   musicdedup://stream/...   → 音频流（id 优先，非数字段回退为绝对路径直读）
 // app 与 stream 分属不同 host，但 cover 挂 app host 下保证与页面同源（fetch 无需 CORS）。
 // 唯一不能走 IPC 的接口是 /rules-meta.js：它是生成的可执行 JS（.toString() 序列化），
 // 由 lib/rules.js 运行时生成，保持单一出处。
@@ -67,7 +67,7 @@ function rulesMetaJs() {
   ].join('\n');
 }
 
-// 音频流：id 优先（真实曲库），非数字段回退为绝对路径（P0 样本不在 db 中）。
+// 音频流：id 优先（真实曲库），非数字段回退为绝对路径（非库内文件不在 db 中）。
 // 路径型 URL 用正斜杠编码（URL 解析器会把自定义 scheme 路径里的反斜杠吃掉——
 // 实测 %5C 会被剥离），此处换回平台分隔符。
 async function handleStream(request, url) {
@@ -89,7 +89,7 @@ async function handleStream(request, url) {
   const total = stat.size;
   const lastModified = stat.mtime.toUTCString();
   // ETag 只用 size+mtime：本地文件在同一会话内不变，足够做 304 校验；
-  // 不能用 id 或路径作组成部分——路径含中文等非 Latin-1 字符会触发
+  // 不能用 id 或路径作组成部分——路径含非 Latin-1 字符会触发
   // Response 构造的 ByteString 编码异常（实测 TypeError）。
   const etag = `"${stat.size}-${stat.mtimeMs}"`;
   // 本地文件在会话内不会变——允许缓存可避免每次 seek/重播从磁盘重读同一批字节

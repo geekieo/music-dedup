@@ -1,4 +1,4 @@
-// scripts/scan-phase-merge-test.mjs — 分阶段增量合并端到端回归（P5.2）
+// scripts/scan-phase-merge-test.mjs — 分阶段增量合并端到端回归
 //
 // 验证：worker 每完成一个阶段 → broker 合并临时库→主库并广播 type:'merged' → 主库在
 // 每阶段 merged 后即含该阶段成果（不等 done）；worker 经闸门放行、全阶段跑完到达 done。

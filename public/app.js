@@ -319,7 +319,7 @@ function useScanStream(onDone){
   const[confirm,setConfirm]=useState(null);
   const onDoneRef=useRef(onDone);
   onDoneRef.current=onDone;
-  // 扫描结果分阶段增量合并（P5.2）：worker 每完成一个阶段，broker 合并临时库→主库并广播
+  // 扫描结果分阶段增量合并：worker 每完成一个阶段，broker 合并临时库→主库并广播
   // type:'merged'，此处据此刷新——"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的
   // 阶段数据（enum 后文件列表、fp 后播放按钮、匹配后重复组）。终态 type:'done'（settle
   // 合并之后广播）再做最终刷新兜底。中途不再依赖匹配步骤完成点的旧刷新逻辑。
@@ -393,7 +393,7 @@ function App(){
     api.get('/api/settings').then(r=>{if(r.ok)setSettingsState(r.data);});
   },[]);
 
-  // P4 统一图标生成：首启栅格化 favicon SVG → PNG data URL，窗口/任务栏图标(256px)
+  // 统一图标生成：首启栅格化 favicon SVG → PNG data URL，窗口/任务栏图标(256px)
   // 同源送达主进程（不提交图片资产，源为 assets/icon.svg）
   useEffect(()=>{
     if(!window.bridge?.readyWindowIcon)return;
@@ -521,7 +521,7 @@ function App(){
   useEffect(()=>{
     const cur=player.current;
     if(!cur||cur.cover!==undefined)return;
-    // v2（P2）：封面走自定义协议（同源 musicdedup://app/cover/<id>，避免二进制过 IPC）
+    // 封面走自定义协议（同源 musicdedup://app/cover/<id>，避免二进制过 IPC）
     fetch(`musicdedup://app/cover/${cur.id}`)
       .then(r=>r.ok?r.blob():null)
       .then(blob=>{ if(blob)cur.cover=URL.createObjectURL(blob); else cur.cover=null; })
@@ -575,15 +575,17 @@ function App(){
     e('audio',{ref:player.audioRef,...player.bind,style:{display:'none'}}),
 
     // Header + nav: single row, 3-column grid — brand left, nav centre, empty right.
-    // P4 无边框：整行是拖拽区（-webkit-app-region:drag），交互元素 no-drag；
+    // 无边框：整行是拖拽区（-webkit-app-region:drag），交互元素 no-drag；
     //   Windows 原生 overlay 按钮在右上、macOS 红绿灯在左上（品牌避让）、Linux 自绘三键在右列。
     e('div',{style:{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',padding:'0 24px',height:54,background:'var(--bg-base)',borderBottom:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',flexShrink:0,zIndex:10,WebkitAppRegion:'drag'},
       onDoubleClick:()=>{ if(window.bridge?.platform==='linux'&&window.bridge?.winControls) window.bridge.winControls.toggleMaximize(); }},
       e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start',paddingLeft:window.bridge?.platform==='darwin'?72:0}},
         e(Logo,{size:28}),
-        e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em'}},'MusicDedup'),
-        e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION),
-        window.bridge?.isTest&&e('span',{style:{fontSize:11,color:'var(--amber)',background:'var(--amber-bg)',padding:'2px 8px',borderRadius:4,border:'1px solid var(--amber-bd)',fontFamily:'var(--font-mono)',fontWeight:600}},'隔离测试')
+        e('div',{style:{display:'flex',alignItems:'baseline',gap:10}},
+          e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em'}},'MusicDedup'),
+          e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION),
+          window.bridge?.isTest&&e('span',{style:{fontSize:11,color:'var(--amber)',background:'var(--amber-bg)',padding:'2px 8px',borderRadius:4,border:'1px solid var(--amber-bd)',fontFamily:'var(--font-mono)',fontWeight:600}},'隔离测试')
+        )
       ),
       e('nav',{style:{display:'flex',gap:4,justifySelf:'center',WebkitAppRegion:'no-drag'}},
         TABS.map(t=>e('button',{key:t.id,onClick:()=>setView(t.id),style:{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:view===t.id?'var(--amber-bg)':'none',border:'none',outline:'none',borderRadius:'var(--r-md)',transition:'all .15s'}},

@@ -2,7 +2,7 @@
 //
 // 背景：Windows 任务管理器/任务栏的进程名与图标取自「进程 exe 的名称与资源」。
 //   dev 模式直接跑 node_modules/electron/dist/electron.exe，Task Manager 里必然
-//   显示「Electron (4)」+ 默认原子图标（运行时无法改，P5 已确认）。
+//   显示「Electron (4)」+ 默认原子图标（运行时无法改）。
 // 做法（与 electron-builder 打包原理相同）：把 electron.exe 复制为同目录的
 //   MusicDedup.exe，再用 rcedit 写图标 + 版本资源（FileDescription/ProductName/
 //   FileVersion 等）。Electron 允许重命名 exe——资源（dll/pak/locales/snapshot）
@@ -15,8 +15,8 @@
 // 已知坑（本机实测）：
 //   - fs.cpSync(recursive) 静默崩溃（Node24/本机 Windows）→ 单文件复制用
 //     fs.copyFileSync（非递归）。
-//   - electron-winstaller 的 rcedit.exe 是 ANSI 版：目标/图标路径含中文（含中文的
-//     绝对路径）会 "Unable to load file"，且不支持 --set-product-name 等
+//   - electron-winstaller 的 rcedit.exe 是 ANSI 版：目标/图标路径含非 ASCII 字符（含非
+//     ASCII 的绝对路径）会 "Unable to load file"，且不支持 --set-product-name 等
 //     便捷 flag（报 "Unexpected trailing arguments"）。→ 在 ASCII 临时目录暂存
 //     exe+icon 再 rcedit（仅用 --set-version-string / --set-file-version /
 //     --set-product-version / --set-icon），再拷回 dist。
@@ -41,7 +41,7 @@ const projectRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
 const rcedit = path.join(projectRoot, 'node_modules', 'electron-winstaller', 'vendor', 'rcedit.exe');
 const iconPath = path.join(projectRoot, 'assets', 'icon.ico');
 
-// ASCII 暂存目录（os.tmpdir 在本机为 ASCII；rcedit ANSI 版不能碰中文路径）
+// ASCII 暂存目录（os.tmpdir 在本机为 ASCII；rcedit ANSI 版不能碰非 ASCII 路径）
 const stagingDir = path.join(os.tmpdir(), 'md-patch-exe');
 
 // 版本资源（与 package.json version 同步；改动版本号时更新这里）

@@ -9,8 +9,8 @@ import { computeScrapeTier, mergeDualScrapeShape } from '../../lib/tier.js';
 import { createRequire } from 'module';
 
 // 主进程网络请求一律走 Electron net.fetch（Chromium 网络栈）：
-// 全局 fetch（undici）在主进程跑会占主进程事件循环——被墙/代理环境下连接挂起时
-// 会阻塞全部 IPC，表现为"验证时整个应用卡死、其他功能点不了"（P5 联调实测）。
+// 全局 fetch（undici）在主进程跑会占主进程事件循环——网络不可达/代理环境下连接挂起时
+// 会阻塞全部 IPC，表现为"验证时整个应用卡死、其他功能点不了"（曾实测复现）。
 // net.fetch 跑在 Chromium IO 线程、尊重系统代理，天然不阻塞主进程 JS。
 // 手动刮削（scrape-single / mb-candidates / acoustid-candidates）经 lib/scraper.js
 // 的可注入 httpFetch 同样切到 net.fetch；scan worker 线程保持全局 fetch（不影响主进程）。
@@ -102,7 +102,7 @@ export const routes = [
       // 用最小（故意无效）指纹做一次 lookup —— 若 KEY 本身有效，AcoustID 会改报指纹
       // 问题而非 key 问题，从而无需真实指纹即可确认 key 可用。
       const params = new URLSearchParams({ client: key.trim(), duration: '240', fingerprint: 'AQAAA', meta: 'recordings' });
-      // 10s 超时：被墙/无网环境下 acoustid.org 连接会无限挂起（AbortController 兜底）。
+      // 10s 超时：网络不可达时 acoustid.org 连接会无限挂起（AbortController 兜底）。
       // 用 net.fetch（Chromium 栈，不阻塞主进程事件循环）而非全局 fetch（undici 会卡 IPC）。
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(), 10000);

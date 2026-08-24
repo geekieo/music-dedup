@@ -687,7 +687,7 @@ function PropsModal({fileId,onClose}){
   const[coverBig,setCoverBig]=useState(false);
   useEffect(()=>{
     api.get(`/api/files/${fileId}`).then(r=>{if(r.ok)setData(r.data);});
-    // Try loading cover art（v2：自定义协议，同源 musicdedup://app/cover/<id>）
+    // Try loading cover art（自定义协议，同源 musicdedup://app/cover/<id>）
     const coverSrc=`musicdedup://app/cover/${fileId}`;
     fetch(coverSrc).then(r=>{if(r.ok)setCoverUrl(coverSrc);}).catch(()=>{});
   },[fileId]);

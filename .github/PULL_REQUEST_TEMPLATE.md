@@ -14,7 +14,6 @@
 ## 验证
 
 - [ ] `npm run smoke` 通过
-- [ ] `npm run p0:verify` 通过
 - [ ] （涉及打包）`npm run smoke:packaged` 通过
 
 ## 关联

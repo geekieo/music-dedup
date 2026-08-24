@@ -1,4 +1,4 @@
-// electron/scan-worker.js — 扫描流水线执行器（worker 线程，P5 扫描隔离）
+// electron/scan-worker.js — 扫描流水线执行器（worker 线程，扫描隔离）
 //
 // 扫描的 8 步流水线（enum→meta→basicMatch→fp→fpMatch→scrape→scrapeMatch）整体从
 // 主进程事件循环搬到这里运行——music-metadata 解析、matcher 相似度、DB 批量写这些
@@ -33,7 +33,7 @@ async function waitIfPaused() {
   while (scanState.paused && !scanState.abortFlag) await sleep(200);
 }
 
-// 分阶段增量合并（P5.2）：每完成一个阶段，通知 broker 合并临时库→主库（渲染层据此刷新，
+// 分阶段增量合并：每完成一个阶段，通知 broker 合并临时库→主库（渲染层据此刷新，
 // "完成一个阶段，更新一个阶段"），等 broker 确认（phaseContinue）后再进下一阶段——保证
 // 合并读到的是该阶段完成点的稳定状态（temp 与 main 是不同文件，broker 只读 temp，无锁冲突）。
 // 中止时不等待（终态 settle 合并兜底）。phaseAck 先复位再发信号，broker 的 continue 必然落在之后。
@@ -80,7 +80,7 @@ async function runScanPipeline(options) {
   // cpuinfo.js 查询，非 SMT 机型也能用满物理核；未传时回退逻辑核/2）。上限 12 防高并发
   // 下内存/带宽过载。FP_DECODE_CONCURRENCY env 可覆盖。
   const decodeConcurrency = Math.max(1, Math.min(12, parseInt(process.env.FP_DECODE_CONCURRENCY || threads, 10) || physicalCores || Math.round(os.cpus().length / 2)));
-  // 本 worker 独立 DB 连接（P5.1：改开主库快照副本 scan-tmp-*.db——node-sqlite3-wasm 无 WAL，
+  // 本 worker 独立 DB 连接（改开主库快照副本 scan-tmp-*.db——node-sqlite3-wasm 无 WAL，
   // 双连接同库在 DELETE 模式互锁；副本让 worker 与主进程零冲突，结束后由 broker 合并回主库）。
   // skipInit：schema 已由主进程建立（快照副本自带 schema）。skipPragma：单连接临时库不需要
   // 并发 pragma，且 worker 线程对 VACUUM 产物执行 journal_mode=WAL 会报 database is locked。

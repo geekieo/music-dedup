@@ -37,7 +37,6 @@
     "electron": "node scripts/run-electron.mjs",
     "smoke": "node scripts/run-electron.mjs --smoke",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
-    "p0:verify": "node scripts/run-electron.mjs --p0",
     "scan:abort": "node scripts/scan-abort-test.mjs",
     "scan:phase": "node scripts/scan-phase-merge-test.mjs",
     "scan:trash": "node scripts/trash-flow-test.mjs",

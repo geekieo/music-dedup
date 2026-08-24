@@ -1,4 +1,4 @@
-// scripts/migrate-data.mjs — v2 数据搬迁：把 v1 项目相对 data/ 目录的 SQLite 库
+// scripts/migrate-data.mjs — 数据搬迁：把旧版项目相对 data/ 目录的 SQLite 库
 // 搬到系统标准位置（Windows %APPDATA%/MusicDedup/，即 Electron userData）。
 //
 // 规则：源存在且目标缺失才复制（含 -wal 边车文件，若有），绝不覆盖目标——

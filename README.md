@@ -46,7 +46,7 @@ npm install
 npm run electron
 ```
 
-> ⚠️ 国内网络需为 Electron 二进制配置镜像，见 [scripts/build-win.mjs](scripts/build-win.mjs) 头部注释。
+> ⚠️ 若下载 Electron 二进制缓慢或失败，可配置镜像，见 [scripts/build-win.mjs](scripts/build-win.mjs) 头部注释。
 
 ### 打包 Windows 产物
 
@@ -144,7 +144,6 @@ npm run smoke:packaged # 打包版冒烟自测
 |---|---|
 | `npm run electron` | 启动开发客户端 |
 | `npm run smoke` | 真实库全链路自测（IPC/流式/渲染/图标） |
-| `npm run p0:verify` | 核心技术栈回归（WASM 库/标签写入/声纹/流式） |
 | `npm run migrate-data` | 手动触发旧数据目录迁移 |
 | `npm run test:setup` | 搭建隔离测试环境（备份生产库 + 复制重复曲目副本 + 建测试 userData） |
 | `npm run build:win` | 打包 Windows NSIS + 便携版 |

@@ -26,7 +26,7 @@
    - `chore:` 杂项
 3. 改动最小化，只包含解决该问题的修改。
 4. 涉及核心逻辑（匹配/保留/刮削/DB）的改动需回归验证。
-5. 提交信息正文用中文，示例：`fix: 匹配阶段让出事件循环消除扫描未响应`
+5. 提交信息正文说明改动根因，示例：`fix: 匹配阶段让出事件循环消除扫描未响应`
 
 ## 构建与自测
 
@@ -35,7 +35,6 @@ npm run electron       # 启动开发客户端
 npm run smoke          # 真实库全链路自测（IPC/流式/渲染/图标）
 npm run scan:abort     # 扫描中止/暂停回归
 npm run scan:phase     # 分阶段增量合并回归
-npm run p0:verify      # 核心技术栈回归（WASM 库/标签写入/声纹/流式）
 npm run build:win      # 打包 Windows NSIS + 便携版
 npm run smoke:packaged # 打包版冒烟
 ```
