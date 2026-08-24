@@ -42,7 +42,6 @@
     "scan:trash": "node scripts/trash-flow-test.mjs",
     "scan:smartkeep": "node scripts/smartkeep-flow-test.mjs",
     "scan:smartkeep-scan": "node scripts/smartkeep-scan-test.mjs",
-    "migrate-data": "node scripts/migrate-data.mjs",
     "test:setup": "node scripts/setup-test-env.mjs",
     "icons": "node scripts/render-icons.mjs",
     "build:win": "node scripts/build-win.mjs"
@@ -70,7 +69,6 @@
     },
     "files": [
       "electron/**",
-      "scripts/migrate-data.mjs",
       "lib/**",
       "public/**",
       "assets/**"

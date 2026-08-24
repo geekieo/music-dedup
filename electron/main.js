@@ -16,9 +16,6 @@ import { fileURLToPath } from 'url';
 // Windows 任务栏分组/身份需要 AppUserModelId（打包后 appId 已在 build 配置）
 app.setAppUserModelId('com.geekieo.musicdedup');
 
-import { runMigrationUX } from './migration.js';
-// protocol.js / ipc/index.js 在模块级即 getDB()（打开/创建目标库）—— 必须在迁移决策
-// 之后才动态 import（见 whenReady），否则首启迁移会被"先建出的空目标库"静默跳过。
 import { getDB } from '../lib/db/index.js';
 import { getSetting, setSetting } from '../lib/db/settings.js';
 
@@ -89,7 +86,6 @@ function createClientWindow() {
   const isMac = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
   // 窗口状态记忆（存 settings 表）：恢复上次尺寸/位置/最大化。
-  // 惰性 getDB()：窗口只在迁移决策（whenReady）后创建，此刻库必已就绪。
   let saved = {};
   try { saved = getSetting(getDB(), 'window_state', null) || {}; } catch (e) { console.log('[main] 读取窗口状态失败：', e && e.message); }
   const win = new BrowserWindow({
@@ -290,25 +286,12 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
   }
 
   app.whenReady().then(async () => {
-    // ── 数据迁移：决策先于任何 DB 打开 ────────────────────────────────
-    // protocol.js 与 ipc/*.js 在模块级即 getDB()（打开/创建目标库），必须等迁移
-    // 决策后才动态 import——否则"先建出的空目标库"会让迁移被 target-exists 静默跳过。
-    const mig = await runMigrationUX({ interactive: isClientMode });
-    if (mig.migrated) console.log(`[main] 已迁移旧数据 → ${mig.target}`);
-    else if (mig.reason === 'target-exists')
-      console.log(`[main] 数据库已存在，跳过迁移: ${process.env.DB_PATH}`);
-    else if (mig.reason === 'skipped') console.log('[main] 用户选择全新开始（未迁移旧数据）');
-    else if (mig.reason === 'no-legacy-source') console.log('[main] 未检测到旧数据，使用全新库');
-    else if (mig.reason === 'copy-failed')
-      console.error(`[main] 迁移失败（已回滚目标，可重试）：${mig.error}`);
-    else console.log(`[main] 未迁移（${mig.reason}）`);
-
-    // 协议处理（先于任何窗口加载；protocol.js 动态 import 才打开目标库——已在迁移后）
+    // 协议处理（先于任何窗口加载；protocol.js 动态 import，模块级即打开目标库）
     const { registerProtocol } = await import('./protocol.js');
     registerProtocol();
 
     // 默认：客户端（IPC + 自定义协议，无 HTTP）
-    // ipc/index.js 在模块级即 getDB()，动态 import 放在迁移决策之后（见上方注释）
+    // ipc/index.js 模块级即 getDB()（打开/创建目标库），动态 import 惰性加载
     const { registerApi } = await import('./ipc/index.js');
     mainWindow = createClientWindow();
     registerApi({ send: sendScan });

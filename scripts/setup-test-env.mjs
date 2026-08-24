@@ -5,7 +5,7 @@
 // ② 备份生产库到 %APPDATA%/MusicDedup/backup（VACUUM INTO 生成单文件快照，
 //    不依赖 WAL 边车；备份是生产数据的保险，放生产数据旁边、不进测试区）
 // ③ 建一个全新测试 userData 目录
-// 之后用 `npm run electron -- --userdata <测试userdata> --migrate no` 启动隔离实例，
+// 之后用 `npm run electron -- --userdata <测试userdata>` 启动隔离实例，
 // 在「测试曲目」目录上做全流程验证；验证完关窗，`npm run electron` 即回到生产库。
 //
 // 幂等：文件已存在则跳过（--copy-all 强制重拷）；备份每次生成带时间戳的新文件。
@@ -162,7 +162,7 @@ console.log(`  测试曲目:    ${tracksDir}`);
 console.log(`  测试 userData: ${userdataDir}`);
 console.log(`  生产库备份:  ${backupFile}`);
 console.log('');
-console.log('启动隔离测试实例（全新空库 + 跳过迁移弹窗）：');
-console.log(`  npm run electron -- --userdata "${userdataDir}" --migrate no`);
+console.log('启动隔离测试实例（全新空库）：');
+console.log(`  npm run electron -- --userdata "${userdataDir}"`);
 console.log('在设置页「音乐目录」添加测试曲目目录后即可全流程验证。');
 console.log('验证完毕：关掉测试实例，`npm run electron` 即回到生产库（生产数据全程未被触碰）。');

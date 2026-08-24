@@ -10,7 +10,6 @@
 // 参数：--smoke → IPC 链路自测（真实库加载后打关键接口并退出），对应 npm run smoke。
 //       --userdata <dir> → 重定向 userData（MUSICDEDUP_USERDATA），隔离测试用
 //           （bootstrap-env 的 app.getPath('appData') 不受 APPDATA 环境变量影响）。
-//       --migrate <yes|no> → 首启迁移弹窗自动作答（V2_MIGRATE），无头验证用。
 // 不用命令行内嵌环境变量赋值（Windows cmd 不兼容），改为在子进程 env 里注入。
 
 import { spawn } from 'child_process';
@@ -50,7 +49,6 @@ const child = spawn(electronPath, args, {
     ...process.env,
     ...(argv.includes('--smoke') ? { V2_SMOKE: '1' } : {}),
     ...(opt('--userdata') ? { MUSICDEDUP_USERDATA: opt('--userdata') } : {}),
-    ...(opt('--migrate') ? { V2_MIGRATE: opt('--migrate') } : {}),
   },
 });
 child.on('close', (code) => process.exit(code == null ? 1 : code));

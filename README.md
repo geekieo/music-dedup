@@ -144,12 +144,11 @@ npm run smoke:packaged # 打包版冒烟自测
 |---|---|
 | `npm run electron` | 启动开发客户端 |
 | `npm run smoke` | 真实库全链路自测（IPC/流式/渲染/图标） |
-| `npm run migrate-data` | 手动触发旧数据目录迁移 |
 | `npm run test:setup` | 搭建隔离测试环境（备份生产库 + 复制重复曲目副本 + 建测试 userData） |
 | `npm run build:win` | 打包 Windows NSIS + 便携版 |
 
 **隔离测试**：`npm run test:setup` 后，用
-`npm run electron -- --userdata <测试userdata> --migrate no` 启动测试实例（数据与生产
+`npm run electron -- --userdata <测试userdata>` 启动测试实例（数据与生产
 `%APPDATA%/MusicDedup` 完全隔离，生产库备份在 `%APPDATA%/MusicDedup/backup/`），
 验证完关窗、直接 `npm run electron` 即回到生产。详见 `scripts/setup-test-env.mjs` 头部说明。
 
@@ -175,7 +174,6 @@ lib/{db,scanner,matcher,rules,scraper,tagger,fingerprint,...}.js → SQLite/文�
 - **扫描时窗口卡顿？** 2.0 起扫描已隔离到 worker 线程，若仍复现请带主进程日志提 issue。
 - **SmartScreen 提示"未知发布者"？** 程序未做代码签名，选择"仍要运行"；安装包与便携版皆如此。
 - **如何启用 AcoustID / Chromaprint？** 设置页填写 AcoustID API Key；fpcalc.exe 放入项目根目录或设置其路径。
-- **从 v1 Web 版升级？** 首次启动会自动询问是否迁移旧数据，选择"迁移到新位置"即可。
 
 ## License
 
