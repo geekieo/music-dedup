@@ -128,8 +128,8 @@ function settle() {
 
 function onWorkerMessage(msg) {
   if (msg.type === 'start' || msg.type === 'progress') {
-    const { paused, abortFlag, running, ...rest } = msg;
-    Object.assign(scanState, rest); // 只合并 display 字段，控制位保留镜像
+    const { paused, abortFlag, running, type, ...rest } = msg;
+    Object.assign(scanState, rest); // 只合并 display 字段（type 不入镜像，防覆盖后续广播），控制位保留镜像
     // start 已由 startScanInWorker 广播过，worker 的 start 回执只更新镜像，不重复转发
     if (msg.type !== 'start') broadcast({ type: msg.type, ...scanState });
   } else if (msg.type === 'phase') {
@@ -144,7 +144,7 @@ function onWorkerMessage(msg) {
     broadcast({ type: 'merged', phase: msg.phase });
     activeWorker?.postMessage({ cmd: 'phaseContinue' });
   } else if (msg.type === 'done') {
-    const { paused, abortFlag, running, ...rest } = msg;
+    const { paused, abortFlag, running, type, ...rest } = msg;
     doneMessage = rest.message || ''; // 保存 worker 完成消息（合并广播前）
     Object.assign(scanState, rest);
     settle();

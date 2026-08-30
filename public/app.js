@@ -322,6 +322,8 @@ function useScanStream(onDone){
   const[logs,setLogs]=useState([]);
   const[confirm,setConfirm]=useState(null);
   const[lane,setLane]=useState(null); // 当前活跃执行单元（library/basic/fp/scrape/smartKeep/all）
+  const laneRef=useRef(null);         // lane 的 ref 镜像：事件闭包回调读当前单元
+  laneRef.current=lane;
   const onDoneRef=useRef(onDone);
   onDoneRef.current=onDone;
   // 扫描结束（running→false）清空活跃单元，避免高亮残留到下一轮
@@ -349,6 +351,11 @@ function useScanStream(onDone){
           const ty=d.level||'ok';
           return[...p.slice(-500),{msg:d.message,ty,ts:Date.now()}];
         });
+      }
+      // 一键执行（完整流程）无自带完成消息，完成时追加一条「扫描完成」
+      if(d.type==='done'&&d.phase==='done'&&laneRef.current==='all'){
+        const ts=new Date().toLocaleTimeString('zh-CN');
+        setLogs(p=>[...p.slice(-500),{msg:`[${ts}] 扫描完成`,ty:'done',ts:Date.now()}]);
       }
       if(d.type==='done')onDoneRef.current?.();
       prevPhaseRef.current=d.phase;
