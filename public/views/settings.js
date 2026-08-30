@@ -790,7 +790,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
         e('div',{style:{marginBottom:12}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:4}},Icon('world',{marginRight:5,fontSize:13}),'MusicBrainz'),
-          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},'默认启用，无需配置。按文件属性精确匹配，属性极度不完整时退回标题模糊搜索。速率限制 1 次/秒。')
+          e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:2}},'默认启用，无需配置。按文件属性精确匹配，标签极度不完整时退回标题模糊搜索。速率限制 1 次/秒。')
         ),
         e('div',null,
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:6}},

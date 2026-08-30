@@ -12,7 +12,7 @@
 
 // RTYPE_LABEL, DIMENSION_COLUMNS are served by /rules-meta.js (source: lib/rules.js)
 
-/* ── 组内属性同步 — sync fields from sibling tracks (ScrapeDialog-style UI) ── */
+/* ── 组内标签同步 — sync tag fields from sibling tracks (ScrapeDialog-style UI) ── */
 function CrossFillDialog({groupId, currentId, onClose, onUpdated, onTagsWritten}){
   const [tracks, setTracks] = useState(null); // loaded from API
   const [sel, setSel] = useState({});      // per-field selected source track id
@@ -158,7 +158,7 @@ function CrossFillDialog({groupId, currentId, onClose, onUpdated, onTagsWritten}
   const nCols = 2 + sources.length;
   const colTemplate = `58px 1fr${sources.map(() => ' 1fr').join('')}`;
 
-  return e(Modal,{title:'组内属性同步',onClose,width:Math.min(900, 200 + sources.length * 160)},
+  return e(Modal,{title:'组内标签同步',onClose,width:Math.min(900, 200 + sources.length * 160)},
     !current && e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},'未找到目标文件'),
 
     current && e('div',null,
@@ -254,7 +254,7 @@ function CrossFillDialog({groupId, currentId, onClose, onUpdated, onTagsWritten}
       confirmWrite&&e('div',{style:{position:'fixed',inset:0,zIndex:1100,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'},
         onClick:ev=>ev.target===ev.currentTarget&&setConfirmWrite(false)},
         e('div',{style:{background:'var(--bg-base)',borderRadius:'var(--r-xl)',padding:'24px 28px',maxWidth:440,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.2)'}},
-          e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认组内属性同步'),
+          e('div',{style:{fontSize:14,fontWeight:700,marginBottom:8}},'确认组内标签同步'),
           e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,marginBottom:12}},
             `将把以下字段值写入 ${current.title||current.path}：`),
           WRITE_FIELDS.filter(({key})=>sel[key]&&srcById[sel[key]]?.[key]!=null&&srcById[sel[key]][key]!==0&&srcById[sel[key]][key]!=='').map(({key,label})=>
@@ -381,7 +381,7 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,onCrossFill,player,
       // ── RIGHT: keep toggle ───────────────────────────────────────────
       e('div',{style:{display:'flex',alignItems:'center',gap:4,flexShrink:0}},
         e(IconAction,{icon:'cloud-download',title:'刮削操作',onClick:onScrape}),
-        onCrossFill&&e(IconAction,{icon:'arrows-exchange',title:'组内属性同步',onClick:onCrossFill}),
+        onCrossFill&&e(IconAction,{icon:'arrows-exchange',title:'组内标签同步',onClick:onCrossFill}),
         e(IconAction,{icon:'folder-open',title:'打开所在目录',onClick:()=>api.post(`/api/files/${track.id}/reveal`)}),
         e(IconAction,{icon:'info-circle',title:'文件属性',onClick:onProps}),
         e('button',{
