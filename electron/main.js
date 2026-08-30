@@ -91,8 +91,8 @@ function createClientWindow() {
   const win = new BrowserWindow({
     width: saved.width || 1280,
     height: saved.height || 840,
-    // 各页复合行的固有最小宽决定最终冻结尺寸，窗口不得压到其下。
-    minWidth: 900,
+    // 最小宽 760（内容 720）：更窄时扫描执行卡换行、重复组详情数据表横向滚动。
+    minWidth: 760,
     minHeight: 620,
     x: saved.x,
     y: saved.y,

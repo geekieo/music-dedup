@@ -12,10 +12,11 @@
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
   {id:'sec-dirs',    label:'音乐目录',   icon:'folders'},
+  {id:'sec-scan-perf', label:'扫描性能', icon:'radar'},
   {id:'sec-basic',   label:'基础匹配',   icon:'tag'},
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
-  {id:'sec-smartkeep', label:'智能保留', icon:'priority-podium'},
+  {id:'sec-smartkeep', label:'智能保留', icon:'star'},
   {id:'sec-wl',      label:'手动保留', icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
 ];
@@ -131,8 +132,8 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
       onClose:()=>setPurgeConfirm(null),
       danger:true,
     }),
-    e(SH,{title:`最近写入${rows?` （${rows.length} 条）`:''} `,
-      sub:'以文件为单位，保留首次写入前的完整标签快照，可一步撤销；30天后自动清除'}),
+    e(SH,{icon:'edit',title:`最近写入${rows?` （${rows.length} 条）`:''} `,
+      sub:'以音乐文件为单位，保留首次写入前的完整标签快照，可一步撤销；30天后自动清除'}),
     rows===null
       ? e('div',{style:{textAlign:'center',padding:20}},e('i',{className:'ti ti-loader spin',style:{fontSize:20}}))
       : rows.length===0
@@ -250,7 +251,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     confirmDialog,
-    e(SH,{title:`手动保留（${rows.length} 个文件）`,sub:'你手动标记保留的文件，参与重复检测但不会被删除'}),
+    e(SH,{icon:'shield-check',title:`手动保留（${rows.length} 个文件）`,sub:'你手动标记保留的文件，参与重复检测但不会被删除'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
       ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
@@ -694,7 +695,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       toastConfig&&colRect&&e(ExecuteToast,{key:toast.key+':'+toast.seq,config:toastConfig,pos:colRect,onDone:()=>setToast(null)}),
 
       e(Card,{id:'sec-dirs'},
-        e(SH,{title:'音乐目录',sub:'添加包含音乐文件的文件夹到音乐库'}),
+        e(SH,{icon:'folders',title:'音乐目录',sub:'添加包含音乐文件的文件夹到音乐库'}),
         e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir,onEnumOnly}),
         e('button',{onClick:()=>setShowExclude(v=>!v),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4,padding:0,marginTop:10}},
           e('i',{className:`ti ti-chevron-${showExclude?'up':'down'}`,style:{fontSize:12}}),'高级：排除规则 / 增量扫描'
@@ -719,7 +720,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       // 与并发上限一致（更高只加内存无收益）。
       e(Card,{id:'sec-scan-perf'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{title:'扫描性能'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'radar',title:'扫描性能'})),
           e(ResetBar,{cardId:'sec-scan-perf'})
         ),
         e('div',null,
@@ -730,7 +731,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-basic'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'tag',title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
           e(ResetBar,{cardId:'sec-basic'})
         ),
         e('div',null,
@@ -743,7 +744,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       // 可执行文件，配置后在频谱声纹之外独立再比对一遍；同一份声纹数据也被刮削匹配的 AcoustID 使用。
       e(Card,{id:'sec-fp'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'wave-sine',title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'})),
           e(ResetBar,{cardId:'sec-fp'})
         ),
         e('div',null,
@@ -776,7 +777,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       ),
 
       e(Card,{id:'sec-scrape'},
-        e(SH,{title:'刮削匹配',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
+        e(SH,{icon:'cloud-download',title:'刮削匹配',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
 
         e('div',{style:{display:'flex',alignItems:'center',padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
@@ -832,7 +833,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-smartkeep'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'priority-podium',title:'智能保留',sub:'上下移动调整 — 顶部优先级最高',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。修改后需点击顶部琥珀卡「立即重新计算」（或到扫描页执行「智能保留」），才会重新应用到现有重复组。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'star',title:'智能保留',sub:'上下移动调整 — 顶部优先级最高',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。修改后需点击顶部琥珀卡「立即重新计算」（或到扫描页执行「智能保留」），才会重新应用到现有重复组。'})),
           e(ResetBar,{cardId:'sec-smartkeep'})
         ),
         e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'2px 0 4px'}},Icon('audio-levels',{fontSize:13}),'音质优先级'),

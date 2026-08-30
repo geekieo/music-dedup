@@ -281,24 +281,10 @@ function DimensionTable({tracks}){
   const[showInfo,setShowInfo]=useState(false);
   if(!tracks||tracks.length<2)return null;
   const mxSize=Math.max(...tracks.map(t=>t.size||1));
-  // Estimate rendered pixel width at fontSize 10.5: CJK ~10.5px, Latin/digit ~6px
-  const textPx=s=>{let w=0;for(const c of s){w+=/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3000-\u303f\uff00-\uffef]/.test(c)?10.5:6}return Math.ceil(w)};
-  // Header width = icon(~11px) + gap(~2px) + label
-  const hdrPx=label=>13+textPx(label);
-  // Size column inner: bar(min 100px) + internal gap(6) + widest bytes text
-  const sizeInner=Math.max(80+6+Math.max(...tracks.map(t=>textPx(fmtBytes(t.size)))),hdrPx('大小'))+4;
-  // Dimension columns inner: max(header, widest cell) + buffer
-  const dimInner={};
-  DIMENSION_COLUMNS.forEach(c=>{
-    const dataPx=Math.max(...tracks.map(t=>textPx(c.cell(t,tracks).text)));
-    dimInner[c.key]=Math.max(hdrPx(c.label),dataPx)+4;
-  });
-  // Convert inner widths → percentages for table-layout:fixed
-  const totalInner=sizeInner+Object.values(dimInner).reduce((a,b)=>a+b,0);
-  const pct=v=>(v/totalInner*100).toFixed(1)+'%';
-  const GAP=10; // right padding = visual gap between columns (no borders)
-  const GAP_FIRST=18; // extra gap after size column — bar fills cell, needs clearer separation
-  return e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'10px 12px',marginBottom:12}},
+  // 列宽由浏览器按内容自动计算：容器够宽则整表恰好贴合、无横向滚动条；超宽时才滚动。
+  const GAP=6; // right padding = visual gap between columns (no borders)
+  const GAP_FIRST=10; // extra gap after size column — bar fills cell, needs clearer separation
+  return e('div',{style:{background:'var(--bg-subtle)',borderRadius:'var(--r-md)',padding:'8px 10px',marginBottom:12}},
     e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}},
       e('div',{style:{fontSize:11,fontWeight:500,color:'var(--tx-faint)',display:'flex',alignItems:'center',gap:4}},
         Icon('table-compare',{fontSize:12}),'维度对比'
@@ -309,15 +295,15 @@ function DimensionTable({tracks}){
       }, Icon('info-circle',{fontSize:12}), '维度说明')
     ),
     e('div',{style:{overflowX:'auto'}},
-      e('table',{style:{borderCollapse:'collapse',tableLayout:'fixed',width:'100%',fontSize:10.5}},
+      e('table',{style:{borderCollapse:'collapse',tableLayout:'auto',width:'100%',fontSize:10.5}},
         e('thead',null,e('tr',null,
-          e('th',{style:{textAlign:'left',padding:'2px '+GAP_FIRST+'px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap',width:pct(sizeInner)}},Icon('ruler',{fontSize:11}),' 大小'),
-          ...DIMENSION_COLUMNS.map(c=>e('th',{key:c.key,style:{textAlign:'left',padding:'2px '+GAP+'px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap',width:pct(dimInner[c.key])}},Icon(c.icon,{fontSize:11}),' ',c.label))
+          e('th',{style:{textAlign:'left',padding:'2px '+GAP_FIRST+'px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},Icon('ruler',{fontSize:11}),' 大小'),
+          ...DIMENSION_COLUMNS.map(c=>e('th',{key:c.key,style:{textAlign:'left',padding:'2px '+GAP+'px 4px 0',color:'var(--tx-faint)',fontWeight:500,whiteSpace:'nowrap'}},Icon(c.icon,{fontSize:11}),' ',c.label))
         )),
         e('tbody',null,tracks.map(t=>e('tr',{key:t.id},
           e('td',{style:{padding:'3px '+GAP_FIRST+'px 3px 0',whiteSpace:'nowrap'}},
-            e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-              e('div',{style:{flex:1,height:6,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden',minWidth:50}},
+            e('div',{style:{display:'flex',alignItems:'center',gap:4}},
+              e('div',{style:{flex:1,height:6,background:'var(--bg-muted)',borderRadius:99,overflow:'hidden',minWidth:32}},
                 e('div',{style:{width:(t.size/mxSize*100).toFixed(1)+'%',height:'100%',background:t._retained?'var(--green)':'var(--red)',opacity:t._retained?.85:.3,borderRadius:99}})
               ),
               e('span',{style:{fontSize:10,fontFamily:'var(--font-mono)',color:t._retained?'var(--green)':'var(--tx-faint)',fontWeight:t._retained?600:400}},fmtBytes(t.size))
@@ -780,7 +766,7 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
       danger:true,
     }),
 
-    e('div',{style:{display:'grid',gridTemplateColumns:'240px 1fr',gap:12,flex:1,minHeight:0}},
+    e('div',{style:{display:'grid',gridTemplateColumns:'clamp(170px, 20%, 240px) minmax(0,1fr)',gap:12,flex:1,minHeight:0}},
 
       e('div',{style:{overflowY:'auto',height:'100%',paddingRight:2}},
         listLoading?e('div',{style:{textAlign:'center',padding:40,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):

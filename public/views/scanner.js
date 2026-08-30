@@ -1,20 +1,22 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   SCANNER VIEW — F5: 5 lanes (音乐库更新/基础匹配/声纹匹配/刮削匹配/智能保留),
-   each bundles its own prerequisites (enum/meta) and always finishes with a
-   global match — no more standalone "文件枚举" / "相似度匹配" buttons.
-   "全量重新执行" is collapsed behind an advanced toggle + confirm dialog.
+   SCANNER VIEW — 三阶段流程卡：① 音乐库更新 → ② 重复匹配（基础/声纹/刮削
+   三法平行，可独立执行）→ ③ 智能保留。每个单元自带 执行 + 下拉（全量重新
+   执行 / 刮削未命中重新执行）；整流程走标题栏「一键执行」。全量重新执行
+   折叠在单元下拉 + 确认框里。
    `scan` (status/logs/...) is owned by App so it survives tab
    switches — see useScanStream().
-   ══════════════════════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
-  library:{label:'音乐库更新',sub:'',  desc:'扫描音乐目录，发现音乐文件并读取标题、艺术家、专辑等信息，更新音乐库。',icon:'folders',      steps:['enum','meta']},
-  basic:  {label:'基础匹配',  sub:'',  desc:'按标题、艺术家和时长比对，找出重复候选，不依赖声纹。',icon:'tag',          steps:['basicMatch']},
+  library:{label:'音乐库更新',sub:'扫描·读取标签',desc:'扫描音乐目录，发现音乐文件并读取标题、艺术家、专辑等信息，更新音乐库。',icon:'folders',steps:['enum','meta']},
+  basic:{label:'基础匹配',sub:'按标签比对',desc:'按标题、艺术家和时长比对，找出重复候选，不依赖声纹。',icon:'tag',steps:['basicMatch']},
   // fp lane — 技术细节：频谱声纹相似度比对；不同编码/母带间的相位差异会让相似度偏低，
   // 因此声纹匹配不单独作为判定唯一依据（阈值 + 基础匹配兜底）。
-  fp:     {label:'声纹匹配',  sub:'',  desc:'对比音频声纹找出重复。声纹匹配不作为判定重复的唯一依据。',icon:'wave-sine',     steps:['fp','fpMatch']},
-  scrape: {label:'刮削匹配',  sub:'',  desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
-  smartKeep:{label:'智能保留',sub:'',desc:'按当前应用的保留优先级，计算所有未处理重复组的推荐保留。',icon:'star',steps:['smartKeep']},
+  fp:{label:'声纹匹配',sub:'按指纹比对',desc:'对比音频声纹找出重复。声纹匹配不作为判定重复的唯一依据。',icon:'wave-sine',steps:['fp','fpMatch']},
+  scrape:{label:'刮削匹配',sub:'按刮削数据比对',desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
+  smartKeep:{label:'智能保留',sub:'计算保留结果',desc:'按当前应用的保留优先级，计算所有未处理重复组的推荐保留。',icon:'star',steps:['smartKeep']},
 };
+// phase → 所属阶段单元：全量执行时点亮当前方法卡
+const PHASE_LANE={starting:'library',enum:'library',meta:'library',basicMatch:'basic',fp:'fp',fpMatch:'fp',scrape:'scrape',scrapeMatch:'scrape',smartKeep:'smartKeep'};
 function ScannerView({scan,hasPlayer}){
   const{status,logs,setLogs,confirm,setConfirm,startStep}=scan;
   const[runningLane,setRunningLane]=useState(null);
@@ -59,6 +61,42 @@ function ScannerView({scan,hasPlayer}){
   // 顶栏 54 + main 上下内边距 40：扫描页根高度钉在 main 可视区（100vh - 顶栏 - 播放器）。
   const CHROME_H=54+40;
 
+  const activeLane=status.running?(runningLane==='all'?(PHASE_LANE[status.phase]||null):runningLane):null;
+  const advDropdown=key=>{
+    const items=[
+      {label:'全量重新执行',run:()=>key==='all'?runAll(true):runLane(key,true)},
+      ...(key==='scrape'?[{label:'未命中重新执行',run:()=>{setRunningLane(key);startStep(LANE_META[key].steps,false,LANE_META[key].label,{retryMissed:true});}}]:[])
+    ];
+    return e('div',{style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
+      items.map(it=>e('button',{key:it.label,onClick:()=>{it.run();setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.65:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),it.label))
+    );
+  };
+  const renderUnit=key=>{
+    const lm=LANE_META[key],isActive=activeLane===key,open=advanced[key];
+    return e('div',{style:{flex:1,minWidth:0,display:'flex',flexDirection:'column'}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:8,minWidth:0}},
+        e('div',{style:{width:32,height:32,borderRadius:8,background:isActive?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${isActive?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
+          isActive?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon(lm.icon,{fontSize:14,color:'var(--tx-faint)'})
+        ),
+        e('div',{style:{minWidth:0,flex:1}},
+          e('div',{style:{display:'flex',alignItems:'center',gap:3,minWidth:0}},
+            e('span',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',minWidth:0,flex:1}},lm.label),
+            e(Hint,{text:lm.desc})
+          ),
+          e('div',{style:{fontSize:10,color:'var(--tx-faint)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginTop:1}},lm.sub)
+        )
+      ),
+      e('div',{style:{position:'relative',zIndex:open?100:'auto',marginTop:'auto',paddingTop:8,display:'flex',gap:5,alignItems:'center'}},
+        e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'执行'),
+        e('button',{onClick:()=>setAdvanced(p=>({...p,[key]:!open})),style:{height:30,padding:'0 9px',background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',cursor:'pointer',color:open?'var(--amber)':'var(--tx-faint)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},e('i',{className:`ti ti-chevron-${open?'up':'down'}`,style:{fontSize:11}})),
+        open&&advDropdown(key)
+      )
+    );
+  };
+  const unitCard=key=>e('div',{style:{flex:'1 1 0',minWidth:100,background:activeLane===key?'var(--amber-bg)':'var(--bg-base)',border:`0.5px solid ${activeLane===key?'var(--amber-bd)':'var(--bd-default)'}`,borderRadius:'var(--r-md)',padding:'10px 12px'}},renderUnit(key));
+  // 三阶段统一包框卡片：bg-subtle 阶段框 + 内部统一单元卡；一三阶段放一个单元，二阶段放三个。
+  const stageFrame=(keys,widthStyle)=>e('div',{style:{...widthStyle,border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',background:'var(--bg-subtle)',padding:8,display:'flex',gap:8}},keys.map(unitCard));
+
   return e('div',{className:'fade',style:{display:'flex',flexDirection:'column',height:`calc(100vh - ${CHROME_H+PLAYER_H}px)`,minHeight:0}},
     confirm&&e(ConfirmModal,{
       title:'确认全量重新执行',
@@ -68,37 +106,28 @@ function ScannerView({scan,hasPlayer}){
       danger:true,
     }),
 
-    // 5 lanes — "执行" + "高级" side by side; dropdown on "高级".
-    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:12}},
-      Object.entries(LANE_META).map(([key,lm])=>{
-        const isActive=status.running&&(runningLane===key||runningLane==='all');
-        return e(Card,{key,style:{border:`0.5px solid ${isActive?'var(--amber)':'var(--bd-default)'}`}},
-          e('div',{style:{display:'flex',alignItems:'center',gap:9,marginBottom:10}},
-            e('div',{style:{width:32,height:32,borderRadius:8,background:isActive?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${isActive?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
-              isActive?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon(lm.icon,{fontSize:14,color:'var(--tx-faint)'})
-            ),
-            e('div',{style:{minWidth:0}},
-              e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center'}},lm.label,e(Hint,{text:lm.desc})),
-              lm.sub&&e('div',{style:{fontSize:10,color:'var(--tx-faint)'}},lm.sub)
-            )
+    // 三阶段流程卡：① → ②（三法平行）→ ③；每个单元独立执行。三个阶段统一
+    // 包框卡片（bg-subtle 阶段框 + 内部单元卡），一三阶段放一个单元、二阶段放三个；
+    // 单元图标带 32×32 包框，运行时换 loader 旋转。
+    e(Card,{style:{marginBottom:12}},
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}},
+        e('div',{style:{display:'flex',alignItems:'center',gap:9}},
+          e('div',{style:{width:32,height:32,borderRadius:8,background:status.running?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${status.running?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
+            status.running?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
           ),
-          e('div',{style:{position:'relative',marginTop:2,zIndex:advanced[key]?100:'auto'}},
-            e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
-              e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'执行'),
-              e('button',{
-                onClick:()=>setAdvanced(p=>({...p,[key]:!p[key]})),
-                style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced[key]?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},
-                e('i',{className:`ti ti-chevron-${advanced[key]?'up':'down'}`,style:{fontSize:11}}),'高级'
-              )
-            ),
-            advanced[key]&&e('div',{
-              style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
-              e('button',{onClick:()=>{runLane(key,true);setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.65:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行'),
-              key==='scrape'&&e('button',{onClick:()=>{setRunningLane(key);startStep(lm.steps,false,lm.label,{retryMissed:true});setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.65:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'未命中重新执行')
-            )
-          )
-        );
-      })
+          e('div',{style:{fontSize:14,fontWeight:500,color:'var(--tx-primary)'}},'扫描流程')
+        ),
+        e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto',display:'flex',gap:4}},
+          e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{padding:'6px 12px'}},'一键执行'),
+          e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{height:30,padding:'0 9px',background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}})),
+          advanced.all&&advDropdown('all')
+        )
+      ),
+      e('div',{style:{display:'flex',alignItems:'stretch',gap:12}},
+        stageFrame(['library'],{flex:'0 1 168px',minWidth:150}),
+        stageFrame(['basic','fp','scrape'],{flex:'1 1 auto',minWidth:0}),
+        stageFrame(['smartKeep'],{flex:'0 1 168px',minWidth:150})
+      )
     ),
 
     // Transparent backdrop — closes any open advanced dropdown when user
@@ -108,34 +137,6 @@ function ScannerView({scan,hasPlayer}){
       onWheel:()=>setAdvanced({}),
       style:{position:'fixed',inset:0,zIndex:99}
     }),
-
-    // Full pipeline control — label left, button group right.  Width
-    // calc(20% - 37.5px) exactly equals a single lane card's content
-    // width at any viewport, so the "执行" button matches the 5 above.
-    e(Card,{style:{marginBottom:12}},
-      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
-        e('div',{style:{flex:1,minWidth:0}},
-          e('div',{style:{fontSize:13,fontWeight:600,display:'flex',alignItems:'center'}},
-            e('div',{style:{width:32,height:32,borderRadius:8,background:(status.running&&runningLane==='all')?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${(status.running&&runningLane==='all')?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginRight:9}},
-              (status.running&&runningLane==='all')?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
-            ),
-            '全部扫描操作',e(Hint,{text:'按顺序执行全部扫描步骤，完成从发现文件到判定重复的完整流程。'})),
-        ),
-        e('div',{style:{width:'calc(20% - 37.5px)',flexShrink:0}},
-          e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto'}},
-            e('div',{style:{display:'flex',gap:5,alignItems:'center'}},
-              e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'执行'),
-              e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',padding:'0 8px',height:32,cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',fontSize:10,display:'flex',alignItems:'center',gap:3,flexShrink:0,whiteSpace:'nowrap'}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}}),'高级'
-              )
-            ),
-            advanced.all&&e('div',{
-              style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
-              e('button',{onClick:()=>{runAll(true);setAdvanced(p=>({...p,all:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.65:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),'全量重新执行')
-            )
-          )
-        )
-      ),
-    ),
 
     // 常驻进度卡（Steam「管理下载」式）—— 三态：
     //   idle：默认态，按钮置灰（无可暂停/停止对象）、进度条空、短默认文本「就绪」；
@@ -192,7 +193,7 @@ function ScannerView({scan,hasPlayer}){
         e('div',{style:{display:'flex',alignItems:'center',gap:6}},Icon('terminal-2',{fontSize:13,color:'var(--tx-faint)'}),e('span',{style:{fontSize:11,fontWeight:500,color:'var(--tx-muted)'}},'运行日志')),
         e('button',{onClick:()=>setLogs([]),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4}},Icon('trash',{fontSize:12}),'清空')
       ),
-      e('div',{ref:logRef,style:{flex:1,minHeight:0,overflowY:'auto',padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85}},
+      e('div',{ref:logRef,style:{flex:1,minHeight:0,overflowY:'auto',padding:'10px 14px',fontFamily:'var(--font-mono)',fontSize:11.5,lineHeight:1.85,wordBreak:'break-all'}},
         logs.length===0&&e('span',{style:{color:'var(--tx-faint)'}},'等待开始...'),
         logs.map((l,i)=>e('div',{key:i,style:{color:l.ty==='sep'?'var(--amber)':LC[l.ty]||'var(--tx-secondary)',fontWeight:l.ty==='sep'?600:400}},l.ty==='sep'?l.msg:((m=>{const ts=m[1],txt=m[2];return e('span',null,e('span',{style:{color:'var(--bd-strong)',marginRight:8,userSelect:'none'}},'›'),ts&&e('span',{style:{color:'var(--tx-faint)',marginRight:6,userSelect:'none',fontWeight:400}},ts),e('span',null,txt))})(l.msg.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)/)||['',null,l.msg])))),
         status.running&&e('span',{className:'blink',style:{color:'var(--amber)'}},'█')
