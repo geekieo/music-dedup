@@ -22,6 +22,20 @@ function ScannerView({scan,hasPlayer}){
   const[runningLane,setRunningLane]=useState(null);
   const[advanced,setAdvanced]=useState({});
   const logRef=useRef(null);
+  // 「一键执行」按钮组宽度 = 智能保留卡按钮行（= 卡内容宽）实测值：flex 1:3:1 并非
+  // 五卡严格等宽（首尾框受内容影响略宽），calc 假设等宽会对不齐；ResizeObserver 跟随
+  // 真实宽度，任意窗口/chrome 都自动对齐。卡按钮行无横向内边距，border-box 即内容宽。
+  const smartKeepRef=useRef(null);
+  const[groupW,setGroupW]=useState(null);
+  useLayoutEffect(()=>{
+    const el=smartKeepRef.current;
+    if(!el)return;
+    const measure=()=>setGroupW(el.getBoundingClientRect().width);
+    measure();
+    const ro=new ResizeObserver(measure);
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[]);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[logs]);
   useEffect(()=>{if(!status.running)setRunningLane(null);},[status.running]);
@@ -86,7 +100,7 @@ function ScannerView({scan,hasPlayer}){
           e('div',{style:{fontSize:10,color:'var(--tx-faint)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginTop:1}},lm.sub)
         )
       ),
-      e('div',{style:{position:'relative',zIndex:open?100:'auto',marginTop:'auto',paddingTop:8,display:'flex',gap:5,alignItems:'center'}},
+      e('div',{...(key==='smartKeep'?{ref:smartKeepRef}:{}),style:{position:'relative',zIndex:open?100:'auto',marginTop:'auto',paddingTop:8,display:'flex',gap:5,alignItems:'center'}},
         e(Btn,{onClick:()=>runLane(key,false),disabled:status.running,icon:'player-play',style:{flex:1,justifyContent:'center'}},'执行'),
         e('button',{onClick:()=>setAdvanced(p=>({...p,[key]:!open})),style:{height:30,padding:'0 9px',background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',cursor:'pointer',color:open?'var(--amber)':'var(--tx-faint)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},e('i',{className:`ti ti-chevron-${open?'up':'down'}`,style:{fontSize:11}})),
         open&&advDropdown(key)
@@ -110,23 +124,28 @@ function ScannerView({scan,hasPlayer}){
     // 包框卡片（bg-subtle 阶段框 + 内部单元卡），一三阶段放一个单元、二阶段放三个；
     // 单元图标带 32×32 包框，运行时换 loader 旋转。
     e(Card,{style:{marginBottom:12}},
+      // 标题行左右内缩 21px（= 阶段框边框 0.5 + 内边距 8 + 单元卡边框 0.5 + 内边距 12），
+      // 用 margin 内缩（不改行盒宽）；雷达图标盒对齐单元图标盒。
+      // 「一键执行」按钮组右对齐最右边的「执行」按钮组；「一键执行」与「执行」按钮同宽。
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}},
-        e('div',{style:{display:'flex',alignItems:'center',gap:9}},
+        e('div',{style:{display:'flex',alignItems:'center',gap:9,marginLeft:21}},
           e('div',{style:{width:32,height:32,borderRadius:8,background:status.running?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${status.running?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
             status.running?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
           ),
           e('div',{style:{fontSize:14,fontWeight:500,color:'var(--tx-primary)'}},'扫描流程')
         ),
-        e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto',display:'flex',gap:4}},
-          e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{padding:'6px 12px'}},'一键执行'),
+        e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto',display:'flex',justifyContent:'flex-end',gap:5,flex:'1 1 0%',minWidth:'max-content',maxWidth:groupW?groupW+'px':'calc((100% - 24px)/5 - 42px)',marginRight:21}},
+          e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'一键执行'),
           e('button',{onClick:()=>setAdvanced(p=>({...p,all:!p.all})),style:{height:30,padding:'0 9px',background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',cursor:'pointer',color:advanced.all?'var(--amber)':'var(--tx-faint)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},e('i',{className:`ti ti-chevron-${advanced.all?'up':'down'}`,style:{fontSize:11}})),
           advanced.all&&advDropdown('all')
         )
       ),
       e('div',{style:{display:'flex',alignItems:'stretch',gap:12}},
-        stageFrame(['library'],{flex:'0 1 168px',minWidth:150}),
-        stageFrame(['basic','fp','scrape'],{flex:'1 1 auto',minWidth:0}),
-        stageFrame(['smartKeep'],{flex:'0 1 168px',minWidth:150})
+        // 阶段框按 1:3:1（flex basis 0）平分剩余空间，随窗口伸缩；minWidth:0 使基准
+        // 不受内容最小宽约束。二阶段内卡间距 8×2 使三张卡比一/三阶段卡宽约 6px，接受。
+        stageFrame(['library'],{flex:'1 1 0',minWidth:0}),
+        stageFrame(['basic','fp','scrape'],{flex:'3 1 0',minWidth:0}),
+        stageFrame(['smartKeep'],{flex:'1 1 0',minWidth:0})
       )
     ),
 
