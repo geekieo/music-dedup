@@ -222,7 +222,7 @@ async function runSmoke(win) {
       if (!t0.includes('执行')) return { m: 'UI', u: 'progress idle render', ok: false, err: 'idle: ' + t0.slice(0, 140) };
       const t1 = await render({ phase: 'fpMatch', running: true, paused: false, pct: 35, subPct: 60, message: '[08:00:00] 频谱多段LSH分组: 300/500 组', level: 'ok', type: 'progress' });
       if (!t1.includes('60%') || t1.includes('[08:00:00]') || !t1.includes('频谱多段LSH分组')) return { m: 'UI', u: 'progress running', ok: false, err: 'running: ' + t1.slice(0, 140) };
-      const t2 = await render({ phase: 'meta', running: true, paused: false, pct: 44, subPct: 44, message: '[08:00:01] 文件属性提取: 1,200 / 2,758', level: 'ok', type: 'progress' });
+      const t2 = await render({ phase: 'meta', running: true, paused: false, pct: 44, subPct: 44, message: '[08:00:01] 读取标签: 1,200 / 2,758', level: 'ok', type: 'progress' });
       if ((t2.match(/44%/g) || []).length > 1) return { m: 'UI', u: 'progress meta no-dup-sub', ok: false, err: 'meta dup %: ' + t2.slice(0, 140) };
       const t3 = await render({ phase: 'done', running: false, paused: false, pct: 100, message: '[08:00:02] 刮削匹配完成！发现 462 个重复组，可释放 12.3GB', level: 'done', type: 'done' });
       // 终态：绿字完成文本 + 「运行完成」标签、按钮置灰常驻（卡片尺寸各状态一致），无时间戳

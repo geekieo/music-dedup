@@ -18,8 +18,7 @@ const LANE_META={
 // phase → 所属阶段单元：全量执行时点亮当前方法卡
 const PHASE_LANE={starting:'library',enum:'library',meta:'library',basicMatch:'basic',fp:'fp',fpMatch:'fp',scrape:'scrape',scrapeMatch:'scrape',smartKeep:'smartKeep'};
 function ScannerView({scan,hasPlayer}){
-  const{status,logs,setLogs,confirm,setConfirm,startStep}=scan;
-  const[runningLane,setRunningLane]=useState(null);
+  const{status,logs,setLogs,confirm,setConfirm,startStep,lane}=scan;
   const[advanced,setAdvanced]=useState({});
   const logRef=useRef(null);
   // 「一键执行」按钮组宽度 = 智能保留卡按钮行（= 卡内容宽）实测值：flex 1:3:1 并非
@@ -38,18 +37,15 @@ function ScannerView({scan,hasPlayer}){
   },[]);
 
   useEffect(()=>{if(logRef.current)logRef.current.scrollTop=logRef.current.scrollHeight;},[logs]);
-  useEffect(()=>{if(!status.running)setRunningLane(null);},[status.running]);
 
   function runLane(key,force=false){
     const lm=LANE_META[key];
-    if(force){setConfirm({steps:lm.steps,force:true,label:lm.label,lane:key});return;}
-    setRunningLane(key);
+    if(force){setConfirm({steps:lm.steps,force:true,label:lm.label});return;}
     startStep(lm.steps,false,lm.label);
   }
   function runAll(force=false){
     const steps=['enum','meta','basicMatch','fp','fpMatch','scrape','scrapeMatch','smartKeep'];
-    if(force){setConfirm({steps,force:true,label:'完整扫描',lane:'all'});return;}
-    setRunningLane('all');
+    if(force){setConfirm({steps,force:true,label:'完整扫描'});return;}
     startStep(steps,false,'完整扫描');
   }
 
@@ -75,11 +71,14 @@ function ScannerView({scan,hasPlayer}){
   // 顶栏 54 + main 上下内边距 40：扫描页根高度钉在 main 可视区（100vh - 顶栏 - 播放器）。
   const CHROME_H=54+40;
 
-  const activeLane=status.running?(runningLane==='all'?(PHASE_LANE[status.phase]||null):runningLane):null;
+  const activeLane=status.running?(lane==='all'?(PHASE_LANE[status.phase]||null):lane):null;
+  // 标题栏图标/标题随运行单元切换：单单元运行（音乐库更新等）→ 该单元图标转圈 + 名称；
+  // 一键执行全流程 / 空闲 → 雷达 + 「扫描流程」。
+  const hdrLane=status.running&&lane&&lane!=='all'?lane:null;
   const advDropdown=key=>{
     const items=[
       {label:'全量重新执行',run:()=>key==='all'?runAll(true):runLane(key,true)},
-      ...(key==='scrape'?[{label:'未命中重新执行',run:()=>{setRunningLane(key);startStep(LANE_META[key].steps,false,LANE_META[key].label,{retryMissed:true});}}]:[])
+      ...(key==='scrape'?[{label:'未命中重新执行',run:()=>startStep(LANE_META[key].steps,false,LANE_META[key].label,{retryMissed:true})}]:[])
     ];
     return e('div',{style:{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',boxShadow:'var(--sh-md)',padding:6,display:'flex',flexDirection:'column',gap:4}},
       items.map(it=>e('button',{key:it.label,onClick:()=>{it.run();setAdvanced(p=>({...p,[key]:false}));},disabled:status.running,style:{width:'100%',padding:'5px 6px',fontSize:10,fontWeight:500,borderRadius:'var(--r-sm)',background:'var(--bg-muted)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',cursor:status.running?'not-allowed':'pointer',opacity:status.running?.65:1,display:'flex',alignItems:'center',gap:4,justifyContent:'center'}},Icon('refresh',{fontSize:11}),it.label))
@@ -115,7 +114,7 @@ function ScannerView({scan,hasPlayer}){
     confirm&&e(ConfirmModal,{
       title:'确认全量重新执行',
       message:e('span',null,'将对「',e('b',null,confirm.label),'」执行全量重提取，忽略智能跳过逻辑（按修改时间/是否存在判断），所有相关文件会被重新处理，耗时会明显更长。'),
-      onConfirm:()=>{setRunningLane(confirm.lane||'all');startStep(confirm.steps,confirm.force,confirm.label);},
+      onConfirm:()=>startStep(confirm.steps,confirm.force,confirm.label),
       onClose:()=>setConfirm(null),
       danger:true,
     }),
@@ -130,9 +129,11 @@ function ScannerView({scan,hasPlayer}){
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}},
         e('div',{style:{display:'flex',alignItems:'center',gap:9,marginLeft:21}},
           e('div',{style:{width:32,height:32,borderRadius:8,background:status.running?'var(--amber-bg)':'var(--bg-muted)',border:`1.5px solid ${status.running?'var(--amber)':'var(--bd-default)'}`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
-            status.running?e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}):Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
+            status.running
+              ?(hdrLane?Icon(LANE_META[hdrLane].icon,{fontSize:14,color:'var(--amber)'},'spin'):e('i',{className:'ti ti-loader spin',style:{fontSize:14,color:'var(--amber)'}}))
+              :Icon('radar',{fontSize:14,color:'var(--tx-faint)'})
           ),
-          e('div',{style:{fontSize:14,fontWeight:500,color:'var(--tx-primary)'}},'扫描流程')
+          e('div',{style:{fontSize:14,fontWeight:500,color:'var(--tx-primary)'}},hdrLane?LANE_META[hdrLane].label:'扫描流程')
         ),
         e('div',{style:{position:'relative',zIndex:advanced.all?100:'auto',display:'flex',justifyContent:'flex-end',gap:5,flex:'1 1 0%',minWidth:'max-content',maxWidth:groupW?groupW+'px':'calc((100% - 24px)/5 - 42px)',marginRight:21}},
           e(Btn,{icon:'player-play',onClick:()=>runAll(false),disabled:status.running,style:{flex:1,justifyContent:'center'}},'一键执行'),
@@ -166,7 +167,7 @@ function ScannerView({scan,hasPlayer}){
     // 必须用 isTerminal（done/error/aborted 且 !running）区分"单步完成"与"整轮扫描结束"。
     (()=>{
       const TERM_LABEL={done:'运行完成',error:'错误',aborted:'已中止'};
-      const RUN_LABEL={idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'文件属性提取',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',smartKeep:'智能保留'};
+      const RUN_LABEL={idle:'就绪',starting:'准备中',enum:'文件枚举',meta:'读取标签',basicMatch:'基础匹配',fp:'声纹提取',fpMatch:'声纹匹配',scrape:'刮削',scrapeMatch:'刮削匹配',smartKeep:'智能保留'};
       const phaseLabel=isTerminal
         ?(TERM_LABEL[status.phase]||'完成')
         :(status.phase==='done'?'匹配完成':(RUN_LABEL[status.phase]||status.phase));

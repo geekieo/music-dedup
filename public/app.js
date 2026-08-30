@@ -313,12 +313,22 @@ function PlayerBar({player,onLocate}){
    the user navigated away, so a re-match started there and watched from
    another tab would finish silently with a stale badge.
    ══════════════════════════════════════════════════════════════════════ */
+// 步骤 → 所属执行单元（与 ScannerView 的 LANE_META.steps 一致）：startStep 据 steps
+// 派生活跃单元，App 级自动启动（音乐库更新/设置变更重匹配等）也能点亮正确卡片。
+const STEP_LANE={enum:'library',meta:'library',basicMatch:'basic',fp:'fp',fpMatch:'fp',scrape:'scrape',scrapeMatch:'scrape',smartKeep:'smartKeep'};
+function laneForSteps(steps){
+  const lanes=[...new Set((steps||[]).map(s=>STEP_LANE[s]).filter(Boolean))];
+  return lanes.length===1?lanes[0]:'all';
+}
 function useScanStream(onDone){
   const[status,setStatus]=useState({phase:'idle',pct:0,running:false,message:''});
   const[logs,setLogs]=useState([]);
   const[confirm,setConfirm]=useState(null);
+  const[lane,setLane]=useState(null); // 当前活跃执行单元（library/basic/fp/scrape/smartKeep/all）
   const onDoneRef=useRef(onDone);
   onDoneRef.current=onDone;
+  // 扫描结束（running→false）清空活跃单元，避免高亮残留到下一轮
+  useEffect(()=>{ if(!status.running)setLane(null); },[status.running]);
   // 扫描结果分阶段增量合并：worker 每完成一个阶段，broker 合并临时库→主库并广播
   // type:'merged'，此处据此刷新——"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的
   // 阶段数据（enum 后文件列表、fp 后播放按钮、匹配后重复组）。终态 type:'done'（settle
@@ -357,11 +367,12 @@ function useScanStream(onDone){
   }
   function startStep(steps,force=false,label,extra={}){
     addSeparator(`${label||'扫描'} · ${force?'全量重新执行':extra.retryMissed?'未命中重新执行':'智能模式'}`);
-    api.post('/api/scan/start',{steps,force,...extra}).then(r=>{if(!r.ok)addSeparator(`⚠ 启动失败：${r.error||''}`);});
+    setLane(laneForSteps(steps));
+    api.post('/api/scan/start',{steps,force,...extra}).then(r=>{ if(!r.ok){addSeparator(`⚠ 启动失败：${r.error||''}`);setLane(null);} });
   }
   function pause(){api.post('/api/scan/pause');}
   function resume(){api.post('/api/scan/resume');}
-  return{status,logs,setLogs,confirm,setConfirm,addSeparator,startStep,pause,resume};
+  return{status,logs,setLogs,confirm,setConfirm,addSeparator,startStep,pause,resume,lane};
 }
 
 /* ══════════════════════════════════════════════════════════════════════
