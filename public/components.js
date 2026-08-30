@@ -146,7 +146,7 @@ const ICONS={
   tag:{els:[['path',{d:'M3 11V5a2 2 0 012-2h6l10 10-8 8z'}],['circle',{cx:8,cy:8,r:1.3,fill:'currentColor'}]]},
   'wave-sine':{els:[['path',{d:'M2 12c2-6 4-6 6 0s4 6 6 0 4-6 6 0'}]]},
   'cloud-download':{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}],['path',{d:'M12 11v8'}],['path',{d:'M9 16l3 3 3-3'}]]},
-  star:{els:[['path',{d:'M12 17.75l-6.172 3.245 1.179-6.873-5-4.867 6.9-1L12 2.002l3.086 6.253 6.9 1-5 4.867 1.179 6.873z'}]]},
+  star:{els:[['path',{d:'M12 17.75l-6.172 3.245 1.179-6.873-5-4.867 6.9-1L12 2.002l3.086 6.253 6.9 1-5 4.867 1.179 6.873z'}],['path',{d:'M9 12l2 2 4-4'}]]},
   download:{els:[['path',{d:'M12 4v12'}],['path',{d:'M7 11l5 5 5-5'}],['path',{d:'M5 20h14'}]]},
   // Volume / speaker icons
   'volume':     {els:[['path',{d:'M11 5L6 9H2v6h4l5 4V5z'}],['path',{d:'M19.07 4.93a10 10 0 010 14.14'}],['path',{d:'M15.54 8.46a5 5 0 010 7.07'}]]},
@@ -280,6 +280,17 @@ function SettingStatus({state='idle',message,onClick,busy}){
     style:{width:28,height:28,borderRadius:'50%',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',
       background:C.bg,border:`0.5px solid ${C.bd}`,cursor:(onClick&&!busy)?'pointer':'default',padding:0}},
     Icon(busy?'loader':C.ic,{fontSize:13,color:C.col},busy?'spin':undefined)
+  );
+}
+// 路径/目录选择框：文本框 + 浏览按钮合并为一体（input-group 式），文本框 flex:1
+// 随容器铺满。音乐目录编辑器与 CP 声纹路径共用同一造型，避免两处样式漂移。
+function PathInput({value,onChange,placeholder,title,onBrowse,browsing,buttonLabel='选择文件夹',buttonTitle,onKeyDown,onBlur,style:ws={},inputStyle:x={}}){
+  return e('div',{style:{display:'flex',borderRadius:'var(--r-md)',overflow:'hidden',...ws}},
+    e('input',{value,onChange,placeholder,title,onKeyDown,onBlur,
+      style:{flex:1,minWidth:0,fontSize:11,padding:'6px 10px',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRight:'none',boxShadow:'var(--sh-xs)',fontFamily:'var(--font-mono)',outline:'none',...x}}),
+    e('button',{onClick:onBrowse,disabled:browsing,title:buttonTitle,
+      style:{padding:'6px 12px',background:'var(--bg-muted)',border:'0.5px solid var(--bd-default)',borderLeft:'none',borderRadius:0,borderTopRightRadius:'var(--r-md)',borderBottomRightRadius:'var(--r-md)',cursor:browsing?'wait':'pointer',fontSize:11,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap',flexShrink:0}},
+      Icon(browsing?'loader':'folder-open',{fontSize:12,color:'var(--tx-muted)'},browsing?'spin':undefined),buttonLabel)
   );
 }
 function Btn({children,onClick,variant='primary',small,disabled,icon,title,style:sx={}}){

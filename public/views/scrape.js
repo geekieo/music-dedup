@@ -230,15 +230,15 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         if(mbR.ok) setMbCandidates(mbR.data||[]);
         if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
       } else {
-        // 首次刮削（无数据）：自动保存 AcoustID + MB 结果，与批量扫描一致
-        const[srapeR, mbR, aidR]=await Promise.all([
-          api.post(`/api/files/${fileId}/scrape-single`),
-          api.get(`/api/files/${fileId}/mb-candidates`),
-          api.get(`/api/files/${fileId}/acoustid-candidates`),
-        ]);
+        // 首次刮削（无数据）：scrape-single 一次请求完成双源刮削并返回候选列表，
+        // 同一首歌只发一个 MB 请求 + 一个 AcoustID 请求（两源并行），不再重复拉候选接口
+        const srapeR = await api.post(`/api/files/${fileId}/scrape-single`);
         setScraping(false);
-        if(mbR.ok) setMbCandidates(mbR.data||[]);
-        if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
+        if(srapeR.ok){
+          const d=srapeR.data;
+          if(d?.mbCandidates) setMbCandidates(d.mbCandidates);
+          if(d?.aidCandidates!==undefined){ setAidCandidates(d.aidCandidates||[]); setAidError(d.aidError||null); }
+        }
         reload(); if(srapeR.ok) onUpdated&&onUpdated();
       }
     } catch (e) {
@@ -750,8 +750,6 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
     }catch{ setErr('未能打开系统文件夹选择器'); }
     finally{ setBrowsing(false); }
   }
-  const inputStyle={flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',fontFamily:'var(--font-mono)',outline:'none',borderRight:'none',borderTopRightRadius:0,borderBottomRightRadius:0};
-  const browseStyle={padding:'6px 12px',background:'var(--bg-muted)',border:'0.5px solid var(--bd-default)',borderLeft:'none',borderRadius:0,borderTopRightRadius:'var(--r-md)',borderBottomRightRadius:'var(--r-md)',cursor:browsing?'wait':'pointer',fontSize:11,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,flexShrink:0};
   return e('div',null,
     dirs.length===0&&e('div',{style:{color:'var(--tx-faint)',fontSize:12,padding:'4px 0 8px',display:'flex',gap:5,alignItems:'center'}},Icon('info-circle',{}),'暂未配置音乐目录'),
     dirs.map((d,i)=>e('div',{key:i,style:{display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)',marginBottom:6}},
@@ -759,14 +757,7 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
       e('span',{title:d,style:{flex:1,fontSize:11,fontFamily:'var(--font-mono)',color:'var(--tx-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},d),
       e('button',{onClick:()=>setRemoveIdx(i),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',padding:'2px 4px',borderRadius:'var(--r-sm)'}},Icon('x',{fontSize:13}))
     )),
-    e('div',{style:{display:'flex',borderRadius:'var(--r-md)',overflow:'hidden',marginBottom:6}},
-      e('input',{value:newDir,onChange:ev=>setNewDir(ev.target.value),
-        onKeyDown:ev=>ev.key==='Enter'&&commit(),
-        onBlur:commit,
-        placeholder:'/Volumes/Music 或 D:\\Music',style:inputStyle}),
-      e('button',{onClick:browse,disabled:browsing,style:browseStyle},
-        Icon(browsing?'loader':'folder-open',{fontSize:12,color:'var(--tx-muted)'},browsing?'spin':undefined),'选择文件夹')
-    ),
+    e(PathInput,{value:newDir,onChange:ev=>setNewDir(ev.target.value),onKeyDown:ev=>ev.key==='Enter'&&commit(),onBlur:commit,placeholder:'/Volumes/Music 或 D:\\Music',onBrowse:browse,browsing,style:{marginBottom:6}}),
     err&&e('div',{style:{fontSize:11,color:'var(--red)',marginBottom:6}},err),
     removeIdx!==null&&e(ConfirmModal,{
       title:'移除音乐目录',

@@ -43,14 +43,18 @@ function attachTiers(f, dual, ignoreScript) {
 }
 
 export const routes = [
-  // 按需单文件刮削（ScrapeDialog 调用）
+  // 按需单文件刮削（ScrapeDialog 调用）——一次请求完成刮削 + 返回双源候选列表，
+  // 前端不再并发拉 mb/acoustid-candidates（避免同一首歌发起重复的 MB/AcoustID 请求）
   { method: 'POST', path: '/api/files/:id/scrape-single', handler: async (p, query) => {
     const s = getAllSettings(db);
     const dual = await scrapeSingleFile(db, +p.id, s.acoustid_key || '', { skipMb: query.skip_mb === '1' });
     if (!dual) return { ok: true, data: null };
     const f = getFileById(db, +p.id);
     const ignoreScript = s.ignore_script_variant !== false;
-    return { ok: true, data: attachTiers(f, dual, ignoreScript) };
+    return { ok: true, data: { ...attachTiers(f, dual, ignoreScript),
+      mbCandidates: dual.mbCandidates || [],
+      aidCandidates: dual.aidCandidates || [],
+      aidError: dual.aidError || null } };
   } },
   // MB 搜索候选（带分数，不落库）
   { method: 'GET', path: '/api/files/:id/mb-candidates', handler: async (p) => {

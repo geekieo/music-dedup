@@ -755,14 +755,17 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
         e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2,display:'flex',alignItems:'center'}},'CP 声纹（可选）',e(Hint,{text:'默认声纹无需配置。CP 声纹是可选第二种，配置后会额外检查一遍，通常能发现默认声纹漏掉的重复，结果会分开标注。同一份数据也会被「刮削匹配」用到。'})),
-          e('div',{style:{display:'flex',gap:6,maxWidth:460}},
-            e('input',{value:s.fpcalc_path||fpcalc?.path||'',
+          e('div',{style:{display:'flex',gap:6}},
+            e(PathInput,{
+              value:s.fpcalc_path||fpcalc?.path||'',
               onChange:ev=>{setS(p=>({...p,fpcalc_path:ev.target.value}));setFpcalcPathDirty(true);},
               placeholder:'留空则自动检测（项目根目录 / PATH）',
               title:'可填 fpcalc 所在目录或完整路径；留空时显示自动检测结果，可直接选择复制',
-              style:{flex:1,fontSize:11,padding:'6px 10px',borderRadius:'var(--r-md)',background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)',outline:'none',fontFamily:'var(--font-mono)',minWidth:0,color:s.fpcalc_path?'var(--tx-primary)':'var(--tx-muted)'}}),
-            e('button',{onClick:browseFpcalc,disabled:browsingFpcalc,title:'浏览选择 fpcalc 所在目录',style:{padding:'6px 10px',background:'var(--bg-muted)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-md)',cursor:browsingFpcalc?'wait':'pointer',fontSize:11,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap',flexShrink:0}},
-              Icon('folders',{fontSize:12}),'浏览'),
+              onBrowse:browseFpcalc,browsing:browsingFpcalc,
+              buttonLabel:'浏览',buttonTitle:'浏览选择 fpcalc 所在目录',
+              style:{flex:1,minWidth:0},
+              inputStyle:{color:s.fpcalc_path?'var(--tx-primary)':'var(--tx-muted)'}
+            }),
             e(SettingStatus,{
               state:!fpcalc?'idle':fpcalc.available?'ok':'warn',
               busy:fpcalcChecking,
