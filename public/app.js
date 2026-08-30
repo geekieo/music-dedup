@@ -309,9 +309,6 @@ function PlayerBar({player,onLocate}){
    GLOBAL SCAN STREAM — mounted once at App level (not inside ScannerView)
    so the SSE connection — and therefore the final "done" event that
    refreshes the 重复组 badge count — survives switching tabs mid-scan.
-   Previously this lived inside ScannerView and was torn down the moment
-   the user navigated away, so a re-match started there and watched from
-   another tab would finish silently with a stale badge.
    ══════════════════════════════════════════════════════════════════════ */
 // 步骤 → 所属执行单元（与 ScannerView 的 LANE_META.steps 一致）：startStep 据 steps
 // 派生活跃单元，App 级自动启动（音乐库更新/设置变更重匹配等）也能点亮正确卡片。
@@ -332,7 +329,7 @@ function useScanStream(onDone){
   // 扫描结果分阶段增量合并：worker 每完成一个阶段，broker 合并临时库→主库并广播
   // type:'merged'，此处据此刷新——"完成一个阶段，更新一个阶段"，扫描期间即可看到已完成的
   // 阶段数据（enum 后文件列表、fp 后播放按钮、匹配后重复组）。终态 type:'done'（settle
-  // 合并之后广播）再做最终刷新兜底。中途不再依赖匹配步骤完成点的旧刷新逻辑。
+  // 合并之后广播）再做最终刷新兜底。
   const prevPhaseRef=useRef(null);
 
   useEffect(()=>{
@@ -376,10 +373,9 @@ function useScanStream(onDone){
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   APP SHELL — F4: tab order is 音乐库 → 重复组 → 扫描 → 设置 (重复组 and
-   扫描 swapped from before); 手动保留 folded into 设置, no longer a top tab.
-   扫描目录 (scan_dirs) is lifted here so LibraryView's empty state and
-   Settings' 扫描目录 section are reading/writing the exact same data.
+   APP SHELL — tabs: 音乐库 → 重复组 → 扫描 → 设置（手动保留在设置内）。
+   扫描目录 (scan_dirs) 提升到 App 层，LibraryView 空状态与设置页的扫描目录
+   读写同一份数据。
    ══════════════════════════════════════════════════════════════════════ */
 function App(){
   const[view,setView]=useState('library');

@@ -231,7 +231,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         if(aidR.ok){ setAidCandidates(aidR.data||[]); setAidError(aidR.error||null); }
       } else {
         // 首次刮削（无数据）：scrape-single 一次请求完成双源刮削并返回候选列表，
-        // 同一首歌只发一个 MB 请求 + 一个 AcoustID 请求（两源并行），不再重复拉候选接口
+        // 同一首歌只发一个 MB 请求 + 一个 AcoustID 请求（两源并行）。
         const srapeR = await api.post(`/api/files/${fileId}/scrape-single`);
         setScraping(false);
         if(srapeR.ok){
@@ -722,19 +722,14 @@ function PropsModal({fileId,onClose}){
   );
 }
 
-// ── Shared scan-directory editor — used both in LibraryView's empty state
-// (so a brand-new user can get going without hunting for Settings) and in
-// Settings → 扫描目录. Both call the SAME onAddDir/onRemoveDir handlers
+// ── Shared scan-directory editor — used in both LibraryView's empty state
+// and Settings → 扫描目录. Both call the SAME onAddDir/onRemoveDir handlers
 // (owned by App), so the directory list is always one shared piece of data,
-// not two copies that can drift — and adding a dir here kicks off a scan
-// immediately, since that's obviously what someone wants right after typing
-// a path in.
-// ScanDirsEditor — item 7: manual path + browse-button on ONE row; blur or
-// Enter on the manual field saves immediately (no separate Add button for the
-// text). Browse button sits inside the right end of the same line. After any
-// dir change the default action is only an enumeration pass (no meta/fp/scrape)
-// so the library stays fast to update; a separate "执行" shortcut lets the
-// user trigger a fuller scan without going to the 扫描 page.
+// not two copies that can drift. Adding a dir here kicks off a scan
+// immediately.
+// 手动路径 + 浏览按钮同一行；手动字段 blur 或 Enter 即保存（无独立 Add 按钮），
+// 浏览按钮在行尾。目录变更后的默认动作只做枚举（不读标签/声纹/刮削），库更新快；
+// 「执行」快捷键触发完整扫描，无需去扫描页。
 function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
   const[newDir,setNewDir]=useState('');
   const[browsing,setBrowsing]=useState(false);
@@ -766,6 +761,6 @@ function ScanDirsEditor({dirs=[],onAddDir,onRemoveDir,onEnumOnly,compact}){
       onClose:()=>setRemoveIdx(null),
       danger:true,
     }),
-    onEnumOnly&&e('div',{style:{display:'none'}}) // button removed — caller decides when to show banner
+    onEnumOnly&&e('div',{style:{display:'none'}}) // 隐藏占位：提示条的显示时机由调用方决定
   );
 }

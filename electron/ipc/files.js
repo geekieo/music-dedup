@@ -1,5 +1,5 @@
 // electron/ipc/files.js — 文件域：详情 / reveal（shell）/ live-tags
-// reveal 用 Electron shell.showItemInFolder 替换 server.js 的 explorer spawn。
+// reveal 用 Electron shell.showItemInFolder。
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);

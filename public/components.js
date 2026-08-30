@@ -61,9 +61,7 @@ const ICONS={
   filter:{els:[['path',{d:'M4 5h16L14 12v6l-4 2v-8z'}]]},
   settings:{els:[['circle',{cx:12,cy:12,r:3}],['path',{d:'M19.4 13a8 8 0 000-2l2-1.6-2-3.4-2.4.6a8 8 0 00-1.7-1l-.4-2.6h-4l-.4 2.6a8 8 0 00-1.7 1l-2.4-.6-2 3.4L4.6 11a8 8 0 000 2l-2 1.6 2 3.4 2.4-.6a8 8 0 001.7 1l.4 2.6h4l.4-2.6a8 8 0 001.7-1l2.4.6 2-3.4z'}]]},
   music:{els:[['path',{d:'M9 18V5l12-2v13'}],['circle',{cx:6,cy:18,r:3}],['circle',{cx:18,cy:16,r:3}]]},
-  // "在音乐库中查看" — the same music-note glyph as 音乐库 (scaled down,
-  // top-left) plus a filled locate-pin badge (bottom-right) so it reads as
-  // "find this in the library" rather than an unrelated bookshelf icon.
+  // "在音乐库中查看" — 音乐库的 music-note 字形（缩小置左上）+ 实心定位针徽标（右下）。
   'music-locate':{els:[
     ['path',{d:'M6.58 12.16V4.1l7.44 -1.24v8.06'}],
     ['circle',{cx:4.72,cy:12.16,r:1.86}],
@@ -93,36 +91,27 @@ const ICONS={
   'shield-check':{els:[['path',{d:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'}],['path',{d:'M9 12l2 2 4-4'}]]},
   // 刮削未确认 — plain cloud silhouette; cloud-check / cloud-download add a status glyph
   cloud:{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}]]},
-  // 刮削确认 — same cloud silhouette as cloud, but with a checkmark instead
-  // of the download arrow, so the status reads as "data fetched & confirmed"
-  // rather than "protected" (that meaning is reserved for shield-check/手动保留名单).
+  // 刮削确认 — cloud 字形加对勾（区别于 download 箭头）；「保护」语义归 shield-check/手动保留名单。
   'cloud-check':{els:[['path',{d:'M7 18a4 4 0 01-1-7.9A5 5 0 0116 7a4.5 4.5 0 011 8.9'}],['path',{d:'M8.5 14.3l2.3 2.3 4.7-4.9'}]]},
-  // 音质优先级 — a 3-band audio equalizer (vertical tracks + slider knobs),
-  // reads as "sound quality levels" rather than a generic gem/rating mark.
+  // 音质优先级 — 三段音频均衡器（竖条 + 滑块旋钮）。
   'audio-levels':{els:[
     ['path',{d:'M6 19V15'}],['path',{d:'M6 12V5'}],['circle',{cx:6,cy:13.5,r:1.4,fill:'currentColor'}],
     ['path',{d:'M12 19V10'}],['path',{d:'M12 7V5'}],['circle',{cx:12,cy:8.5,r:1.4,fill:'currentColor'}],
     ['path',{d:'M18 19V17'}],['path',{d:'M18 14V5'}],['circle',{cx:18,cy:15.5,r:1.4,fill:'currentColor'}]
   ]},
-  // 保留优先级 — a ranking podium with the tallest (1st-place) column
-  // starred, reads as "which file wins and gets kept" rather than an
-  // ambiguous card stack.
+  // 保留优先级 — 领奖台，最高（第一名）柱带星标。
   'priority-podium':{els:[
     ['rect',{x:3,y:13,width:5,height:8,rx:1}],
     ['rect',{x:9.5,y:8,width:5,height:13,rx:1}],
     ['rect',{x:16,y:15,width:5,height:6,rx:1}],
     ['path',{d:'M12 3.8l.7 1.5 1.6.2-1.2 1.2.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.2 1.6-.2z',fill:'currentColor',stroke:'none'}]
   ]},
-  // 维度对比 — a comparison table (header row + column dividers), reads as
-  // "compare across columns" rather than any single dimension's own icon
-  // (avoids colliding with 音质优先级/audio-levels, which is one specific
-  // dimension, not the whole comparison).
+  // 维度对比 — 对比表（表头行 + 列分隔线）；区别于单个维度图标（音质优先级/audio-levels）。
   'table-compare':{els:[
     ['rect',{x:3,y:4.5,width:18,height:15,rx:1.5}],['path',{d:'M3 9.5h18'}],
     ['path',{d:'M9.3 9.5v10'}],['path',{d:'M15 9.5v10'}]
   ]},
-  // 大小 dimension — a ruler (distinct from priority-podium's stacked bars,
-  // so "size" and "保留优先级" don't read as the same glyph).
+  // 大小 dimension — 直尺（与 priority-podium 的堆叠条区分）。
   ruler:{els:[
     ['rect',{x:3,y:9,width:18,height:6,rx:1}],['path',{d:'M7 9v2.2'}],['path',{d:'M11 9v3.2'}],
     ['path',{d:'M15 9v2.2'}],['path',{d:'M18 9v3.2'}]
@@ -298,9 +287,7 @@ function Btn({children,onClick,variant='primary',small,disabled,icon,title,style
   const V={primary:{...base,background:'var(--amber)',color:'#fff'},ghost:{...base,background:'var(--bg-base)',color:'var(--tx-secondary)',border:'0.5px solid var(--bd-default)',boxShadow:'var(--sh-xs)'},danger:{...base,background:'var(--red-bg)',color:'var(--red)',border:'0.5px solid var(--red-bd)'},success:{...base,background:'var(--green-bg)',color:'var(--green)',border:'0.5px solid var(--green-bd)'}};
   return e('button',{onClick:disabled?undefined:onClick,title,style:V[variant]||V.primary},icon&&Icon(icon,{fontSize:small?12:14},icon==='loader'?'spin':undefined),children);
 }
-// Icon-only action button — bigger touch target + a real fill color when
-// active, so the three per-track actions (打开/属性/手动保留) read as buttons
-// at a glance instead of being lost as small grey text links.
+// Icon-only action button — 更大的点击区；激活时有实心填充色。
 function IconAction({icon,title,onClick,active,activeColor='var(--amber)',activeBg,color='var(--tx-muted)',size=15,danger,disabled}){
   const ac=danger?'var(--red)':activeColor;
   const bg=active?(activeBg||ac+'17'):'var(--bg-base)';

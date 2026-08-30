@@ -1,8 +1,8 @@
 // electron/scan-worker.js — 扫描流水线执行器（worker 线程，扫描隔离）
 //
-// 扫描的 8 步流水线（enum→meta→basicMatch→fp→fpMatch→scrape→scrapeMatch）整体从
-// 主进程事件循环搬到这里运行——music-metadata 解析、matcher 相似度、DB 批量写这些
-// 同步 CPU 大户从此不再占用主进程，窗口其他功能（播放/导航/IPC 读库）保持响应。
+// 扫描的 8 步流水线（enum→meta→basicMatch→fp→fpMatch→scrape→scrapeMatch）在
+// worker 线程运行——music-metadata 解析、matcher 相似度、DB 批量写这些同步 CPU 大户
+// 不占用主进程，窗口其他功能（播放/导航/IPC 读库）保持响应。
 // 主进程侧（electron/ipc/scan.js）只做薄 broker：转发消息 + 维护状态镜像。
 //
 // 与主进程的契约：
@@ -22,7 +22,7 @@ import { createDecodePool } from './fp-decode-pool.mjs';
 
 let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle', pct: 0, message: '', startTime: null };
 let db = null; // 流水线内打开，finally 里 close
-let decodePool = null; // 声纹解码进程池（解码移出 Electron worker，见 fp-decode-pool.mjs）
+let decodePool = null; // 声纹解码进程池（sidecar 子进程，见 fp-decode-pool.mjs）
 let phaseAck = false; // 分阶段合并闸门：broker 合并完发 phaseContinue 才放行下一阶段
 
 function post(data) {
@@ -43,7 +43,7 @@ async function gatePhase(phase) {
   while (!phaseAck && !scanState.abortFlag) await sleep(200);
 }
 
-// 根据 DB 文件数量预估各步骤耗时占比，使进度条反映真实耗时分布（从主进程原样迁移）。
+// 根据 DB 文件数量预估各步骤耗时占比，使进度条反映真实耗时分布。
 function estimateStepWeights(db, steps, { force, acoustidKey }) {
   const totalAudio = (db.get("SELECT COUNT(*) n FROM files") || { n: 0 }).n;
   const withTitle = (db.get("SELECT COUNT(*) n FROM files WHERE title IS NOT NULL AND title!=''") || { n: 0 }).n;
@@ -80,7 +80,7 @@ async function runScanPipeline(options) {
   // cpuinfo.js 查询，非 SMT 机型也能用满物理核；未传时回退逻辑核/2）。上限 12 防高并发
   // 下内存/带宽过载。FP_DECODE_CONCURRENCY env 可覆盖。
   const decodeConcurrency = Math.max(1, Math.min(12, parseInt(process.env.FP_DECODE_CONCURRENCY || threads, 10) || physicalCores || Math.round(os.cpus().length / 2)));
-  // 本 worker 独立 DB 连接（改开主库快照副本 scan-tmp-*.db——node-sqlite3-wasm 无 WAL，
+  // 本 worker 独立 DB 连接（开主库快照副本 scan-tmp-*.db——node-sqlite3-wasm 无 WAL，
   // 双连接同库在 DELETE 模式互锁；副本让 worker 与主进程零冲突，结束后由 broker 合并回主库）。
   // skipInit：schema 已由主进程建立（快照副本自带 schema）。skipPragma：单连接临时库不需要
   // 并发 pragma，且 worker 线程对 VACUUM 产物执行 journal_mode=WAL 会报 database is locked。

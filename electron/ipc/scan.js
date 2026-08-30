@@ -1,12 +1,12 @@
 // electron/ipc/scan.js — 扫描域薄 broker（扫描隔离）
 //
-// 扫描的 8 步流水线整体移入 electron/scan-worker.js（worker 线程），主进程不再跑任何
-// 扫描 CPU 活——窗口其他功能（播放/导航/IPC 读库）不再被占用。本模块职责：
+// 扫描的 8 步流水线在 electron/scan-worker.js（worker 线程）运行，主进程不跑扫描 CPU 活，
+// 窗口其他功能（播放/导航/IPC 读库）不被占用。本模块职责：
 //   1. 维护镜像 scanState（供 /api/scan/status 与 main.js sendScan）
 //   2. 转发 worker 消息 → broadcast（send 注入的 webContents）
 //   3. abort/pause/resume 控制位 → 更新镜像 + 转发 worker
 //   4. worker 生命周期：spawn per-scan、done/error 后 settle + terminate
-// 对外契约不变：routes（start/abort/pause/resume/status）+ setSend。
+// 对外契约：routes（start/abort/pause/resume/status）+ setSend。
 //
 // 镜像同步规则：display 字段（phase/pct/message/level/subPct/groups/savings）以 worker
 // 为准；控制位（paused/abortFlag/running）永远以 broker 镜像为准——worker 的 progress
@@ -39,8 +39,7 @@ export function setSend(fn) { send = fn; }
 function broadcast(data) {
   // 关键：type 不能并入 scanState —— broadcast({type:'done', ...scanState}) 时若
   // scanState 已带 type:'progress'（被 Object.assign 污染），会把 done 覆盖成 progress，
-  // 渲染进程的 onDone / 主进程 sendScan 的 scanRunning=false 全部失效（曾复现：
-  // "扫描后重复组不刷新"、关闭流程异常同源）。type 仅走事件载荷。
+  // 渲染进程的 onDone / 主进程 sendScan 的 scanRunning=false 全部失效。type 仅走事件载荷。
   const { type, ...rest } = data;
   Object.assign(scanState, rest);
   send({ ...data });

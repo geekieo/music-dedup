@@ -10,7 +10,7 @@ import { createRequire } from 'module';
 
 // 主进程网络请求一律走 Electron net.fetch（Chromium 网络栈）：
 // 全局 fetch（undici）在主进程跑会占主进程事件循环——网络不可达/代理环境下连接挂起时
-// 会阻塞全部 IPC，表现为"验证时整个应用卡死、其他功能点不了"（曾实测复现）。
+// 会阻塞全部 IPC，表现为"验证时整个应用卡死、其他功能点不了"。
 // net.fetch 跑在 Chromium IO 线程、尊重系统代理，天然不阻塞主进程 JS。
 // 手动刮削（scrape-single / mb-candidates / acoustid-candidates）经 lib/scraper.js
 // 的可注入 httpFetch 同样切到 net.fetch；scan worker 线程保持全局 fetch（不影响主进程）。
@@ -44,7 +44,7 @@ function attachTiers(f, dual, ignoreScript) {
 
 export const routes = [
   // 按需单文件刮削（ScrapeDialog 调用）——一次请求完成刮削 + 返回双源候选列表，
-  // 前端不再并发拉 mb/acoustid-candidates（避免同一首歌发起重复的 MB/AcoustID 请求）
+  // 同一首歌只发一个 MB 请求 + 一个 AcoustID 请求（避免重复请求）
   { method: 'POST', path: '/api/files/:id/scrape-single', handler: async (p, query) => {
     const s = getAllSettings(db);
     const dual = await scrapeSingleFile(db, +p.id, s.acoustid_key || '', { skipMb: query.skip_mb === '1' });

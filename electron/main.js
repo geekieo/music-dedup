@@ -1,7 +1,7 @@
 // electron/main.js — 主进程入口
 //
-// IPC 化：server.js 的 Express 路由已迁到 electron/ipc/*；应用本体（静态资源 /
-// rules-meta / cover / stream）走 musicdedup:// 协议，无 HTTP 层。
+// 应用本体（静态资源 / rules-meta / cover / stream）走 musicdedup:// 协议，无 HTTP 层；
+// 路由在 electron/ipc/*。
 // 数据目录一律 userData（%APPDATA%/MusicDedup/）。
 // Smoke 自测：V2_SMOKE=1（npm run smoke）——真实库加载后从主进程经 IPC 打关键
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
@@ -115,7 +115,7 @@ function createClientWindow() {
   win.on('close', (e) => {
     const b = win.getNormalBounds();
     // 存窗口状态失败（如扫描合并期的临时锁冲突）不阻断关闭——关窗路径不容许抛未捕获异常
-    // 触发 Electron 崩溃对话框（实测：merge 撞锁时此处 setSetting 抛 database is locked）。
+    // 触发 Electron 崩溃对话框。
     try { setSetting(getDB(), 'window_state', { x: b.x, y: b.y, width: b.width, height: b.height, maximized: win.isMaximized() }); }
     catch (err) { console.log('[main] 保存窗口状态失败：', err && err.message); }
     // 任务进行中 → 程序内弹窗确认（渲染层），确认后中止任务再退出；空闲直接退出。
@@ -154,8 +154,8 @@ function registerWindowControls() {
     try { mainWindow.setTitleBarOverlay(colors); } catch (e) { /* 平台/窗口态不允许改色时忽略 */ }
   });
   // 关闭确认通道：置 pendingClose，等扫描中止归位（sendScan done 分支，此时合并已完成）后退出；
-  // 中止超时兜底强退，避免任务中止异常时窗口关不掉。超时放宽到 30s——worker 可能在长同步
-  // 匹配块（fpMatch 单块曾实测 27s）中，5s 会赶在合并完成前强退 → 临时库孤立、扫描结果丢失。
+  // 中止超时兜底强退，避免任务中止异常时窗口关不掉。超时 30s——worker 可能在长同步匹配块中，
+  // 超时过短会在合并完成前强退 → 临时库孤立、扫描结果丢失。
   ipcMain.handle('app:confirm-close', () => {
     pendingClose = true;
     if (!scanRunning) {

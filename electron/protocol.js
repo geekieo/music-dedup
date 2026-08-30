@@ -35,7 +35,7 @@ const STATIC_MIME = {
   '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2',
 };
 
-// /rules-meta.js 生成（自 server.js 原样移植）—— DIMENSION_DEFS.cell 是函数不能过 JSON。
+// /rules-meta.js 生成——DIMENSION_DEFS.cell 是函数不能过 JSON。
 // 展示常量（GROUP_TAG_*/PICK_TAG_COLOR/DIMENSION_*/TIER_*）来自 lib/rules-ui.js，
 // 核心函数（mergePickOrder/computeScrapeMatch/DEFAULT_*）来自 lib/rules.js。
 function rulesMetaJs() {
@@ -68,8 +68,7 @@ function rulesMetaJs() {
 }
 
 // 音频流：id 优先（真实曲库），非数字段回退为绝对路径（非库内文件不在 db 中）。
-// 路径型 URL 用正斜杠编码（URL 解析器会把自定义 scheme 路径里的反斜杠吃掉——
-// 实测 %5C 会被剥离），此处换回平台分隔符。
+// 路径型 URL 用正斜杠编码（URL 解析器会剥离自定义 scheme 路径里的反斜杠），此处换回平台分隔符。
 async function handleStream(request, url) {
   const seg = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
   const asId = /^\d+$/.test(seg) ? +seg : null;
@@ -90,7 +89,7 @@ async function handleStream(request, url) {
   const lastModified = stat.mtime.toUTCString();
   // ETag 只用 size+mtime：本地文件在同一会话内不变，足够做 304 校验；
   // 不能用 id 或路径作组成部分——路径含非 Latin-1 字符会触发
-  // Response 构造的 ByteString 编码异常（实测 TypeError）。
+  // Response 构造的 ByteString 编码异常。
   const etag = `"${stat.size}-${stat.mtimeMs}"`;
   // 本地文件在会话内不会变——允许缓存可避免每次 seek/重播从磁盘重读同一批字节
   const headers = { 'Cache-Control': 'private, max-age=86400', 'Last-Modified': lastModified, 'ETag': etag };

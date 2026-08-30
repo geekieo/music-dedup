@@ -21,9 +21,9 @@ function ScannerView({scan,hasPlayer}){
   const{status,logs,setLogs,confirm,setConfirm,startStep,lane}=scan;
   const[advanced,setAdvanced]=useState({});
   const logRef=useRef(null);
-  // 「一键执行」按钮组宽度 = 智能保留卡按钮行（= 卡内容宽）实测值：flex 1:3:1 并非
-  // 五卡严格等宽（首尾框受内容影响略宽），calc 假设等宽会对不齐；ResizeObserver 跟随
-  // 真实宽度，任意窗口/chrome 都自动对齐。卡按钮行无横向内边距，border-box 即内容宽。
+  // 「一键执行」按钮组宽度跟随智能保留卡按钮行真实宽度（flex 1:3:1 并非五卡严格
+  // 等宽，首尾框受内容影响略宽），ResizeObserver 自动对齐；卡按钮行无横向内边距，
+  // border-box 即内容宽。
   const smartKeepRef=useRef(null);
   const[groupW,setGroupW]=useState(null);
   useLayoutEffect(()=>{
@@ -143,7 +143,7 @@ function ScannerView({scan,hasPlayer}){
       ),
       e('div',{style:{display:'flex',alignItems:'stretch',gap:12}},
         // 阶段框按 1:3:1（flex basis 0）平分剩余空间，随窗口伸缩；minWidth:0 使基准
-        // 不受内容最小宽约束。二阶段内卡间距 8×2 使三张卡比一/三阶段卡宽约 6px，接受。
+        // 不受内容最小宽约束。二阶段内卡间距 8×2 使三张卡比一/三阶段卡宽约 6px。
         stageFrame(['library'],{flex:'1 1 0',minWidth:0}),
         stageFrame(['basic','fp','scrape'],{flex:'3 1 0',minWidth:0}),
         stageFrame(['smartKeep'],{flex:'1 1 0',minWidth:0})

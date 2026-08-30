@@ -1,6 +1,6 @@
 // scripts/release.js — 一键发布（版本号同步 → CHANGELOG 占位 → 构建 → 打包版冒烟 → 产物清单）
 //
-// 单条命令完成发布全流程（合并原 release.js 的版本管理与 build-and-verify 的打包验证）：
+// 单条命令完成发布全流程：
 //   1. 版本号同步：package.json + package-lock.json + public/app.js（APP_VERSION，UI 头部徽标）
 //   2. CHANGELOG.md 插入占位（内容由开发者手动补）
 //   3. 构建 NSIS 安装包 + portable 便携版（图标生成/旧产物清理/镜像注入在 build-win.mjs）
@@ -87,7 +87,7 @@ function getCommitsSinceLastRelease() {
   return targetLogs.map(line => line.match(/^\S+\s+(.+)$/)?.[1] || line);
 }
 
-// ── 打包验证（原 build-and-verify）────────────────────────
+// ── 打包验证 ────────────────────────
 
 function packAndVerify() {
   console.log('\n[release] 构建 NSIS + portable（图标生成 / 清理 / 镜像注入）…');

@@ -1,5 +1,5 @@
 // electron/ipc/settings.js — 设置域：settings / browse-folder（原生对话框）/ fpcalc 探针
-// browse-folder 用 Electron dialog.showOpenDialog，替换了旧版 powershell/osascript 子进程实现。
+// browse-folder 用 Electron dialog.showOpenDialog（原生目录选择对话框）。
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);

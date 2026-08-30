@@ -98,10 +98,8 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
   },[]);
 
   // Infinite scroll + scrolledToBottom via IntersectionObserver on a
-  // sentinel div at the bottom of the list. This works correctly regardless
-  // of which ancestor element actually scrolls — avoids the "wrong container"
-  // bug where attaching to containerRef had no effect because the element
-  // didn't scroll itself (the <main> parent did).
+  // sentinel div at the bottom of the list. Works regardless of which
+  // ancestor element actually scrolls.
   useEffect(()=>{
     const sentinel=scrollSentinelRef.current;
     if(!sentinel)return;

@@ -7,7 +7,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('bridge', {
-  // 统一请求通道（对应 server.js 的 REST 语义，路由表在 electron/ipc/index.js）
+  // 统一请求通道（REST 语义，路由表在 electron/ipc/index.js）
   request: (method, url, body) => ipcRenderer.invoke('api', { method, url, body }),
   // 扫描进度事件订阅；返回取消订阅函数
   onScanProgress: (cb) => {

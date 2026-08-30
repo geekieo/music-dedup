@@ -1,7 +1,7 @@
 /* ══════════════════════════════════════════════════════════════════════
    DUPLICATES VIEW
    ══════════════════════════════════════════════════════════════════════ */
-/* TrackRow — redesigned layout (item 3):
+/* TrackRow layout:
    LEFT  : play button + cover art thumbnail
    MIDDLE: title + quality badge + dimension tags (quality_best/scrape_best/...)
            subtitle line: artist · album | bitrate/size info
@@ -798,8 +798,8 @@ const DuplicatesView=React.memo(function DuplicatesView({player,scanDoneKey,libr
         !detail||detail.id!==selId?
           e('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:10,height:'100%',color:'var(--tx-faint)',fontSize:12}},Icon('click',{fontSize:36}),'从左侧选择重复组查看详情'):
           e('div',{className:'fade'},
-            // Header — F6: just tags, no extra explanation paragraph; the tag
-            // itself (with hover description) carries the meaning now.
+            // Header — just tags, no extra explanation paragraph; the tag
+            // itself (with hover description) carries the meaning.
             e('div',{style:{marginBottom:14}},
               e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10}},
                 e('div',{style:{flex:1,minWidth:0}},

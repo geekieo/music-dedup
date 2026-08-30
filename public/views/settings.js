@@ -1,14 +1,12 @@
 /* ══════════════════════════════════════════════════════════════════════
-   SETTINGS VIEW — F6: single scrollable page, anchored sections:
+   SETTINGS VIEW — single scrollable page, anchored sections:
    扫描目录 → 基础匹配 → 声纹匹配 → 刮削匹配 → 智能保留 → 手动保留 → 最近写入.
-   A sticky left rail jumps to each anchor. Explanatory text that used to
-   sit as an always-visible box is now a hover-revealed Hint next to the
-   heading it explains, except 重复组标签 which IS the reference itself
-   and stays visible. F8: changes auto-SAVE; a match-affecting change
-   (时长容差/声纹阈值/排除规则/音质优先级/AcoustID Key) lights the corresponding
-   执行模块卡 (基础匹配/声纹匹配/更新音乐库/智能保留/刮削匹配) at the top of the
-   column — the button re-runs that module only, never re-extracts fp/scrape.
-   智能保留优先级修改只点亮「智能保留」卡，点「立即重新计算」才应用到现有重复组。
+   A sticky left rail jumps to each anchor. 说明文字为悬停提示（Hint），
+   除 重复组标签 本身即参考内容、常驻可见。
+   改动自动保存；影响匹配的改动（时长容差/声纹阈值/排除规则/音质优先级/AcoustID Key）
+   点亮列顶对应的 执行模块卡 (基础匹配/声纹匹配/更新音乐库/智能保留/刮削匹配)——
+   按钮只重跑该模块，不重新提取声纹/刮削。智能保留优先级修改只点亮「智能保留」卡，
+   点「立即重新计算」才应用到现有重复组。
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
   {id:'sec-dirs',    label:'音乐目录',   icon:'folders'},
@@ -549,8 +547,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   },[s]);
 
   // 按执行模块重跑。steps 只含该卡对应模块（基础匹配卡→basicMatch，声纹匹配卡→fpMatch，
-  // 智能保留卡→smartKeep）。应用后把该模块基线同步为当前值，并清 pending（卡消失）——
-  // 变更已交到执行通道，不再需要常驻提醒。
+  // 智能保留卡→smartKeep）。应用后把该模块基线同步为当前值，并清 pending（卡消失）。
   function applyBasic(){
     setReapplying(true);
     onMatchAffectingChange?.(['basicMatch']);

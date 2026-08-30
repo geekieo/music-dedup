@@ -6,7 +6,7 @@ import { statsQuery, queryLibrary, locateFileInLibrary, libraryStats } from '../
 
 const db = getDB();
 
-// /api/library —— sort=scrape_tier / scrapeTier 过滤的 tier 路径已并入 queryLibrary
+// /api/library —— sort=scrape_tier / scrapeTier 过滤的 tier 路径由 queryLibrary 处理
 function libraryHandler(_params, query) {
   const { search = '', sort = 'title', order = 'asc', page = 1, limit = 100, format = '', libFilter = 'all', scrapeTier = '' } = query;
   // 繁简忽略 (settings.ignore_script_variant, default true) — 见 lib/tier.js。
