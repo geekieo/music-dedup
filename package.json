@@ -78,7 +78,9 @@
       "node_modules/**",
       "electron/scan-worker.js",
       "electron/fp-decode-pool.mjs",
-      "electron/fp-decode-cli.mjs"
+      "electron/fp-decode-cli.mjs",
+      "electron/match-pool.mjs",
+      "electron/match-worker.js"
     ],
     "extraResources": [
       {

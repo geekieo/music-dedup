@@ -10,7 +10,6 @@
    ══════════════════════════════════════════════════════════════════════ */
 const SETTINGS_SECTIONS=[
   {id:'sec-dirs',    label:'音乐目录',   icon:'folders'},
-  {id:'sec-scan-perf', label:'扫描性能', icon:'radar'},
   {id:'sec-basic',   label:'基础匹配',   icon:'tag'},
   {id:'sec-fp',      label:'声纹匹配',   icon:'wave-sine'},
   {id:'sec-scrape',  label:'刮削匹配',   icon:'cloud-download'},
@@ -25,16 +24,14 @@ const SETTINGS_SECTIONS=[
 // 需新鲜数组，避免与全局 DEFAULT_* 共享引用。恢复默认只改本卡的键，不动其他卡。
 // 音乐目录卡不放按钮：其主体（scan_dirs）是用户数据，无默认值。
 const CARD_DEFAULTS={
-  'sec-scan-perf': ()=>({ threads:null }),
   'sec-basic':     ()=>({ duration_tolerance:5 }),
-  'sec-fp':        ()=>({ threshold:90 }),
+  'sec-fp':        ()=>({ threshold:90, threads:null }),
   'sec-smartkeep': ()=>({ quality_tiers:[...DEFAULT_Q], pick_tag_order:[...DEFAULT_PICK] }),
 };
 // 恢复默认按钮的悬停说明：告诉用户该卡具体重置什么。
 const RESET_HINT={
-  'sec-scan-perf': '恢复默认：并发数回到自动（按 CPU 核数）',
   'sec-basic':     '恢复默认：时长容差回到 5 秒',
-  'sec-fp':        '恢复默认：相似度阈值回到 90%',
+  'sec-fp':        '恢复默认：相似度阈值回到 90%、并发数回到自动（按 CPU 核数）',
   'sec-smartkeep': '恢复默认：音质与保留优先级回到默认顺序',
 };
 // 撤销快照与当前值比较时归一化：字符串"90"与数字 90 视为相同，数组按内容比较。
@@ -355,7 +352,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
   const[saveState,setSaveState]=useState('idle');
   const[showExclude,setShowExclude]=useState(false);
   // 各执行模块的「待重新应用」触发态：只有影响最终结果的设置变更才点亮对应模块的卡。
-  // 扫描性能（threads）不影响最终结果，不触发任何卡。每张卡独立 show + seq（再次修改重新滑动）。
+  // 并发数（threads）不影响最终结果，不触发任何卡。每张卡独立 show + seq（再次修改重新滑动）。
   const[basicPending,setBasicPending]=useState(false); // 基础匹配模块 ← duration_tolerance
   const[basicSeq,setBasicSeq]=useState(0);
   const[fpPending,setFpPending]=useState(false);       // 声纹匹配模块 ← threshold
@@ -681,7 +678,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
     e('div',{ref:colRef,'data-hint-boundary':'',style:{position:'relative',display:'flex',flexDirection:'column',gap:14,paddingBottom:14}},
 
       // 顶部执行卡槽：按设置项影响的执行模块各一张，常驻于音乐目录卡上方（文档流内，不覆盖设置卡）。
-      // 只对「影响最终结果」的设置点亮对应卡：threads（扫描性能）不影响结果，永不触发任何卡。
+      // 只对「影响最终结果」的设置点亮对应卡：threads（并发数）不影响结果，永不触发任何卡。
       // 槽为每张卡保留固定高度——滑动卡展示期间对应常驻卡以 visibility:hidden 占位，卡显现时
       // 下方内容零位移；槽随待处理集合增减而增减（发生在点亮/关闭时）。带按钮的卡先播滑动卡
       // （ExecuteToast，固定层），消失后才显现常驻卡；无按钮卡（keep）直接常驻。
@@ -712,20 +709,6 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
         )
       ),
 
-      // 扫描性能 — 声纹解码并发数（同时解码的文件数），直接影响声纹阶段的并行度与内存。
-      // threads 未设置（自动）时由 scan-worker 按逻辑核数计算 min(12, 逻辑核/2)；滑块上限 12
-      // 与并发上限一致（更高只加内存无收益）。
-      e(Card,{id:'sec-scan-perf'},
-        e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'radar',title:'扫描性能'})),
-          e(ResetBar,{cardId:'sec-scan-perf'})
-        ),
-        e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'并发解码的文件数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:autoThreads)),
-          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:rangeChange('sec-scan-perf','threads'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-scan-perf');},onPointerUp:commitRange,onBlur:commitRange})
-        )
-      ),
-
       e(Card,{id:'sec-basic'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
           e('div',{style:{flex:1}},e(SH,{icon:'tag',title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
@@ -745,9 +728,15 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
           e(ResetBar,{cardId:'sec-fp'})
         ),
         e('div',null,
-          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'相似度达到此值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。标题、艺术家、时长近似的歌曲，即使低于此值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
-          e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:rangeChange('sec-fp','threshold'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-fp');},onPointerUp:commitRange,onBlur:commitRange}),
-          e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
+          // 并发：声纹提取（解码池）与声纹匹配（worker 池）共用「同时处理文件数」，
+          // 对应流程先提取后匹配；调低可减少解码内存占用。
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'声纹提取（解码）与声纹匹配的并发处理数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:autoThreads)),
+          e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:rangeChange('sec-fp','threads'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-fp');},onPointerUp:commitRange,onBlur:commitRange}),
+          e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
+            e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'相似度达到此值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。标题、艺术家、时长近似的歌曲，即使低于此值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
+            e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:rangeChange('sec-fp','threshold'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-fp');},onPointerUp:commitRange,onBlur:commitRange}),
+            e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
+          )
         ),
 
         e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},

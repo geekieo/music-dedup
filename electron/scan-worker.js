@@ -19,10 +19,12 @@ import { runScrapeMatcher, runBasicMatcher, runFpMatcher, runSmartKeep } from '.
 import { runScrape } from '../lib/scraper.js';
 import { killActiveFpcalc } from '../lib/chromaprint-bridge.js';
 import { createDecodePool } from './fp-decode-pool.mjs';
+import { createMatchPool } from './match-pool.mjs';
 
 let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle', pct: 0, message: '', startTime: null };
 let db = null; // 流水线内打开，finally 里 close
 let decodePool = null; // 声纹解码进程池（sidecar 子进程，见 fp-decode-pool.mjs）
+let activeMatchPool = null; // 声纹匹配相似度计算 worker 池（fpMatch 步用，中止时 terminate 在途 worker）
 let phaseAck = false; // 分阶段合并闸门：broker 合并完发 phaseContinue 才放行下一阶段
 
 function post(data) {
@@ -151,7 +153,6 @@ async function runScanPipeline(options) {
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
     if (steps.includes('basicMatch') && !abort()) {
       if (force) forceStripLaneTags(db, ['meta_confirmed']);
-      wrapProg('basicMatch')({ phase: 'basicMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始基础匹配分析...' });
       await runBasicMatcher(db, { durationTolerance, onProgress: wrapProg('basicMatch'), onAbort: abort, onPause: pause });
       advanceWeight('basicMatch');
       await gatePhase('basicMatch');
@@ -169,8 +170,14 @@ async function runScanPipeline(options) {
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
     if (steps.includes('fpMatch') && !abort()) {
       if (force) forceStripLaneTags(db, ['spectral_exact', 'same_recording', 'cp_exact', 'cp_similar']);
-      wrapProg('fpMatch')({ phase: 'fpMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始声纹匹配分析...' });
-      await runFpMatcher(db, { threshold, onProgress: wrapProg('fpMatch'), onAbort: abort, onPause: pause });
+      // 相似度计算 worker 池：复用「同时处理文件数」并发（与解码池同值，两阶段错峰不抢资源）。
+      activeMatchPool = createMatchPool({ concurrency: decodeConcurrency });
+      try {
+        await runFpMatcher(db, { threshold, matchPool: activeMatchPool, onProgress: wrapProg('fpMatch'), onAbort: abort, onPause: pause });
+      } finally {
+        activeMatchPool.close();
+        activeMatchPool = null;
+      }
       advanceWeight('fpMatch');
       await gatePhase('fpMatch');
     }
@@ -183,7 +190,6 @@ async function runScanPipeline(options) {
     // 步骤8: 刮削匹配（recording ID 对比）
     if (steps.includes('scrapeMatch') && !abort()) {
       if (force) forceStripLaneTags(db, ['mb_confirmed', 'acoustid_confirmed']);
-      wrapProg('scrapeMatch')({ phase: 'scrapeMatch', pct: 0, level: 'info', message: force ? '全量重新执行：清除本通道旧组，重新匹配后合并' : '开始刮削匹配分析...' });
       await runScrapeMatcher(db, { onProgress: wrapProg('scrapeMatch'), onAbort: abort, onPause: pause });
       advanceWeight('scrapeMatch');
       await gatePhase('scrapeMatch');
@@ -191,7 +197,6 @@ async function runScanPipeline(options) {
     // 步骤9: 智能保留 —— 用 applied 优先级快照重算未处理组的推荐保留（纯列更新，
     // 不清除组；快照已由主进程 /api/scan/start 在扫描开始时写入）。
     if (steps.includes('smartKeep') && !abort()) {
-      wrapProg('smartKeep')({ phase: 'smartKeep', pct: 0, level: 'info', message: '开始重新计算智能保留...' });
       await runSmartKeep(db, { onProgress: wrapProg('smartKeep'), onAbort: abort, onPause: pause });
       advanceWeight('smartKeep');
       await gatePhase('smartKeep');
@@ -209,10 +214,12 @@ async function runScanPipeline(options) {
   }
 }
 
-// 崩溃兜底：任何未捕获异常也保证 close DB/解码池 + 通知主进程（否则文件锁泄漏、broker 卡 running）。
+// 崩溃兜底：任何未捕获异常也保证 close DB/解码池/匹配池 + 通知主进程
+//（否则文件锁泄漏、嵌套 worker 成孤儿线程、broker 卡 running）。
 process.on('uncaughtException', (e) => {
   console.error('[scan-worker] uncaughtException:', e);
   try { if (decodePool) decodePool.close(); } catch {}
+  try { if (activeMatchPool) activeMatchPool.close(); } catch {}
   try { if (db) db.close(); } catch {}
   parentPort.postMessage({ type: 'error', message: e && e.message ? e.message : String(e) });
   process.exit(1);
@@ -220,6 +227,7 @@ process.on('uncaughtException', (e) => {
 process.on('unhandledRejection', (e) => {
   console.error('[scan-worker] unhandledRejection:', e);
   try { if (decodePool) decodePool.close(); } catch {}
+  try { if (activeMatchPool) activeMatchPool.close(); } catch {}
   try { if (db) db.close(); } catch {}
   parentPort.postMessage({ type: 'error', message: e && e.message ? e.message : String(e) });
   process.exit(1);
@@ -236,6 +244,8 @@ parentPort.on('message', (msg) => {
       // kill 后 computeChromaprint 的 execP reject → 批结束 → 边界 onAbort() 随即返回。
       // Goertzel/parseFile 不可打断，至多等一个文件解码。
       killActiveFpcalc();
+      // 声纹匹配 worker 池同样关闭：在途分片任务 reject → allSettled 吞掉 → onAbort() 返回。
+      if (activeMatchPool) activeMatchPool.close();
       break;
     case 'pause':
       if (scanState.running && !scanState.abortFlag) scanState.paused = true;

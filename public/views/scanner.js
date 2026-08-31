@@ -8,11 +8,11 @@
    ═══════════════════════════════════════════════════════════════════════ */
 const LANE_META={
   library:{label:'音乐库更新',sub:'扫描·读取标签',desc:'扫描音乐目录，发现音乐文件并读取标题、艺术家、专辑等信息，更新音乐库。',icon:'folders',steps:['enum','meta']},
-  basic:{label:'基础匹配',sub:'按标签比对',desc:'按标题、艺术家和时长比对，找出重复候选，不依赖声纹。',icon:'tag',steps:['basicMatch']},
+  basic:{label:'基础匹配',sub:'按标签比对',desc:'按标题、艺术家和时长比对，找出重复组。',icon:'tag',steps:['basicMatch']},
   // fp lane — 技术细节：频谱声纹相似度比对；不同编码/母带间的相位差异会让相似度偏低，
   // 因此声纹匹配不单独作为判定唯一依据（阈值 + 基础匹配兜底）。
-  fp:{label:'声纹匹配',sub:'按指纹比对',desc:'对比音频声纹找出重复。声纹匹配不作为判定重复的唯一依据。',icon:'wave-sine',steps:['fp','fpMatch']},
-  scrape:{label:'刮削匹配',sub:'按刮削数据比对',desc:'联网查询录音信息，两个文件命中同一条录音即视为重复。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
+  fp:{label:'声纹匹配',sub:'按指纹比对',desc:'对比音频声纹找出重复，找出重复组。',icon:'wave-sine',steps:['fp','fpMatch']},
+  scrape:{label:'刮削匹配',sub:'按刮削数据比对',desc:'联网查询录音信息，命中同一条录音即视为重复组。AcoustID 刮削依赖声纹匹配提取的 CP 声纹。',icon:'cloud-download',steps:['scrape','scrapeMatch']},
   smartKeep:{label:'智能保留',sub:'计算保留结果',desc:'按当前应用的保留优先级，计算所有未处理重复组的推荐保留。',icon:'star',steps:['smartKeep']},
 };
 // phase → 所属阶段单元：全量执行时点亮当前方法卡
