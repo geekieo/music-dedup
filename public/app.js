@@ -344,8 +344,8 @@ function useScanStream(onDone){
       // 相位切换时清 subPct：新相位首个 emit 常不带 subPct，残留上一相位的值会让
       // 内联子% 卡在旧值（如上一相位结束的 100%）。
       setStatus(prev=>(d.phase!==prevPhaseRef.current?{...d,subPct:undefined}:d));
-      // 正常完成的终态 done 复用最后一步完成消息（已入日志），跳过以免重复
-      if(d.message&&!(d.type==='done'&&d.phase==='done')){
+      // live（活动行刷新）与终态 done 不追加日志：前者只刷活动行，后者消息已入日志
+      if(d.message&&!d.live&&!(d.type==='done'&&d.phase==='done')){
         setLogs(p=>{
           if(p.length&&p[p.length-1].msg===d.message&&p[p.length-1].ty!=='sep')return p;
           const ty=d.level||'ok';

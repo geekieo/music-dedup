@@ -1,13 +1,8 @@
 // electron/match-pool.mjs — 声纹匹配相似度计算 worker 池（worker_thread）
 //
-// 相似度计算是纯 JS 位运算（lib/fingerprint.js），用 worker_thread 池分片并行；
-// 并发上限由 createMatchPool({concurrency}) 传入——scan-worker 复用 decodeConcurrency
-//（即设置页「同时处理文件数」），与解码池错峰互不抢资源。
-// 不用子进程：node-sqlite3-wasm 在子进程退出时触发 libuv 断言崩溃（Windows/Node24），
-// worker_thread 共享进程无此问题；且 worker 不读库——指纹记录由主线程一次性 prepare
-// 注入，彻底避开锁竞争。
-// prepare(records)：把指纹记录发给所有 worker（一次）。computeShard(job)：把一对分片
-// 交给空闲 worker。close()：terminate 所有 worker（幂等，finally/中止均可安全调用）。
+// 并发上限由 createMatchPool({concurrency}) 传入（scan-worker 复用 decodeConcurrency，
+// 即设置页「同时处理文件数」）。worker 不碰库：指纹记录由主线程 prepare 注入，配对经
+// computeShard 分发；close() 幂等 terminate 所有 worker（finally/中止均可调用）。
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 

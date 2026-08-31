@@ -1,7 +1,5 @@
 // electron/match-worker.js — 声纹匹配相似度计算 worker（worker_thread）
 //
-// 与 fp-decode 的子进程方案不同：相似度是纯 JS 位运算，无需 WASM 解码，worker_thread
-// 即可（子进程退出会触发 node-sqlite3-wasm 的 libuv 断言，见 match-pool 头注释）。
 // 协议：
 //   主→worker { type:'records', records:[{id,fingerprint,chromaprint_raw}] }  一次性注入指纹
 //   主→worker { type:'job', jobId, maxOffset, spectralPairs:[[a,b]], cpPairs:[[a,b]] }

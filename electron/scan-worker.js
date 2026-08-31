@@ -24,7 +24,7 @@ import { createMatchPool } from './match-pool.mjs';
 let scanState = { running: false, abortFlag: false, paused: false, phase: 'idle', pct: 0, message: '', startTime: null };
 let db = null; // 流水线内打开，finally 里 close
 let decodePool = null; // 声纹解码进程池（sidecar 子进程，见 fp-decode-pool.mjs）
-let activeMatchPool = null; // 声纹匹配相似度计算 worker 池（fpMatch 步用，中止时 terminate 在途 worker）
+let activeMatchPool = null; // 声纹匹配 worker 池（中止时 terminate 在途 worker）
 let phaseAck = false; // 分阶段合并闸门：broker 合并完发 phaseContinue 才放行下一阶段
 
 function post(data) {
@@ -93,7 +93,8 @@ async function runScanPipeline(options) {
   // 原地 mutate scanState 并上送——只上送 evt 会因前端整体替换而丢掉 running/paused/abortFlag
   const prog = (evt) => {
     const ts = new Date().toLocaleTimeString([], { hour12: false });
-    Object.assign(scanState, evt.message ? { ...evt, message: `[${ts}] ${evt.message}` } : evt);
+    // live 是瞬时标记：普通 emit 显式复位，防残留污染下一条事件（被前端当 live 跳过日志）
+    Object.assign(scanState, { ...(evt.message ? { ...evt, message: `[${ts}] ${evt.message}` } : evt), live: evt.live === true });
     post({ type: 'progress', ...scanState });
   };
   const abort = () => scanState.abortFlag;
@@ -153,9 +154,10 @@ async function runScanPipeline(options) {
     // 步骤3: 属性匹配（标题分组 + 元数据确认，不依赖声纹）
     if (steps.includes('basicMatch') && !abort()) {
       if (force) forceStripLaneTags(db, ['meta_confirmed']);
-      await runBasicMatcher(db, { durationTolerance, onProgress: wrapProg('basicMatch'), onAbort: abort, onPause: pause });
+      const result = await runBasicMatcher(db, { durationTolerance, onProgress: wrapProg('basicMatch'), onAbort: abort, onPause: pause });
       advanceWeight('basicMatch');
       await gatePhase('basicMatch');
+      if (!abort() && result) wrapProg('basicMatch')({ phase: 'done', pct: 100, level: 'done', ...result });
     }
     // 步骤4: 提取声纹
     if (steps.includes('fp') && !abort()) {
@@ -170,16 +172,18 @@ async function runScanPipeline(options) {
     // 步骤5+6: 声纹匹配（频谱声纹 + CP声纹）
     if (steps.includes('fpMatch') && !abort()) {
       if (force) forceStripLaneTags(db, ['spectral_exact', 'same_recording', 'cp_exact', 'cp_similar']);
-      // 相似度计算 worker 池：复用「同时处理文件数」并发（与解码池同值，两阶段错峰不抢资源）。
+      // 相似度计算 worker 池：复用「同时处理文件数」并发（与解码池同值）
       activeMatchPool = createMatchPool({ concurrency: decodeConcurrency });
+      let result;
       try {
-        await runFpMatcher(db, { threshold, matchPool: activeMatchPool, onProgress: wrapProg('fpMatch'), onAbort: abort, onPause: pause });
+        result = await runFpMatcher(db, { threshold, matchPool: activeMatchPool, onProgress: wrapProg('fpMatch'), onAbort: abort, onPause: pause });
       } finally {
         activeMatchPool.close();
         activeMatchPool = null;
       }
       advanceWeight('fpMatch');
       await gatePhase('fpMatch');
+      if (!abort() && result) wrapProg('fpMatch')({ phase: 'done', pct: 100, level: 'done', ...result });
     }
     // 步骤7: 刮削
     if (steps.includes('scrape') && !abort()) {
@@ -190,16 +194,18 @@ async function runScanPipeline(options) {
     // 步骤8: 刮削匹配（recording ID 对比）
     if (steps.includes('scrapeMatch') && !abort()) {
       if (force) forceStripLaneTags(db, ['mb_confirmed', 'acoustid_confirmed']);
-      await runScrapeMatcher(db, { onProgress: wrapProg('scrapeMatch'), onAbort: abort, onPause: pause });
+      const result = await runScrapeMatcher(db, { onProgress: wrapProg('scrapeMatch'), onAbort: abort, onPause: pause });
       advanceWeight('scrapeMatch');
       await gatePhase('scrapeMatch');
+      if (!abort() && result) wrapProg('scrapeMatch')({ phase: 'done', pct: 100, level: 'done', ...result });
     }
     // 步骤9: 智能保留 —— 用 applied 优先级快照重算未处理组的推荐保留（纯列更新，
     // 不清除组；快照已由主进程 /api/scan/start 在扫描开始时写入）。
     if (steps.includes('smartKeep') && !abort()) {
-      await runSmartKeep(db, { onProgress: wrapProg('smartKeep'), onAbort: abort, onPause: pause });
+      const result = await runSmartKeep(db, { onProgress: wrapProg('smartKeep'), onAbort: abort, onPause: pause });
       advanceWeight('smartKeep');
       await gatePhase('smartKeep');
+      if (!abort() && result) wrapProg('smartKeep')({ phase: 'done', pct: 100, level: 'done', ...result });
     }
   } catch (e) {
     prog({ phase: 'error', pct: 0, level: 'err', message: `失败: ${e.message}` });
@@ -214,8 +220,7 @@ async function runScanPipeline(options) {
   }
 }
 
-// 崩溃兜底：任何未捕获异常也保证 close DB/解码池/匹配池 + 通知主进程
-//（否则文件锁泄漏、嵌套 worker 成孤儿线程、broker 卡 running）。
+// 崩溃兜底：未捕获异常也 close DB/解码池/匹配池并通知主进程（否则文件锁/孤儿线程/broker 卡）
 process.on('uncaughtException', (e) => {
   console.error('[scan-worker] uncaughtException:', e);
   try { if (decodePool) decodePool.close(); } catch {}

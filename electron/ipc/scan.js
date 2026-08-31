@@ -100,10 +100,11 @@ let doneMessage = ''; // worker 的最终完成消息（settle 的合并广播�
 function settle() {
   if (settled) return;
   settled = true;
-  // 先合并临时库（worker 已完成且关闭 temp 连接，此刻 ATTACH 无锁冲突），
-  // 再广播 done——done 后前端 refreshStats 读到的是合并后的最新数据。
+  // 合并临时库后广播 done（正常完成时最后阶段已 gate 合并，此处静默幂等兜底；
+  // 中止/异常时 gate 未完成，合并是抢救数据，需明确提示）。
+  const needMergeNote = scanState.abortFlag || scanState.phase === 'error';
   if (activeTempDb) {
-    broadcast({ type: 'progress', ...scanState, level: 'info', message: `[${now()}] 正在合并扫描结果...` });
+    if (needMergeNote) broadcast({ type: 'progress', ...scanState, live: false, level: 'info', message: `[${now()}] 正在合并扫描结果...` });
     try {
       mergeTempDb(activeTempDb);
       cleanupTempDb(activeTempDb); // 合并成功才清理；失败保留临时库，下次扫描孤儿恢复兜底
@@ -122,7 +123,8 @@ function settle() {
   } else if (doneMessage) {
     scanState.message = doneMessage;
   }
-  broadcast({ type: 'done', ...scanState });
+  // 终态广播强制 live:false——live 残留会让前端跳过「扫描已中止」等终态日志
+  broadcast({ type: 'done', ...scanState, live: false });
   if (activeWorker) { try { activeWorker.terminate(); } catch {} activeWorker = null; }
 }
 
