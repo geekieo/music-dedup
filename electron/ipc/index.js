@@ -16,6 +16,7 @@ import * as tags from './tags.js';
 import * as scrape from './scrape.js';
 import * as duplicates from './duplicates.js';
 import * as scan from './scan.js';
+import * as about from './about.js';
 
 const ROUTES = [
   ...library.routes,
@@ -25,6 +26,7 @@ const ROUTES = [
   ...scrape.routes,
   ...duplicates.routes,
   ...scan.routes,
+  ...about.routes,
 ];
 
 // Express-lite 参数匹配：/api/files/:id → { id }（无参数时返回 {}）

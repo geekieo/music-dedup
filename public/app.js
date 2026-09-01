@@ -595,10 +595,10 @@ function App(){
       onDoubleClick:()=>{ if(window.bridge?.platform==='linux'&&window.bridge?.winControls) window.bridge.winControls.toggleMaximize(); }},
       e('div',{style:{display:'flex',alignItems:'center',gap:10,justifySelf:'start',paddingLeft:window.bridge?.platform==='darwin'?72:0}},
         e(Logo,{size:28}),
-        e('div',{style:{display:'flex',alignItems:'baseline',gap:10}},
-          e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em'}},'MusicDedup'),
-          e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)'}},'v'+APP_VERSION),
-          window.bridge?.isTest&&e('span',{style:{fontSize:11,color:'var(--amber)',background:'var(--amber-bg)',padding:'2px 8px',borderRadius:4,border:'1px solid var(--amber-bd)',fontFamily:'var(--font-mono)',fontWeight:600}},'隔离测试')
+        e('div',{style:{display:'flex',alignItems:'baseline',gap:8,flexShrink:0}},
+          e('span',{style:{fontWeight:700,fontSize:15,color:'var(--tx-primary)',letterSpacing:'-.015em',whiteSpace:'nowrap'}},'MusicDedup'),
+          e('span',{style:{fontSize:11,color:'var(--tx-faint)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap',flexShrink:0}},'v'+APP_VERSION),
+          window.bridge?.isTest&&e('span',{style:{fontSize:10,color:'var(--amber)',background:'var(--amber-bg)',padding:'1px 6px',borderRadius:4,border:'1px solid var(--amber-bd)',fontFamily:'var(--font-mono)',fontWeight:600,whiteSpace:'nowrap',flexShrink:0}},'隔离测试')
         )
       ),
       e('nav',{style:{display:'flex',gap:4,justifySelf:'center',WebkitAppRegion:'no-drag'}},

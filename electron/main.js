@@ -12,6 +12,7 @@ import './bootstrap-env.js'; // 必须先于其它 import：lib/db.js 在模块�
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { appState } from './app-state.js';
 
 // Windows 任务栏分组/身份需要 AppUserModelId（打包后 appId 已在 build 配置）
 app.setAppUserModelId('com.geekieo.musicdedup');
@@ -40,9 +41,8 @@ protocol.registerSchemesAsPrivileged([
 // ── 客户端路径 ─────────────────────────────────────────────────────────
 let mainWindow = null;
 // 关闭行为：任务进行中关窗 → 程序内弹窗确认（渲染层），确认后中止任务再退出；
-// 空闲关窗直接退出。forceQuit 由确认关闭路径置位。
+// 空闲关窗直接退出。forceQuit 由确认关闭路径/自动更新安装置位（appState.forceQuit）。
 let scanRunning = false; // 由 scan 事件跟踪（start→true / done→false）
-let forceQuit = false;   // 确认关闭后置位，跳过关窗拦截
 let pendingClose = false; // 用户已确认关闭、等待扫描中止归位后退出
 function sendScan(data) {
   if (!data) return;
@@ -50,7 +50,7 @@ function sendScan(data) {
   else if (data.type === 'done') {
     scanRunning = false;
     // 已确认关闭：扫描已中止归位 → 立刻退出（等合并完成后窗口才会收到 done）
-    if (pendingClose) { pendingClose = false; forceQuit = true; if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); }
+    if (pendingClose) { pendingClose = false; appState.forceQuit = true; if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close(); }
   }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
 }
@@ -120,7 +120,7 @@ function createClientWindow() {
     catch (err) { console.log('[main] 保存窗口状态失败：', err && err.message); }
     // 任务进行中 → 程序内弹窗确认（渲染层），确认后中止任务再退出；空闲直接退出。
     // 渲染层不可达时回退直接退出。
-    if (!forceQuit && scanRunning) {
+    if (!appState.forceQuit && scanRunning) {
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
         e.preventDefault();
         mainWindow.webContents.send('app:confirm-close');
@@ -160,14 +160,14 @@ function registerWindowControls() {
     pendingClose = true;
     if (!scanRunning) {
       pendingClose = false;
-      forceQuit = true;
+      appState.forceQuit = true;
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
       return true;
     }
     setTimeout(() => {
       if (pendingClose) {
         pendingClose = false;
-        forceQuit = true;
+        appState.forceQuit = true;
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
       }
     }, 30000);
@@ -230,6 +230,28 @@ async function runSmoke(win) {
       return { m: 'UI', u: 'progress UI states', ok: true, err: null };
     })();
     out.push(progUI);
+    // 设置页 UI 回归：渲染 SettingsView（mock props，真实 /api/settings 数据）→ 断言「关于」卡
+    const settingsUI = await (async () => {
+      const el = document.createElement('div');
+      ReactDOM.createRoot(el).render(React.createElement(SettingsView, {
+        dirs: [], onAddDir(){}, onRemoveDir(){}, onEnumOnly(){}, onDismissDirChanged(){},
+        dirChanged:false, dirSeq:0, onMatchAffectingChange(){}, onScrapeReapply(){},
+        scanRunning:false, player:null, retentionListKey:0, writeHistoryKey:0,
+        onLocateFile(){}, onNavigateToDuplicateGroup(){}, onLocate:{},
+        mainScrollRef:React.createRef(), onTagsWritten(){}, active:true,
+      }));
+      await new Promise((res) => { // 等 /api/settings 加载完成，卡片渲染出来（轮询防慢机抖动）
+        const deadline = Date.now() + 4000;
+        const tick = () => {
+          if (el.innerText.includes('检查更新') || Date.now() > deadline) res();
+          else setTimeout(tick, 100);
+        };
+        tick();
+      });
+      const t=el.innerText;
+      return { m:'UI', u:'settings render (关于卡)', ok: t.includes('关于') && t.includes('检查更新') && t.includes('联系反馈'), err: t.slice(0,140) };
+    })();
+    out.push(settingsUI);
     // 窗口图标代码生成验证：favicon SVG → 256px PNG data URL（首启由同一逻辑生成窗口图标）
     const winIcon = await (async () => {
       try {

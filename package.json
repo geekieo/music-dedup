@@ -80,7 +80,8 @@
       "electron/fp-decode-pool.mjs",
       "electron/fp-decode-cli.mjs",
       "electron/match-pool.mjs",
-      "electron/match-worker.js"
+      "electron/match-worker.js",
+      "electron/updater-download-cli.mjs"
     ],
     "extraResources": [
       {

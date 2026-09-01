@@ -16,6 +16,7 @@ const SETTINGS_SECTIONS=[
   {id:'sec-smartkeep', label:'智能保留', icon:'star'},
   {id:'sec-wl',      label:'手动保留', icon:'shield-check'},
   {id:'sec-history', label:'最近写入',   icon:'edit'},
+  {id:'sec-about',   label:'关于',   icon:'info-circle'},
 ];
 // DEFAULT_Q, DEFAULT_PICK, mergePickOrder are served by /rules-meta.js (source: lib/rules.js)
 
@@ -342,6 +343,72 @@ function ExecuteToast({config,pos,onDone}){
     e('div',{style:{fontSize:12,color:'var(--tx-secondary)',flex:1,minWidth:0}},config.message),
     config.btnLabel&&e(Btn,{small:true,icon:config.btnIcon,disabled:config.disabled,onClick:()=>{config.onAction?.();setPhase('leaving');}},config.disabled?config.disabledLabel:config.btnLabel),
     e('button',{onClick:()=>setPhase('leaving'),title:'关闭',style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-muted)',padding:4,flexShrink:0}},Icon('x',{fontSize:14}))
+  );
+}
+
+// 关于卡：版本号 / 检查更新（对比 GitHub release；发现新版本后分支进程下载、静默安装并退出）/
+// 联系反馈（GitHub issue）。状态区只显示状态文字，不显示进度。
+function AboutSection(){
+  const[checking,setChecking]=useState(false);
+  const[res,setRes]=useState(null);        // {current,hasUpdate,latest} | {error}
+  const[downloading,setDownloading]=useState(null); // 'downloading'|'installing'|null
+  const[downloadError,setDownloadError]=useState(null);
+  const openExternal=url=>api.post('/api/external/open',{url});
+
+  async function check(){
+    setChecking(true);setRes(null);setDownloadError(null);setDownloading(null);
+    try{
+      const r=await api.get('/api/update/check?current='+encodeURIComponent(APP_VERSION));
+      setRes(r.ok?r.data:{error:r.error||'检查更新失败'});
+    }catch(e){setRes({error:'网络错误，请检查网络连接'});}
+    finally{setChecking(false);}
+  }
+  async function download(){
+    const asset=res?.latest?.setupAsset;
+    if(!asset){if(res?.latest?.htmlUrl)openExternal(res.latest.htmlUrl);return;}
+    setDownloading('downloading');setDownloadError(null);
+    try{
+      const r=await api.post('/api/update/download',{url:asset.url,version:res.latest.version});
+      if(r.ok)setDownloading('installing'); // 应用随后退出进入静默安装
+      else{setDownloading(null);setDownloadError(r.error||'下载失败');}
+    }catch(e){setDownloading(null);setDownloadError('下载失败，请检查网络');}
+  }
+
+  const busy=checking||!!downloading;
+  return e(Card,{id:'sec-about'},
+    e(SH,{icon:'info-circle',title:'关于',sub:'查看当前版本、检查更新、提交问题反馈'}),
+    e('div',{style:{display:'flex',alignItems:'center',gap:10}},
+      e(Logo,{size:24}),
+      e('div',{style:{flex:1,minWidth:0}},
+        e('div',{style:{fontSize:13,fontWeight:600}},'MusicDedup'),
+        e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:1}},'本地重复音乐管理工具')
+      ),
+      e('span',{style:{fontSize:11,color:'var(--tx-primary)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}},'v'+APP_VERSION),
+      e(Btn,{small:true,icon:checking?'loader':'refresh',disabled:busy,onClick:check},checking?'检查中...':'检查更新')
+    ),
+    (busy||res||downloadError)&&e('div',{style:{marginTop:14,padding:'10px 12px',borderRadius:'var(--r-md)',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-subtle)',fontSize:12,lineHeight:1.6}},
+      downloading==='downloading'&&e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--tx-secondary)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'正在下载更新…'),
+      downloading==='installing'&&e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--tx-secondary)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'下载完成，正在安装新版本…'),
+      checking&&e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--tx-secondary)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'正在检查更新…'),
+      (!checking&&!downloading&&res&&res.error)&&e('div',{style:{color:'var(--red)'}},'检查更新失败：'+res.error),
+      (!checking&&!downloading&&res&&!res.error&&!res.latest)&&e('div',{style:{color:'var(--tx-muted)'}},'仓库暂无发布版本'),
+      (!checking&&!downloading&&res&&res.latest&&!res.hasUpdate)&&e('div',{style:{color:'var(--green)',display:'flex',alignItems:'center',gap:6}},Icon('circle-check',{fontSize:14}),'已是最新版本（v'+APP_VERSION+'）'),
+      (!checking&&!downloading&&res&&res.latest&&res.hasUpdate)&&e('div',null,
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap'}},
+          e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--amber)',fontWeight:600}},Icon('download',{fontSize:14}),'发现新版本 v'+res.latest.version),
+          e('div',{style:{display:'flex',gap:6}},
+            e(Btn,{small:true,icon:'download',disabled:busy,onClick:download},'下载更新'),
+            e(Btn,{small:true,variant:'ghost',onClick:()=>openExternal(res.latest.htmlUrl)},'查看更新内容')
+          )
+        ),
+        res.latest.publishedAt&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:6}},fmtDate(new Date(res.latest.publishedAt))+' 发布')
+      ),
+      downloadError&&e('div',{style:{color:'var(--red)'}},'更新失败：'+downloadError)
+    ),
+    e('div',{style:{display:'flex',alignItems:'center',gap:10,marginTop:16}},
+      e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'遇到问题或有建议？'),
+      e(Btn,{small:true,variant:'ghost',icon:'info-circle',onClick:()=>openExternal('https://github.com/geekieo/music-dedup/issues/new/choose')},'联系反馈')
+    )
   );
 }
 
@@ -711,7 +778,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-basic'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'tag',title:'基础匹配',sub:'标题 + 艺术家 + 时长',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'tag',title:'基础匹配',sub:'按标题、艺术家和时长比对重复，可设置时长容差',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
           e(ResetBar,{cardId:'sec-basic'})
         ),
         e('div',null,
@@ -724,7 +791,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       // 可执行文件，配置后在频谱声纹之外独立再比对一遍；同一份声纹数据也被刮削匹配的 AcoustID 使用。
       e(Card,{id:'sec-fp'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'wave-sine',title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'wave-sine',title:'声纹匹配',sub:'通过音频声纹识别重复，内置声纹开箱即用，可选配 CP 声纹',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'})),
           e(ResetBar,{cardId:'sec-fp'})
         ),
         e('div',null,
@@ -732,14 +799,14 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
           // 对应流程先提取后匹配；调低可减少解码内存占用。
           e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'同时处理文件数',e(Hint,{text:'声纹提取（解码）与声纹匹配的并发处理数，默认自动按 CPU 核数；调低可减少扫描内存占用。'})),e('span',{style:{fontSize:14,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},s.threads?s.threads:autoThreads)),
           e('input',{type:'range',min:1,max:12,value:s.threads||autoThreads,onChange:rangeChange('sec-fp','threads'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-fp');},onPointerUp:commitRange,onBlur:commitRange}),
-          e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
+          e('div',{style:{marginTop:14}},
             e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6}},e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4}},'频谱声纹相似度阈值',e(Hint,{text:'相似度达到此值即视为匹配。值越高越严格（匹配更少），越低越宽松（匹配更多）。标题、艺术家、时长近似的歌曲，即使低于此值仍会被判定为重复。'})),e('span',{style:{fontSize:15,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)'}},(s.threshold||90)+'%')),
             e('input',{type:'range',min:70,max:100,value:s.threshold||90,onChange:rangeChange('sec-fp','threshold'),onPointerDown:()=>{draggingRange.current=true;captureSnapshot('sec-fp');},onPointerUp:commitRange,onBlur:commitRange}),
             e('div',{style:{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--tx-faint)',marginTop:3}},e('span',null,'70% 宽松'),e('span',null,'100% 精确'))
           )
         ),
 
-        e('div',{style:{marginTop:16,paddingTop:14,borderTop:'0.5px solid var(--bd-subtle)'}},
+        e('div',{style:{marginTop:14}},
           e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',marginBottom:2,display:'flex',alignItems:'center'}},'CP 声纹（可选）',e(Hint,{text:'默认声纹无需配置。CP 声纹是可选第二种，配置后会额外检查一遍，通常能发现默认声纹漏掉的重复，结果会分开标注。同一份数据也会被「刮削匹配」用到。'})),
           e('div',{style:{display:'flex',gap:6}},
             e(PathInput,{
@@ -766,7 +833,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       ),
 
       e(Card,{id:'sec-scrape'},
-        e(SH,{icon:'cloud-download',title:'刮削匹配',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
+        e(SH,{icon:'cloud-download',title:'刮削匹配',sub:'向 MusicBrainz 查询录音信息，交叉确认重复',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
 
         e('div',{style:{display:'flex',alignItems:'center',padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
@@ -822,10 +889,10 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-smartkeep'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'star',title:'智能保留',sub:'上下移动调整 — 顶部优先级最高',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。修改后需点击顶部琥珀卡「立即重新计算」（或到扫描页执行「智能保留」），才会重新应用到现有重复组。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'star',title:'智能保留',sub:'按音质与保留优先级规则，自动决定保留哪个文件',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。修改后需点击顶部琥珀卡「立即重新计算」（或到扫描页执行「智能保留」），才会重新应用到现有重复组。'})),
           e(ResetBar,{cardId:'sec-smartkeep'})
         ),
-        e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'2px 0 4px'}},Icon('audio-levels',{fontSize:13}),'音质优先级'),
+        e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'0 0 6px'}},Icon('audio-levels',{fontSize:13}),'音质优先级'),
         q.map((f,i)=>e('div',{key:f,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<3?'var(--green)':i<6?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
           e('span',{style:{flex:1,fontSize:12,color:i<6?'var(--tx-secondary)':'var(--tx-faint)'}},f),
@@ -835,7 +902,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
             e('button',{onClick:()=>moveQ(i,1),disabled:i===q.length-1,style:{background:'none',border:'none',cursor:i===q.length-1?'default':'pointer',padding:'1px 4px',opacity:i===q.length-1?.2:1,color:'var(--tx-muted)'}},Icon('chevron-down',{fontSize:13}))
           )
         )),
-        e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'14px 0 4px'}},Icon('priority-podium',{fontSize:13}),'保留优先级',e(Hint,{text:'决定重复组中保留哪个文件，越靠上越优先。某文件缺少对应数据时，该轮不参与、也不会被淘汰。各维度含义见重复组详情「维度对比」旁的说明按钮。'})),
+        e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'14px 0 6px'}},Icon('priority-podium',{fontSize:13}),'保留优先级',e(Hint,{text:'决定重复组中保留哪个文件，越靠上越优先。某文件缺少对应数据时，该轮不参与、也不会被淘汰。各维度含义见重复组详情「维度对比」旁的说明按钮。'})),
         pick.map((key,i)=>e('div',{key,style:{display:'flex',alignItems:'center',gap:10,padding:'4px 10px',background:'var(--bg-subtle)',borderRadius:'var(--r-md)',marginBottom:3,border:'0.5px solid var(--bd-subtle)'}},
           e('span',{style:{width:20,fontSize:11,fontFamily:'var(--font-mono)',fontWeight:700,color:i<2?'var(--green)':i<4?'var(--amber)':'var(--tx-faint)',textAlign:'center'}},i+1),
           e('span',{style:{flex:1,fontSize:12,color:i<pick.length?'var(--tx-secondary)':'var(--tx-faint)'}},PICK_TAG_LABEL[key]||key),
@@ -848,7 +915,8 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       ),
 
       e(RetentionListSection,{player,retentionListKey,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup}),
-      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup,onTagsWritten})
+      e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup,onTagsWritten}),
+      e(AboutSection)
     )
   );
 }
