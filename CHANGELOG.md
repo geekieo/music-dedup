@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [2.0.0] — 2026-08-16
+## [2.0.0] — 2026-09-01
 
 > 从「前端网页 + 后端 Node 服务」转型为 **Electron 桌面客户端** 的大版本。完整历程：v2.0.0-alpha.1（内嵌 Express 骨架）→ v2.0.0-beta.0（IPC 化 + 代码清理）→ v2.0.0（原生体验 + 发布）。
 
@@ -15,16 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **无边框窗口（路线 A）** — Windows `titleBarStyle:hidden` + 原生控件悬浮（Aero Snap 免费）、macOS 交通灯避让、Linux 自绘三键；标题栏整行可拖拽
 - **扫描隔离 worker 化** — 整条 8 步扫描流水线移入独立 worker 线程，扫描时窗口其他功能全程流畅（主进程事件循环滞后 239ms → 33ms）；崩溃自动兜底广播终态
 - **扫描进度条 UI 重设计** — 单进度条 + 内联子% + 一行可关闭摘要（绿✓/红错/灰中止）
-- **并发数自适应** — 未设置时默认 `min(8, 核心数)`；新增「扫描性能」设置卡
+- **并发数自适应** — 未设置时默认 `min(12, 物理核)`（主进程经 `/api/system/info` 查询物理核数，非 SMT 机型也能用满）；并发设置并入「声纹匹配」卡，声纹提取与声纹匹配共用
 - **NSIS 安装包 + 便携版双产物** — 安装器自动创建带 AUMID 的任务栏/开始菜单快捷方式
-- **打包体积瘦身** — 99M → 80.5M（locales 裁剪 + maximum 压缩 + 删除 DXC/Vulkan 软渲染/许可文本）
+- **打包体积瘦身** — 99M → 78.5M（locales 裁剪 + maximum 压缩 + 删除 DXC/Vulkan 软渲染/许可文本）
+- **更新机制升级** — 新增「关于」卡（当前版本 / 检查更新 / 联系反馈）与更新 API：`/api/update/check`（GitHub release 对比）、`/api/update/download`（子进程流式下载）、`/api/update/install`（重建安装包路径并校验存在后静默安装）、`/api/external/open`（https 外链）；`forceQuit` 提取为共享 appState，自动安装退出绕过「扫描中关窗确认」
+- **自动检查 / 自动下载** — 启动时按 `auto_check_update` 静默检查，命中后在顶部「设置」标签显示版本徽标（点击直达「关于」卡并清除）；`auto_download_update` 开启后命中即后台下载安装包（只下载不安装），安装统一经 App 级确认弹窗（UpdateModal）
+- **声纹匹配并发执行** — 频谱 + CP 相似度计算移入 `worker_thread` 池（`match-pool.mjs`）并行，复用「同时处理文件数」，与解码池错峰互不抢资源；不用子进程（node-sqlite3-wasm 子进程退出触发 libuv 断言）
+- **双源刮削并行** — 批量刮削时 AcoustID 与 MusicBrainz 两阶段并行发起，整体进度按两源各自耗时权重合并（单调不减）；单曲手动刮削复用同一次搜索返回双源候选列表，不再二次请求
+- **批量阶段统一进度/日志** — `createPhaseLog`：开始日志、活动行 1s 刷新、日志按 10% 步进、结束日志；matcher 改为返回结果、由 scan-worker 统一补发完成日志
+- **持久化重复组分批事务** — 每 100 组分批提交，批间检查中止并让出事件循环；中止时当前批已写保留
 
 ### Changed
 
-- **移除 Express/HTTP 层** — 全部约 50 个接口改为 `ipcMain.handle` 单通道（URL 桥）+ 按域拆分 `electron/ipc/{library,files,tags,scrape,duplicates,scan,settings}.js`；SSE 进度改 IPC 事件；音频/封面走 `musicdedup://` 自定义协议直读磁盘
+- **移除 Express/HTTP 层** — 全部约 50 个接口改为 `ipcMain.handle` 单通道（URL 桥）+ 按域拆分 `electron/ipc/{library,files,tags,scrape,duplicates,scan,settings,about}.js`；SSE 进度改 IPC 事件；音频/封面走 `musicdedup://` 自定义协议直读磁盘
 - **代码清理** — `db.js` 按域拆 8 文件；`rules.js` 核心/展示两层拆分；tier 词汇收敛（绿蓝黄红单一出处）；相似度阈值收敛 `lib/constants.js`；`queryLibrary` 三件套合并；`app.js` 组件下沉 `components.js`
 - **统一图标（6 版迭代定稿）** — `assets/icon.svg` 单一源，构建期栅格化；header Logo/favicon/打包图标统一
 - **保留机制语义统一** — 保留名单与手动保留合并为统一「保留」，带来源标注 `smart | manual`；手动保留为级联结果的人工覆盖、不被重算冲掉
+- **扫描页重构为三阶段流程卡** — ① 音乐库更新 → ② 重复匹配（基础/声纹/刮削三法平行，可独立执行）→ ③ 智能保留；每单元自带「执行」+ 下拉（全量重新执行）；标题栏图标/标题随运行单元切换
+- **设置页卡片 UI 统一** — 卡片标题下文案统一为功能说明（`sub`→`hint`），各卡加统一图标，声纹卡移除设置项间分割线改间距
+- **术语统一** — 音乐内嵌字段「属性」→「标签」（README、库更新日志「文件属性提取」→「读取标签」）
+- **目录选择 UI 统一合并式** — 文本框 + 浏览按钮合并为 input-group（`PathInput` 组件），音乐目录编辑器与 CP 声纹路径共用同一造型；智能保留图标在星星内加钩
+- **重复组维度对比表自动列宽**，时长显示 `mm:ss`；窗口最小宽允许更窄
+- **移除 v1→v2 数据迁移** — 删 `migration.js` / `migrate-data.mjs`、首启自动迁移与 `--migrate` 参数
 
 ### Fixed
 
@@ -35,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`estimateStepWeights` 引用不存在列** — 新 schema 库扫描即 `no such column`；改正列名并把权重计算移入 try 块
 - **打包版扫描 worker 读 asar 依赖失败** — worker 不继承 Electron asar fs 补丁，声纹/扫描 worker 一直静默降级回主进程；`asarUnpack` 扩为 `lib/**` + `node_modules/**` + `scan-worker.js`，打包版扫描现已可用
 - **dev 进程身份显示「Electron」（任务栏/任务管理器）** — 本机 Start Menu 曾残留指向 electron.exe 的 `Electron.lnk` 干扰任务栏身份，且 dev 直跑 electron.exe 时任务管理器必然显示「Electron」。最终方案：主窗口显式 `icon` + 新增 dev 专用 `MusicDedup.exe`（electron.exe 复制 + rcedit 打图标/版本资源，`scripts/patch-dev-exe.mjs`），dev 全程显示 MusicDedup，不再依赖或污染 Start Menu 快捷方式
+- **一键执行末尾追加「扫描完成」完成日志**
+- **broker 将 `type` 并入 scanState 导致终态 `done` 重复广播**
+- **live 状态残留导致前端跳过终态日志**
+- **LSH 进度分母**从「所有 LSH 桶」改为「实际参与比较的多文件桶」
+- **隔离测试徽标在最小窗口宽度下换行变形**、挤压标题与版本号 — `nowrap` + `flexShrink:0` 并紧凑化
+- **扫描日志去重与配色统一**
+- **自动启动的扫描点亮对应执行卡**；标题栏随运行单元切换不再误显「扫描流程」
 
 ## [1.15.0] — 2026-08-03
 
