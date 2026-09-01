@@ -116,7 +116,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
   ]);
 
   // [列名, 固定布局列宽] — 列宽总和 100%，fixed 布局下表格恒等于容器宽，不撑破设置列
-  const COLS=[['播放','6%'],['标题','16%'],['艺术家','13%'],['修改字段','14%'],['修改时间','15%'],['剩余天数','14%'],['操作','22%']];
+  const COLS=[['播放','6%'],['标题','16%'],['艺术家','12%'],['修改字段','18%'],['修改时间','12%'],['剩余天数','10%'],['操作','25%']];
 
   return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
@@ -129,7 +129,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
       danger:true,
     }),
     e(SH,{icon:'edit',title:`最近写入${rows?` （${rows.length} 条）`:''} `,
-      sub:'以音乐文件为单位，保留首次写入前的完整标签快照，可一步撤销；30天后自动清除'}),
+      hint:'以音乐文件为单位，保留首次写入前的完整标签快照，可一步撤销；30天后自动清除'}),
     rows===null
       ? e('div',{style:{textAlign:'center',padding:20}},e('i',{className:'ti ti-loader spin',style:{fontSize:20}}))
       : rows.length===0
@@ -247,7 +247,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
   return e(Card,{id:'sec-wl',style:{minHeight:120}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
     confirmDialog,
-    e(SH,{icon:'shield-check',title:`手动保留（${rows.length} 个文件）`,sub:'你手动标记保留的文件，参与重复检测但不会被删除'}),
+    e(SH,{icon:'shield-check',title:`手动保留（${rows.length} 个文件）`,hint:'你手动标记保留的文件，参与重复检测但不会被删除'}),
     loading?e('div',{style:{textAlign:'center',padding:30,color:'var(--tx-faint)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:22}})):
     rows.length===0
       ? e('div',{style:{textAlign:'center',padding:'24px 0',color:'var(--tx-faint)',lineHeight:2}},
@@ -346,73 +346,57 @@ function ExecuteToast({config,pos,onDone}){
   );
 }
 
-// 关于卡：版本号 / 检查更新（对比 GitHub release；发现新版本后分支进程下载、静默安装并退出）/
-// 联系反馈（GitHub issue）。状态区只显示状态文字，不显示进度。
-function AboutSection(){
-  const[checking,setChecking]=useState(false);
-  const[res,setRes]=useState(null);        // {current,hasUpdate,latest} | {error}
-  const[downloading,setDownloading]=useState(null); // 'downloading'|'installing'|null
-  const[downloadError,setDownloadError]=useState(null);
-  const openExternal=url=>api.post('/api/external/open',{url});
-
-  async function check(){
-    setChecking(true);setRes(null);setDownloadError(null);setDownloading(null);
-    try{
-      const r=await api.get('/api/update/check?current='+encodeURIComponent(APP_VERSION));
-      setRes(r.ok?r.data:{error:r.error||'检查更新失败'});
-    }catch(e){setRes({error:'网络错误，请检查网络连接'});}
-    finally{setChecking(false);}
-  }
-  async function download(){
-    const asset=res?.latest?.setupAsset;
-    if(!asset){if(res?.latest?.htmlUrl)openExternal(res.latest.htmlUrl);return;}
-    setDownloading('downloading');setDownloadError(null);
-    try{
-      const r=await api.post('/api/update/download',{url:asset.url,version:res.latest.version});
-      if(r.ok)setDownloading('installing'); // 应用随后退出进入静默安装
-      else{setDownloading(null);setDownloadError(r.error||'下载失败');}
-    }catch(e){setDownloading(null);setDownloadError('下载失败，请检查网络');}
-  }
-
-  const busy=checking||!!downloading;
+// 关于卡：当前版本 / 检查更新 / 自动检查、自动下载开关 / 联系反馈。
+// 结果内联显示在「当前版本」行（版本徽章与检查更新按钮之间留白处），不插行、不走 Toast；
+// 发现新版本 / 自动下载完成 → App 级确认弹窗（UpdateModal）。自动检查命中只在顶部「设置」
+// 标签显示徽标（App 派生），进入本卡或关闭自动检查即清除。
+function AboutSection({update,s,setS,onAutoCheckToggle}){
+  const own=useUpdate();            // 无条件调用，遵守 hooks 规则；冒烟测试未传 update 时兜底
+  const upd=update||own;
+  const autoCheck=s.auto_check_update!==false;
+  const autoDownload=!!s.auto_download_update;
+  // 行内状态，优先级：检查/下载错误 > 下载中/已下载 > 发现新版本 > 手动检查结果
+  const status=upd.err?{t:'检查失败：'+upd.err,c:'var(--red)'}
+    : upd.dlError?{t:'更新失败：'+upd.dlError,c:'var(--red)'}
+    : upd.dl==='downloading'?{t:'正在下载更新…',c:'var(--tx-muted)'}
+    : upd.res?.hasUpdate&&upd.res.latest?{t:upd.dl==='downloaded'?'新版本 v'+upd.res.latest.version+' 已下载':'发现新版本 v'+upd.res.latest.version,c:'var(--amber)'}
+    : upd.checked?(upd.res?.latest?{t:'已是最新版本',c:'var(--green)'}:{t:'仓库暂无发布版本',c:'var(--tx-muted)'})
+    : null;
   return e(Card,{id:'sec-about'},
-    e(SH,{icon:'info-circle',title:'关于',sub:'查看当前版本、检查更新、提交问题反馈'}),
-    e('div',{style:{display:'flex',alignItems:'center',gap:10}},
-      e(Logo,{size:24}),
-      e('div',{style:{flex:1,minWidth:0}},
-        e('div',{style:{fontSize:13,fontWeight:600}},'MusicDedup'),
-        e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:1}},'本地重复音乐管理工具')
-      ),
-      e('span',{style:{fontSize:11,color:'var(--tx-primary)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}},'v'+APP_VERSION),
-      e(Btn,{small:true,icon:checking?'loader':'refresh',disabled:busy,onClick:check},checking?'检查中...':'检查更新')
-    ),
-    (busy||res||downloadError)&&e('div',{style:{marginTop:14,padding:'10px 12px',borderRadius:'var(--r-md)',background:'var(--bg-subtle)',border:'0.5px solid var(--bd-subtle)',fontSize:12,lineHeight:1.6}},
-      downloading==='downloading'&&e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--tx-secondary)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'正在下载更新…'),
-      downloading==='installing'&&e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--tx-secondary)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'下载完成，正在安装新版本…'),
-      checking&&e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--tx-secondary)'}},e('i',{className:'ti ti-loader spin',style:{fontSize:12}}),'正在检查更新…'),
-      (!checking&&!downloading&&res&&res.error)&&e('div',{style:{color:'var(--red)'}},'检查更新失败：'+res.error),
-      (!checking&&!downloading&&res&&!res.error&&!res.latest)&&e('div',{style:{color:'var(--tx-muted)'}},'仓库暂无发布版本'),
-      (!checking&&!downloading&&res&&res.latest&&!res.hasUpdate)&&e('div',{style:{color:'var(--green)',display:'flex',alignItems:'center',gap:6}},Icon('circle-check',{fontSize:14}),'已是最新版本（v'+APP_VERSION+'）'),
-      (!checking&&!downloading&&res&&res.latest&&res.hasUpdate)&&e('div',null,
-        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexWrap:'wrap'}},
-          e('div',{style:{display:'flex',alignItems:'center',gap:6,color:'var(--amber)',fontWeight:600}},Icon('download',{fontSize:14}),'发现新版本 v'+res.latest.version),
-          e('div',{style:{display:'flex',gap:6}},
-            e(Btn,{small:true,icon:'download',disabled:busy,onClick:download},'下载更新'),
-            e(Btn,{small:true,variant:'ghost',onClick:()=>openExternal(res.latest.htmlUrl)},'查看更新内容')
+    e(SH,{icon:'info-circle',title:'关于',hint:'查看当前版本、检查更新、联系反馈'}),
+    // 更新策略组：当前版本（主行）+ 自动检查/自动下载（次级行，缩进体现从属）
+    e('div',{style:{marginBottom:14}},
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
+        e('span',{style:{fontSize:12,color:'var(--tx-secondary)'}},'当前版本'),
+        e('div',{style:{flex:1,display:'flex',alignItems:'center',justifyContent:'flex-end',gap:8,minWidth:0}},
+          status&&e('span',{style:{fontSize:12,color:status.c,whiteSpace:'nowrap'}},status.t),
+          e('span',{style:{fontSize:11,color:'var(--tx-primary)',background:'var(--bg-muted)',padding:'2px 8px',borderRadius:4,border:'0.5px solid var(--bd-default)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}},'v'+APP_VERSION),
+          e(Btn,{small:true,icon:upd.checking?'loader':'refresh',disabled:upd.checking||upd.dl==='downloading'||upd.dl==='installing',onClick:()=>upd.check()},
+            // 隐藏占位 + 绝对定位叠加：按钮宽度恒等于「检查更新/检查中...」中较宽者，状态切换不改变行内布局
+            e('span',{style:{position:'relative',display:'inline-block'}},
+              e('span',{style:{visibility:'hidden'}},'检查中...'),
+              e('span',{style:{position:'absolute',left:0,top:0,right:0,bottom:0,display:'flex',alignItems:'center',justifyContent:'center'}},upd.checking?'检查中...':'检查更新')
+            )
           )
-        ),
-        res.latest.publishedAt&&e('div',{style:{fontSize:11,color:'var(--tx-faint)',marginTop:6}},fmtDate(new Date(res.latest.publishedAt))+' 发布')
+        )
       ),
-      downloadError&&e('div',{style:{color:'var(--red)'}},'更新失败：'+downloadError)
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:10}},
+        e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},e('span',{style:{width:14,flexShrink:0,borderTop:'1px solid var(--bd-default)',marginRight:8}}),'自动检查更新',e(Hint,{text:'启动时自动检查新版本。发现新版本不弹窗，只在顶部「设置」旁显示提示徽标。'})),
+        e('input',{type:'checkbox',checked:autoCheck,onChange:ev=>{const v=ev.target.checked;setS(p=>({...p,auto_check_update:v}));onAutoCheckToggle?.(v);}})
+      ),
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:10}},
+        e('span',{style:{fontSize:12,color:'var(--tx-secondary)',display:'flex',alignItems:'center'}},e('span',{style:{width:14,flexShrink:0,borderTop:'1px solid var(--bd-default)',marginRight:8}}),'自动下载',e(Hint,{text:'检测到新版本后自动后台下载安装包，安装时仍会征求你的确认。需先开启「自动检查更新」。'})),
+        e('input',{type:'checkbox',checked:autoDownload,disabled:!autoCheck,onChange:ev=>setS(p=>({...p,auto_download_update:ev.target.checked}))})
+      )
     ),
-    e('div',{style:{display:'flex',alignItems:'center',gap:10,marginTop:16}},
+    e('div',{style:{display:'flex',alignItems:'center',gap:10}},
       e('div',{style:{flex:1,fontSize:12,color:'var(--tx-secondary)'}},'遇到问题或有建议？'),
-      e(Btn,{small:true,variant:'ghost',icon:'info-circle',onClick:()=>openExternal('https://github.com/geekieo/music-dedup/issues/new/choose')},'联系反馈')
+      e(Btn,{small:true,variant:'ghost',icon:'info-circle',onClick:()=>api.post('/api/external/open',{url:'https://github.com/geekieo/music-dedup/issues/new/choose'})},'联系反馈')
     )
   );
 }
 
-function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,dirSeq,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten,active}){
+function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,dirChanged,dirSeq,onMatchAffectingChange,onScrapeReapply,scanRunning,player,retentionListKey,writeHistoryKey,onLocateFile,onNavigateToDuplicateGroup,onLocate,mainScrollRef,onTagsWritten,active,update,onAutoCheckToggle}){
   // 并发默认值 = 自动 min(12, 物理核)（主进程经 /api/system/info 查询；非 SMT 机型也能用满物理核）
   const [autoThreads,setAutoThreads]=useState(Math.min(12, Math.round((navigator.hardwareConcurrency||8)/2)));
   const[s,setS]=useState(null);
@@ -756,7 +740,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       toastConfig&&colRect&&e(ExecuteToast,{key:toast.key+':'+toast.seq,config:toastConfig,pos:colRect,onDone:()=>setToast(null)}),
 
       e(Card,{id:'sec-dirs'},
-        e(SH,{icon:'folders',title:'音乐目录',sub:'添加包含音乐文件的文件夹到音乐库'}),
+        e(SH,{icon:'folders',title:'音乐目录',hint:'添加包含音乐文件的文件夹到音乐库'}),
         e(ScanDirsEditor,{dirs,onAddDir,onRemoveDir,onEnumOnly}),
         e('button',{onClick:()=>setShowExclude(v=>!v),style:{background:'none',border:'none',cursor:'pointer',color:'var(--tx-faint)',fontSize:11,display:'flex',alignItems:'center',gap:4,padding:0,marginTop:10}},
           e('i',{className:`ti ti-chevron-${showExclude?'up':'down'}`,style:{fontSize:12}}),'高级：排除规则 / 增量扫描'
@@ -778,7 +762,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-basic'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'tag',title:'基础匹配',sub:'按标题、艺术家和时长比对重复，可设置时长容差',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，不需要声纹。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'tag',title:'基础匹配',hint:'按标题、艺术家和时长直接比对，是最主要、最可靠的重复判定依据，可设时长容差，不需要声纹。'})),
           e(ResetBar,{cardId:'sec-basic'})
         ),
         e('div',null,
@@ -791,7 +775,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       // 可执行文件，配置后在频谱声纹之外独立再比对一遍；同一份声纹数据也被刮削匹配的 AcoustID 使用。
       e(Card,{id:'sec-fp'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'wave-sine',title:'声纹匹配',sub:'通过音频声纹识别重复，内置声纹开箱即用，可选配 CP 声纹',hint:'通过对比音频声纹识别重复，内置声纹开箱即用。可选配第二种声纹（CP 声纹），能额外发现一些漏掉的重复。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'wave-sine',title:'声纹匹配',hint:'通过对比音频声纹识别重复，内置开箱即用；可选配第二种声纹（CP），能额外发现漏掉的重复。'})),
           e(ResetBar,{cardId:'sec-fp'})
         ),
         e('div',null,
@@ -833,7 +817,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
       ),
 
       e(Card,{id:'sec-scrape'},
-        e(SH,{icon:'cloud-download',title:'刮削匹配',sub:'向 MusicBrainz 查询录音信息，交叉确认重复',hint:'向 MusicBrainz 查询录音信息，可选再叠加 AcoustID 声纹识别。两个文件命中同一条录音即视为交叉确认，是比对比声纹更强的重复证据。'}),
+        e(SH,{icon:'cloud-download',title:'刮削匹配',hint:'向 MusicBrainz 查询录音信息，可选叠加 AcoustID 声纹。两个文件命中同一条录音即视为交叉确认，是更强的重复证据。'}),
 
         e('div',{style:{display:'flex',alignItems:'center',padding:'8px 10px',marginBottom:12,background:'var(--bg-subtle)',borderRadius:'var(--r-md)',border:'0.5px solid var(--bd-subtle)'}},
           e('input',{type:'checkbox',id:'ignoreScript',checked:s.ignore_script_variant!==false,
@@ -889,7 +873,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(Card,{id:'sec-smartkeep'},
         e('div',{style:{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10}},
-          e('div',{style:{flex:1}},e(SH,{icon:'star',title:'智能保留',sub:'按音质与保留优先级规则，自动决定保留哪个文件',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。修改后需点击顶部琥珀卡「立即重新计算」（或到扫描页执行「智能保留」），才会重新应用到现有重复组。'})),
+          e('div',{style:{flex:1}},e(SH,{icon:'star',title:'智能保留',hint:'音质优先级决定不同格式/码率哪个更优；保留优先级决定重复组中保留哪个文件。'})),
           e(ResetBar,{cardId:'sec-smartkeep'})
         ),
         e('div',{style:{fontSize:12,fontWeight:500,color:'var(--tx-secondary)',display:'flex',alignItems:'center',gap:4,margin:'0 0 6px'}},Icon('audio-levels',{fontSize:13}),'音质优先级'),
@@ -916,7 +900,7 @@ function SettingsView({dirs,onAddDir,onRemoveDir,onEnumOnly,onDismissDirChanged,
 
       e(RetentionListSection,{player,retentionListKey,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup}),
       e(WriteHistorySection,{writeHistoryKey,player,onLocateFile,onLocate,onLocateInDuplicates:onNavigateToDuplicateGroup,onTagsWritten}),
-      e(AboutSection)
+      e(AboutSection,{update,s,setS,onAutoCheckToggle})
     )
   );
 }

@@ -394,6 +394,8 @@ function App(){
   const[writeHistoryKey,setWriteHistoryKey]=useState(0);
   const[confirmCloseOpen,setConfirmCloseOpen]=useState(false); // 任务进行中关窗的确认弹窗
   const player=useGlobalPlayer();
+  const upd=useUpdate();
+  const[updateBadge,setUpdateBadge]=useState(null); // 自动检查命中的新版本号；进入设置/关闭自动检查时清除
 
   function refreshStats(){
     api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});
@@ -406,6 +408,24 @@ function App(){
     refreshStats();
     api.get('/api/settings').then(r=>{if(r.ok)setSettingsState(r.data);});
   },[]);
+
+  // 启动自动检查：settings 加载后按 auto_check_update 跑一次（静默，命中时由下方 effect 派生徽标）
+  const autoCheckedRef=useRef(false);
+  useEffect(()=>{
+    if(!settings||autoCheckedRef.current)return;
+    autoCheckedRef.current=true;
+    if(settings.auto_check_update!==false)upd.check({silent:true});
+  },[settings]);
+  // 静默检查命中 → 「设置」标签徽标；自动下载开启时后台下载一次（只下载，安装待用户确认）
+  useEffect(()=>{
+    if(!upd.res?.hasUpdate||!upd.res.latest)return;
+    setUpdateBadge(upd.res.latest.version);
+    if(settings?.auto_download_update&&upd.dl===null)upd.download({silent:true});
+  },[upd.res,upd.dl]);
+  // 自动下载完成 → 打开 App 级确认弹窗（安装需用户确认）；手动下载走 install 不触发
+  useEffect(()=>{
+    if(upd.dl==='downloaded'&&!upd.promptOpen)upd.setPromptOpen(true);
+  },[upd.dl]);
 
   // 统一图标生成：首启栅格化 favicon SVG → PNG data URL，窗口/任务栏图标(256px)
   // 同源送达主进程（不提交图片资产，源为 assets/icon.svg）
@@ -602,9 +622,16 @@ function App(){
         )
       ),
       e('nav',{style:{display:'flex',gap:4,justifySelf:'center',WebkitAppRegion:'no-drag'}},
-        TABS.map(t=>e('button',{key:t.id,onClick:()=>setView(t.id),style:{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:view===t.id?'var(--amber-bg)':'none',border:'none',outline:'none',borderRadius:'var(--r-md)',transition:'all .15s'}},
+        TABS.map(t=>e('button',{key:t.id,
+          onClick:()=>{ setView(t.id);
+            // 有新版本时点「设置」直接跳到版本更新卡，并清除徽标（已看到）
+            if(t.id==='settings'&&updateBadge){ setUpdateBadge(null);
+              setTimeout(()=>document.getElementById('sec-about')?.scrollIntoView({behavior:'smooth',block:'start'}),150); } },
+          title:t.id==='settings'&&updateBadge?'发现新版本，点击前往「设置→关于」':undefined,
+          style:{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',cursor:'pointer',fontSize:12,fontWeight:view===t.id?600:400,color:view===t.id?'var(--amber)':'var(--tx-muted)',background:view===t.id?'var(--amber-bg)':'none',border:'none',outline:'none',borderRadius:'var(--r-md)',transition:'all .15s'}},
           Icon(t.icon,{fontSize:15}),t.label,
-          t.badge?e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',minWidth:16,textAlign:'center'}},t.badge):null
+          t.badge?e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',minWidth:16,textAlign:'center'}},t.badge):null,
+          t.id==='settings'&&updateBadge&&e('span',{style:{fontSize:10,fontWeight:700,background:'var(--amber)',color:'#fff',borderRadius:8,padding:'1px 6px',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}},'v'+updateBadge)
         ))
       ),
       e('div',{style:{justifySelf:'end',display:'flex',WebkitAppRegion:'no-drag'}},
@@ -619,7 +646,7 @@ function App(){
         e('div',{style:{display:view==='library'?'block':'none'}},e(LibraryView,{player:player.lite,dirs,onAddDir:addScanDirNav,onRemoveDir:removeScanDir,onEnumOnly:refreshLibrary,onLocate:{setLocateInLibrary:fn=>{locateInLibraryRef.current=fn;}},mainScrollRef,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});}})),
         e('div',{style:{display:view==='duplicates'?'block':'none'}},e(DuplicatesView,{player:player.lite,scanDoneKey,libraryKey,onRetentionChange:()=>setRetentionListKey(k=>k+1),onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLibraryMutated:()=>{setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocate:{setLocateInDuplicates:fn=>{locateInDuplicatesRef.current=fn;}}})),
         e('div',{style:{display:view==='scanner'?'block':'none'}},e(ScannerView,{scan,hasPlayer:!!player.current})),
-        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{active:view==='settings',dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,dirSeq:settings?._dirChanged||0,onEnumOnly:()=>{refreshLibrary();},onDismissDirChanged:()=>setSettingsState(p=>({...(p||{}),_dirChanged:0})),onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef}))
+        e('div',{style:{display:view==='settings'?'block':'none'}},e(SettingsView,{active:view==='settings',dirs,onAddDir:addScanDirOnly,onRemoveDir:removeScanDir,dirChanged:!!settings?._dirChanged,dirSeq:settings?._dirChanged||0,onEnumOnly:()=>{refreshLibrary();},onDismissDirChanged:()=>setSettingsState(p=>({...(p||{}),_dirChanged:0})),onMatchAffectingChange,onScrapeReapply,scanRunning:scan.status.running,player:player.lite,retentionListKey,writeHistoryKey,onTagsWritten:()=>{setWriteHistoryKey(k=>k+1);setLibraryKey(k=>k+1);api.get('/api/stats').then(r=>{if(r.ok&&r.data)setPending(r.data.pendingGroups||0);});},onLocateFile:navigateToFile,onNavigateToDuplicateGroup:navigateToDuplicateGroup,onLocate:{setLocateInRetentionList:fn=>{locateInRetentionListRef.current=fn;},setLocateInHistory:fn=>{locateInHistoryRef.current=fn;}},mainScrollRef,update:upd,onAutoCheckToggle:v=>{if(!v)setUpdateBadge(null);}}))
       )
     ),
     // PlayerBar in normal flow — pushes content up, never overlaps.
@@ -630,6 +657,10 @@ function App(){
       message:e('span',null,'有任务正在执行（扫描进行中）。确认停止任务并关闭应用？未完成的扫描结果将丢失。'),
       onConfirm:()=>{ api.post('/api/scan/abort'); if(window.bridge?.confirmClose)window.bridge.confirmClose(); },
       onClose:()=>setConfirmCloseOpen(false),
-    })
+    }),
+    // 更新检查反馈：发现新版本/自动下载完成 → App 级确认弹窗；其余状态行内显示（不插行）
+    upd.promptOpen&&upd.res?.hasUpdate&&e(UpdateModal,{res:upd.res,dl:upd.dl,dlError:upd.dlError,
+      onDownload:()=>upd.download(),onInstall:upd.install,
+      onOpenExternal:url=>api.post('/api/external/open',{url}),onClose:upd.close})
   );
 }

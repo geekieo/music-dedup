@@ -303,7 +303,7 @@ function IconAction({icon,title,onClick,active,activeColor='var(--amber)',active
     Icon(icon,{fontSize:size}));
 }
 function Card({children,style:sx={},id}){return e('div',{id,style:{background:'var(--bg-base)',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-lg)',boxShadow:'var(--sh-xs)',padding:'18px 20px',...sx}},children);}
-function SH({title,sub,hint,icon}){return e('div',{style:{marginBottom:18}},e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center',gap:5}},icon&&Icon(icon,{fontSize:14,color:'var(--tx-muted)'}),title,e(Hint,{text:hint})),sub&&e('div',{style:{fontSize:11,color:'var(--tx-muted)',marginTop:4,lineHeight:1.6}},sub));}
+function SH({title,hint,icon}){return e('div',{style:{marginBottom:18}},e('div',{style:{fontSize:13,fontWeight:600,color:'var(--tx-primary)',display:'flex',alignItems:'center',gap:5}},icon&&Icon(icon,{fontSize:14,color:'var(--tx-muted)'}),title,e(Hint,{text:hint})));}
 function Toast({msg,type='info',onClose}){
   useEffect(()=>{const t=setTimeout(onClose,3800);return()=>clearTimeout(t);},[]);
   const S={error:{bg:'var(--red-bg)',col:'var(--red)',bd:'var(--red-bd)',ic:'alert-circle'},success:{bg:'var(--green-bg)',col:'var(--green)',bd:'var(--green-bd)',ic:'circle-check'},info:{bg:'var(--amber-bg)',col:'var(--amber)',bd:'var(--amber-bd)',ic:'info-circle'}};
@@ -367,7 +367,72 @@ function useConfirmAction(){
   return{confirmAction,confirmDialog};
 }
 
+/* ── 更新检查 / 下载 ── 与设置页「关于」卡共用（App 单例 + AboutSection 兜底）。
+   check({silent}) 静默检查不弹提示，命中结果由 App 派生顶部「设置」标签徽标；
+   手动检查命中打开确认弹窗（App 级 UpdateModal）；行内状态由 AboutSection 从 res/checked/err 派生。
+   download({silent}) 自动下载只下载不安装，安装由 install() 在用户确认后触发。 */
+function useUpdate(){
+  const[checking,setChecking]=useState(false);
+  const[res,setRes]=useState(null);       // {current,hasUpdate,latest} | {error}
+  const[promptOpen,setPromptOpen]=useState(false);
+  const[dl,setDl]=useState(null);         // null|'downloading'|'downloaded'|'installing'
+  const[dlError,setDlError]=useState(null);
+  const[checked,setChecked]=useState(false); // 手动检查过（非 silent），行内据此显示「已是最新」
+  const[err,setErr]=useState(null);          // 手动检查失败信息
 
+  async function check(opts={}){
+    setChecking(true);setErr(null);setDlError(null);
+    if(!opts.silent)setChecked(true);
+    try{
+      const r=await api.get('/api/update/check?current='+encodeURIComponent(APP_VERSION));
+      if(r.ok){
+        setRes(r.data);
+        if(r.data.hasUpdate&&r.data.latest&&!opts.silent)setPromptOpen(true);
+      }else if(!opts.silent){ setErr(r.error||'检查更新失败'); }
+    }catch(e){
+      if(!opts.silent)setErr('网络错误，请检查网络连接');
+    }finally{ setChecking(false); }
+  }
+  async function download(opts={}){
+    const asset=res?.latest?.setupAsset;
+    if(!asset||dl)return;
+    setDl('downloading');setDlError(null);
+    try{
+      const r=await api.post('/api/update/download',{url:asset.url,version:res.latest.version,auto:!!opts.silent});
+      if(r.ok)setDl(opts.silent?'downloaded':'installing');
+      else{setDl(null);setDlError(r.error||'下载失败');}
+    }catch(e){setDl(null);setDlError('下载失败，请检查网络');}
+  }
+  async function install(){
+    const v=res?.latest?.version;
+    if(!v)return;
+    setDl('installing');setDlError(null);
+    try{
+      const r=await api.post('/api/update/install',{version:v});
+      if(!r.ok){setDl('downloaded');setDlError(r.error||'安装失败');}
+    }catch(e){setDl('downloaded');setDlError('安装失败，请检查网络');}
+  }
+  function close(){setPromptOpen(false);}
+
+  return{checking,res,promptOpen,setPromptOpen,dl,dlError,checked,err,check,download,install,close};
+}
+
+// 发现新版本弹窗：手动「检查更新」命中时展示。dl 状态驱动按钮（下载中/已下载→立即安装）。
+function UpdateModal({res,dl,dlError,onDownload,onInstall,onOpenExternal,onClose}){
+  const latest=res?.latest;
+  if(!latest)return null;
+  return e(Modal,{title:'发现新版本',description:`v${res.current} → v${latest.version}`+(latest.publishedAt?' · '+fmtDate(new Date(latest.publishedAt)):''),onClose,width:500},
+    latest.body&&e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,whiteSpace:'pre-wrap',maxHeight:280,overflowY:'auto',scrollbarGutter:'stable'}},latest.body),
+    dlError&&e('div',{style:{color:'var(--red)',fontSize:12,marginTop:10}},'更新失败：'+dlError),
+    e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}},
+      e(Btn,{variant:'ghost',onClick:()=>onOpenExternal&&onOpenExternal(latest.htmlUrl)},'查看更新内容'),
+      dl==='downloading'&&e(Btn,{icon:'loader',disabled:true},'正在下载更新…'),
+      dl==='installing'&&e(Btn,{icon:'loader',disabled:true},'正在安装新版本…'),
+      dl==='downloaded'&&e(Btn,{icon:'download',onClick:onInstall},'立即安装'),
+      dl===null&&e(Btn,{icon:'download',onClick:onDownload},'下载更新')
+    )
+  );
+}
 
 /* ── 无边框：Linux 自绘窗口控制三键（frame:false 无原生按钮；Win/mac 不渲染）── */
 function WindowControls() {

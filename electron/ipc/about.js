@@ -8,6 +8,7 @@
 // 外链：POST /api/external/open {url} —— 校验 https 后 shell.openExternal。
 import { createRequire } from 'module';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -107,13 +108,26 @@ export const routes = [
     const target = path.join(app.getPath('temp'), 'MusicDedup', `MusicDedup Setup ${version}.exe`);
     const result = await downloadTo(target, url);
     if (!result.ok) return result;
-    // 自动升级：仅 Windows（NSIS Setup /S）。安装需退出应用，绕过扫描中关窗确认；
+    // auto（自动下载）：只下载不安装，安装由 /api/update/install 在用户确认后触发。
+    // 非 auto：立即静默安装（NSIS Setup /S）。安装需退出应用，绕过扫描中关窗确认；
     // 非 Windows 只完成下载，不自动安装。
-    if (process.platform === 'win32') {
+    if (!body.auto && process.platform === 'win32') {
       appState.forceQuit = true;
       spawnInstallAndCleanup(target);
       setTimeout(() => { try { app.quit(); } catch { /* 退出失败不阻塞 */ } }, 1500);
     }
+    return { ok: true, version };
+  } },
+  // 自动下载后由用户确认安装：重建临时安装包路径，校验存在后触发静默安装（仅 Windows）。
+  { method: 'POST', path: '/api/update/install', handler: async (_p, _q, body) => {
+    if (process.platform !== 'win32') return { ok: false, error: '仅支持 Windows 静默安装' };
+    const version = String((body && body.version) || '').trim();
+    if (!/^\d+\.\d+\.\d+$/.test(version)) return { ok: false, error: '版本号格式无效' };
+    const target = path.join(app.getPath('temp'), 'MusicDedup', `MusicDedup Setup ${version}.exe`);
+    if (!existsSync(target)) return { ok: false, error: '安装包不存在，请重新下载更新' };
+    appState.forceQuit = true;
+    spawnInstallAndCleanup(target);
+    setTimeout(() => { try { app.quit(); } catch { /* 退出失败不阻塞 */ } }, 1500);
     return { ok: true, version };
   } },
   { method: 'POST', path: '/api/external/open', handler: async (_p, _q, body) => {
