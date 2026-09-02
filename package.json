@@ -44,7 +44,9 @@
     "scan:smartkeep-scan": "node scripts/smartkeep-scan-test.mjs",
     "test:setup": "node scripts/setup-test-env.mjs",
     "icons": "node scripts/render-icons.mjs",
-    "build:win": "node scripts/build-win.mjs"
+    "build:win": "node scripts/build-win.mjs",
+    "build:mac": "node scripts/build-mac.mjs",
+    "build:linux": "electron-builder --linux AppImage deb --publish never"
   },
   "dependencies": {
     "audio-decode": "^3.10.1",
@@ -84,12 +86,6 @@
       "electron/match-worker.js",
       "electron/updater-download-cli.mjs"
     ],
-    "extraResources": [
-      {
-        "from": "fpcalc.exe",
-        "to": "fpcalc.exe"
-      }
-    ],
     "npmRebuild": false,
     "afterPack": "scripts/after-pack.cjs",
     "electronLanguages": [
@@ -124,10 +120,24 @@
       "artifactName": "MusicDedup-Setup-${version}.exe",
       "differentialPackage": false
     },
+    "mac": {
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.music",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "MusicDedup-${version}-${arch}.${ext}"
+    },
     "linux": {
       "icon": "assets/icons",
+      "category": "Audio",
+      "maintainer": "geekieo <geekieo@users.noreply.github.com>",
+      "synopsis": "本地重复音乐管理工具",
+      "description": "纯 JS 声纹识别 + 智能保留策略的本地重复音乐管理工具。",
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ]
     }
   }

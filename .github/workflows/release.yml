@@ -1,7 +1,8 @@
-# Release — 推 v* 标签后自动构建并发布
+# Release — 推 v* 标签后跨平台构建并发布
 #
-# 流程：推 vX.Y.Z 标签 → npm ci → electron-builder 构建（NSIS 安装包 + 便携 exe→zip，
-# latest.yml 由 electron-builder 生成）→ 打包版冒烟 → 创建 GitHub Release 并上传全部产物。
+# 流程：推 vX.Y.Z 标签 → Windows（NSIS 安装包 + 便携 exe→zip）、macOS（dmg + zip，x64+arm64）、
+# Linux（AppImage + deb）三平台并行构建 → 各平台产物（含 latest.yml / latest-mac.yml /
+# latest-linux.yml）上传 → 汇总 job 创建 GitHub Release 并上传全部产物。
 name: Release
 
 on:
@@ -13,8 +14,46 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: windows-latest
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            icons: node scripts/render-icons.mjs
+            build: node scripts/build-win.mjs nsis portable
+            smoke: true
+            key: windows
+            upload: |
+              release/MusicDedup-Setup-*.exe
+              release/MusicDedup-Portable.zip
+              release/latest.yml
+          - name: macos
+            os: macos-latest
+            icons: ''
+            build: node scripts/build-mac.mjs
+            smoke: false
+            key: macos
+            upload: |
+              release/*.dmg
+              release/*.zip
+              release/latest-mac.yml
+          - name: linux
+            os: ubuntu-latest
+            icons: xvfb-run -a node scripts/render-icons.mjs
+            build: npx electron-builder --linux AppImage deb --publish never
+            smoke: false
+            key: linux
+            upload: |
+              release/*.AppImage
+              release/*.deb
+              release/latest-linux.yml
+    env:
+      # 无签名证书时不让 electron-builder 尝试自动发现/签名（macOS 未签名产物可正常构建）
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
 
@@ -26,11 +65,34 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 构建（NSIS + 便携 exe→zip，不发布；latest.yml 照常生成）
-        run: node scripts/build-win.mjs nsis portable
+      - name: 生成图标（assets/icons png + icon.ico；macOS 由 build-mac 生成 icon.icns）
+        if: ${{ matrix.icons }}
+        shell: pwsh
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: ${{ matrix.icons }}
 
-      - name: 打包版冒烟
+      - name: 构建（${{ matrix.name }}）
+        shell: bash
+        run: ${{ matrix.build }}
+
+      - name: 打包版冒烟（仅 Windows）
+        if: matrix.smoke
         run: node scripts/smoke-packaged.mjs
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.key }}
+          if-no-files-found: error
+          path: ${{ matrix.upload }}
+
+  publish:
+    name: 创建 Release 并上传
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
 
       - name: 提取本版 CHANGELOG 作为 Release 说明
         shell: pwsh
@@ -42,6 +104,13 @@ jobs:
           $body = if ($m.Success) { $m.Value.Trim() } else { "Release v$ver" }
           Set-Content -Path "$env:RUNNER_TEMP\release-body.md" -Value $body -Encoding UTF8
 
+      - name: 汇总产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: artifacts
+
       - name: 创建 Release 并上传产物
         shell: pwsh
         env:
@@ -50,8 +119,8 @@ jobs:
           $tag = "$env:GITHUB_REF_NAME"
           $ver = $tag.TrimStart('v')
           # 已存在（重跑）时回退 edit；upload --clobber 幂等
-          gh release create $tag --title "MusicDedup v$ver" --notes-file "$env:RUNNER_TEMP\release-body.md" 2>$null
+          gh release create $tag --title "MusicDedup v$ver" --notes-file "$env:RUNNER_TEMP/release-body.md" 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release edit $tag --title "MusicDedup v$ver" --notes-file "$env:RUNNER_TEMP\release-body.md"
+            gh release edit $tag --title "MusicDedup v$ver" --notes-file "$env:RUNNER_TEMP/release-body.md"
           }
-          gh release upload $tag "release/MusicDedup-Setup-*.exe" release/MusicDedup-Portable.zip release/latest.yml --clobber
+          gh release upload $tag artifacts/* --clobber

@@ -367,6 +367,66 @@ function useConfirmAction(){
   return{confirmAction,confirmDialog};
 }
 
+/* ── 极简 Markdown → React 元素（更新日志用）
+   按需覆盖 CHANGELOG 常用子集：##/### 标题、- / 1. 列表、**加粗**、`行内码`、[链接](url)。
+   元素化渲染（无 innerHTML）；文本来源为仓库 CHANGELOG / 维护者 Release 说明。 */
+function mdInlineToEl(text, keyBase){
+  const nodes=[]; let buf=''; let i=0, n=0;
+  const flush=()=>{ if(buf){nodes.push(buf);buf='';} };
+  const pushEl=(el)=>{ flush(); nodes.push(el); n++; };
+  // 一次只匹配行首：**bold** / `code` / [text](url)
+  const re=/^(\*\*)([\s\S]+?)(\*\*)|^(`)([^`\n]+)(`)|^(\[)([^\]]+)(\]\()([^)\s]+)(\))/;
+  while(i<text.length){
+    const m=re.exec(text.slice(i));
+    if(m){
+      if(m[1]){
+        pushEl(e('strong',{key:keyBase+'-'+n},...mdInlineToEl(m[2],keyBase+'-'+n)));
+      }else if(m[4]){
+        pushEl(e('code',{key:keyBase+'-'+n,style:{fontFamily:'var(--font-mono)',fontSize:11,background:'var(--bg-muted)',padding:'1px 4px',borderRadius:3}},m[5]));
+      }else if(m[7]){
+        pushEl(e('a',{key:keyBase+'-'+n,href:m[10],style:{color:'var(--blue)',textDecoration:'underline',cursor:'pointer'}},m[8]));
+      }
+      i+=m[0].length;
+    }else{ buf+=text[i]; i++; }
+  }
+  flush();
+  return nodes;
+}
+function renderMarkdown(md){
+  const lines=String(md||'').replace(/\r\n?/g,'\n').split('\n');
+  const blocks=[]; let i=0;
+  const isH=(l)=>/^#{1,6}\s+/.test(l);
+  const isUl=(l)=>/^\s*[-*+]\s+/.test(l);
+  const isOl=(l)=>/^\s*\d+\.\s+/.test(l);
+  while(i<lines.length){
+    const line=lines[i];
+    if(!line.trim()){ i++; continue; }
+    const h=isH(line)?line.match(/^(#{1,6})\s+(.*)$/):null;
+    if(h){
+      const lvl=h[1].length;
+      blocks.push(e(`h${lvl}`,{key:'h'+i,style:{fontSize:lvl<=2?13:lvl===3?12.5:12,fontWeight:600,color:'var(--tx-primary)',margin:'10px 0 4px',lineHeight:1.5}},...mdInlineToEl(h[2],'h'+i)));
+      i++; continue;
+    }
+    if(isUl(line)||isOl(line)){
+      const ol=isOl(line);
+      const items=[];
+      while(i<lines.length&&lines[i].trim()&&(isUl(lines[i])||isOl(lines[i]))){
+        const content=lines[i].replace(ol?/^\s*\d+\.\s+/:/^\s*[-*+]\s+/,'').trim();
+        if(content)items.push(content);
+        i++;
+      }
+      blocks.push(e(ol?'ol':'ul',{key:'l'+i,style:{margin:'4px 0 6px',paddingLeft:18,listStyleType:ol?'decimal':'disc'}},
+        items.map((it,idx)=>e('li',{key:idx,style:{margin:'2px 0'}},...mdInlineToEl(it,'li'+i+'-'+idx)))));
+      continue;
+    }
+    const para=[line.trim()];
+    i++;
+    while(i<lines.length&&lines[i].trim()&&!isH(lines[i])&&!isUl(lines[i])&&!isOl(lines[i])){ para.push(lines[i].trim()); i++; }
+    blocks.push(e('p',{key:'p'+i,style:{margin:'6px 0'}},...mdInlineToEl(para.join(' '),'p'+i)));
+  }
+  return blocks;
+}
+
 /* ── 更新检查 / 下载 ── 与设置页「关于」卡共用（App 单例 + AboutSection 兜底）。
    check({silent}) 静默检查不弹提示，命中结果由 App 派生顶部「设置」标签徽标；
    手动检查命中打开确认弹窗（App 级 UpdateModal）；行内状态由 AboutSection 从 res/checked/err 派生。
@@ -376,9 +436,19 @@ function useUpdate(){
   const[res,setRes]=useState(null);       // {current,hasUpdate,latest} | {error}
   const[promptOpen,setPromptOpen]=useState(false);
   const[dl,setDl]=useState(null);         // null|'downloading'|'downloaded'|'installing'
+  const[dlPct,setDlPct]=useState(null);   // 下载进度百分比（下载中实时更新）
   const[dlError,setDlError]=useState(null);
   const[checked,setChecked]=useState(false); // 手动检查过（非 silent），行内据此显示「已是最新」
   const[err,setErr]=useState(null);          // 手动检查失败信息
+
+  // 订阅主进程下载进度（安装版 electron-updater / 便携版 sidecar 均上报 {percent}）
+  useEffect(()=>{
+    if(!window.bridge?.onUpdateDownloadProgress)return;
+    return window.bridge.onUpdateDownloadProgress(d=>{
+      if(!d||typeof d.percent!=='number')return;
+      setDlPct(Math.max(0,Math.min(100,Math.round(d.percent))));
+    });
+  },[]);
 
   async function check(opts={}){
     setChecking(true);setErr(null);setDlError(null);
@@ -396,16 +466,16 @@ function useUpdate(){
   async function download(opts={}){
     const latest=res?.latest;
     if(!latest||dl)return;
-    setDl('downloading');setDlError(null);
+    setDl('downloading');setDlPct(0);setDlError(null);
     try{
       // 安装版（electron-updater）无需 url/digest；便携版携带资产地址与 SHA256 供校验
       const payload={version:latest.version};
       if(latest.asset){payload.url=latest.asset.url;if(latest.asset.digest)payload.digest=latest.asset.digest;}
       const r=await api.post('/api/update/download',payload);
       // 下载只下载不安装：安装/替换由用户点「立即安装」走 install 触发
-      if(r.ok)setDl('downloaded');
-      else{setDl(null);setDlError(r.error||'下载失败');}
-    }catch(e){setDl(null);setDlError('下载失败，请检查网络');}
+      if(r.ok){setDl('downloaded');setDlPct(100);}
+      else{setDl(null);setDlPct(null);setDlError(r.error||'下载失败');}
+    }catch(e){setDl(null);setDlPct(null);setDlError('下载失败，请检查网络');}
   }
   async function install(){
     const v=res?.latest?.version;
@@ -418,19 +488,27 @@ function useUpdate(){
   }
   function close(){setPromptOpen(false);}
 
-  return{checking,res,promptOpen,setPromptOpen,dl,dlError,checked,err,check,download,install,close};
+  return{checking,res,promptOpen,setPromptOpen,dl,dlPct,dlError,checked,err,check,download,install,close};
 }
 
 // 发现新版本弹窗：手动「检查更新」命中时展示。dl 状态驱动按钮（下载中/已下载→立即安装）。
-function UpdateModal({res,dl,dlError,onDownload,onInstall,onOpenExternal,onClose}){
+function UpdateModal({res,dl,dlPct,dlError,onDownload,onInstall,onOpenExternal,onClose}){
   const latest=res?.latest;
   if(!latest)return null;
+  // 更新日志里的链接：拦截默认导航，交给主进程用系统浏览器打开
+  const onBodyClick=(ev)=>{
+    const a=ev.target&&ev.target.closest&&ev.target.closest('a');
+    if(!a)return;
+    ev.preventDefault();
+    const href=a.getAttribute('href');
+    if(href&&/^https:\/\//.test(href))onOpenExternal&&onOpenExternal(href);
+  };
   return e(Modal,{title:'发现新版本',description:`v${res.current} → v${latest.version}`+(latest.publishedAt?' · '+fmtDate(new Date(latest.publishedAt)):''),onClose,width:500},
-    latest.body&&e('div',{style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,whiteSpace:'pre-wrap',maxHeight:280,overflowY:'auto',scrollbarGutter:'stable'}},latest.body),
+    latest.body&&e('div',{onClick:onBodyClick,style:{fontSize:12,color:'var(--tx-secondary)',lineHeight:1.7,maxHeight:280,overflowY:'auto',scrollbarGutter:'stable'}},renderMarkdown(latest.body)),
     dlError&&e('div',{style:{color:'var(--red)',fontSize:12,marginTop:10}},'更新失败：'+dlError),
     e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end',marginTop:16}},
       e(Btn,{variant:'ghost',onClick:()=>onOpenExternal&&onOpenExternal(latest.htmlUrl)},'查看更新内容'),
-      dl==='downloading'&&e(Btn,{icon:'loader',disabled:true},'正在下载更新…'),
+      dl==='downloading'&&e(Btn,{icon:'loader',disabled:true},dlPct!=null?`正在下载更新… ${dlPct}%`:'正在下载更新…'),
       dl==='installing'&&e(Btn,{icon:'loader',disabled:true},'正在安装新版本…'),
       dl==='downloaded'&&e(Btn,{variant:'ghost',onClick:onClose},'稍后'),
       dl==='downloaded'&&e(Btn,{icon:'download',onClick:onInstall},'立即安装'),

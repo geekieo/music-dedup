@@ -1,5 +1,8 @@
 
 // scrape_tier 由服务端（lib/tier.js）计算；normCmp 保留给 autoSelectFields 的字节级相等判断。
+
+// 写入确认「本轮不再显示」：模块级状态，整个应用会话内有效（视图常驻挂载）。
+let skipWriteConfirm = false;
 const normCmp = s => (s||'').toLowerCase().replace(/[\s\u3000()（）【】「」\-_,.]/g,'');
 
 // TIER_COLOR, TIER_LABEL are served by /rules-meta.js (source: lib/rules.js)
@@ -180,6 +183,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
   const[scraped,setScraped]=useState(undefined);// undefined=loading, null=none
   const[scraping,setScraping]=useState(false);
   const[writing,setWriting]=useState(false);
+  const[reverting,setReverting]=useState(false);
   const[writeResult,setWriteResult]=useState(null);
   const[confirmWrite,setConfirmWrite]=useState(false);
   const[sel,setSel]=useState({});
@@ -263,8 +267,12 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
     setMbCandidates(null); setAidCandidates(null);
     onUpdated&&onUpdated();
   }
-  async function doWrite(){
-    setConfirmWrite(false); setWriting(true); setWriteResult(null);
+  function doWrite(){
+    setConfirmWrite(false);
+    performWrite();
+  }
+  async function performWrite(){
+    setWriting(true); setWriteResult(null);
     const fields={};
     for(const{key}of WRITE_FIELDS){
       const src = sel[key];
@@ -275,10 +283,19 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
     setWriting(false); setWriteResult(r);
     if(r.ok){ reload(); onUpdated?.(); onTagsWritten?.(); }
   }
-  async function doRevert(snapshotId){
-    const r=await api.post(`/api/snapshots/${snapshotId}/revert`);
+  // 写入入口：勾选「本轮不再显示」后跳过确认直接写入
+  function onWriteClick(){
+    if(skipWriteConfirm){ setConfirmWrite(false); performWrite(); }
+    else setConfirmWrite(true);
+  }
+  // 撤销按 file_id（write_history 主键）回滚到首次写入前；写入响应无 snapshotId
+  async function doRevert(){
+    if(reverting)return;
+    setReverting(true);
+    const r=await api.post(`/api/snapshots/${fileId}/revert`);
     if(r.ok){ reload(); setWriteResult(null); onUpdated?.(); onTagsWritten?.(); }
     else setWriteResult({ok:false,error:r.error||'撤销失败'});
+    setReverting(false);
   }
 
   const filename=fileInfo?fileInfo.path.split(/[\\/]/).pop():'';
@@ -627,9 +644,9 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
         writeResult.ok
           ?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}},
             e('span',{style:{color:'var(--green)'}},'✓ 写入成功'),
-            e('button',{onClick:()=>doRevert(writeResult.snapshotId),
-              style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-sm)',padding:'2px 10px',fontSize:11,cursor:'pointer',color:'var(--tx-secondary)'}},
-              '撤销此次写入'))
+            e('button',{onClick:doRevert,disabled:reverting,
+              style:{background:'none',border:'0.5px solid var(--bd-default)',borderRadius:'var(--r-sm)',padding:'2px 10px',fontSize:11,cursor:reverting?'wait':'pointer',color:'var(--tx-secondary)'}},
+              reverting?'撤销中…':'撤销此次写入'))
           :e('span',{style:{color:'var(--red)'}},
             Icon('alert-circle',{marginRight:4,fontSize:12}),'失败: '+writeResult.error)
       ),
@@ -640,7 +657,7 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
           Icon('shield-check',{fontSize:12,color:'var(--green)'}),'写入前自动备份原始标签，可随时撤销'),
         e(Btn,{disabled:!canWrite||writing||scraping,
           icon:writing?'loader':'pencil',
-          onClick:()=>setConfirmWrite(true)},
+          onClick:onWriteClick},
           writing?'写入中...':canWrite?`写入 ${selCount} 个字段`:'选择字段后写入')
       ),
 
@@ -660,6 +677,9 @@ function ScrapeDialog({fileId,onClose,onUpdated,onTagsWritten}){
           ),
           e('div',{style:{fontSize:10,color:'var(--tx-faint)',marginTop:10,marginBottom:16,display:'flex',alignItems:'center',gap:5}},
             Icon('shield-check',{fontSize:11,color:'var(--green)'}),'写入前将自动备份原始标签，支持撤销'),
+          e('label',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:16,cursor:'pointer',fontSize:12,color:'var(--tx-muted)'}},
+            e('input',{type:'checkbox',onChange:ev=>{skipWriteConfirm=ev.target.checked;}}),
+            '本轮不再显示'),
           e('div',{style:{display:'flex',gap:8,justifyContent:'flex-end'}},
             e(Btn,{variant:'ghost',onClick:()=>setConfirmWrite(false)},'返回'),
             e(Btn,{onClick:doWrite},'确认写入')

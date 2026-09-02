@@ -358,7 +358,7 @@ function AboutSection({update,s,setS,onAutoCheckToggle}){
   // 行内状态，优先级：检查/下载错误 > 下载中/已下载 > 发现新版本 > 手动检查结果
   const status=upd.err?{t:'检查失败：'+upd.err,c:'var(--red)'}
     : upd.dlError?{t:'更新失败：'+upd.dlError,c:'var(--red)'}
-    : upd.dl==='downloading'?{t:'正在下载更新…',c:'var(--tx-muted)'}
+    : upd.dl==='downloading'?{t:upd.dlPct!=null?`正在下载更新… ${upd.dlPct}%`:'正在下载更新…',c:'var(--tx-muted)'}
     : upd.res?.hasUpdate&&upd.res.latest?{t:upd.dl==='downloaded'?'新版本 v'+upd.res.latest.version+' 已下载':'发现新版本 v'+upd.res.latest.version,c:'var(--amber)'}
     : upd.checked?(upd.res?.latest?{t:'已是最新版本',c:'var(--green)'}:{t:'仓库暂无发布版本',c:'var(--tx-muted)'})
     : null;

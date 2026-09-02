@@ -55,8 +55,9 @@ export function dispatch(method, url, body) {
 }
 
 // 主进程接线入口：main.js 在窗口创建后调用（send 绑定到该窗口的 webContents）。
-export function registerApi({ send }) {
+export function registerApi({ send, sendUpdate }) {
   scan.setSend(send);
+  about.setSend(sendUpdate);
   ipcMain.handle('api', async (_event, { method, url, body }) => {
     try {
       // await：异步 handler 的 rejection 也兜底为 {ok:false,error}（不传给渲染层变未处理异常）

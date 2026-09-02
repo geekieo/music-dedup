@@ -4,7 +4,7 @@
 // 安装包相当），随后打成发布用 MusicDedup-Portable.zip（内含单个 MusicDedup.exe，非展开
 // 目录）；离线 exe 随即删除。发布时携带安装包 + 该 zip + latest.yml。
 // 支持 --publish（CI 用，electron-builder 发布到 GitHub Release）；本地默认不发布，
-// latest.yml 仍会照常生成。
+// 产物在 release/。latest.yml 仍会照常生成。
 //
 //   node scripts/build-win.mjs [nsis portable] [--publish]
 //

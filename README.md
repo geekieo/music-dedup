@@ -32,17 +32,21 @@
 
 | 产物 | 说明 |
 |---|---|
-| `MusicDedup-Setup-<ver>.exe` | NSIS 安装包（安装版），自动创建带图标的任务栏/开始菜单快捷方式；支持自动更新 |
-| `MusicDedup-Portable.zip` | 便携版（绿色版），内含单个压缩 `MusicDedup.exe`（~78MB），解压后运行；数据在 exe 旁 `UserData/`；支持自动更新（替换程序文件，保留数据） |
+| `MusicDedup-Setup-<ver>.exe` | Windows NSIS 安装包（安装版），自动创建快捷方式；支持自动更新 |
+| `MusicDedup-Portable.zip` | Windows 便携版（绿色版），内含单个压缩 `MusicDedup.exe`，解压即用；数据在 exe 旁 `UserData/`；支持自动更新 |
+| `MusicDedup-<ver>-<arch>.dmg` | macOS 安装镜像（x64 / arm64），拖入「应用程序」 |
+| `MusicDedup-<ver>-<arch>.zip` | macOS 自动更新包（配合 `latest-mac.yml`） |
+| `MusicDedup-<ver>.AppImage` | Linux（x64）AppImage，`chmod +x` 后运行 |
+| `MusicDedup_<ver>_amd64.deb` | Linux Debian/Ubuntu 安装包 |
 
-> 未签名程序在 Windows SmartScreen 会提示"未知发布者"——选择"仍要运行"即可。数据全程在本机，无任何云同步。
+> 产物均未签名：Windows SmartScreen 会提示"未知发布者"——选择"仍要运行"即可；macOS 首次打开需右键 → 打开放行；
+> Linux 运行 AppImage 需 FUSE，安装 deb 用 `sudo apt install ./MusicDedup_<ver>_amd64.deb`。数据全程在本机，无任何云同步。
 >
-> **自动更新**：安装版与便携版都支持自动检查更新（自动下载，安装前征求确认）。安装版更新走系统安装器；
-> 便携版下载 zip 后替换程序文件。更新走 HTTPS 出站（GitHub Releases），不监听端口。
+> **自动更新**：Windows 安装版与便携版支持自动检查更新（自动下载，安装前征求确认）。更新走 HTTPS 出站（GitHub Releases），不监听端口。
 
 ### 从源码运行
 
-**系统要求**：Node.js ≥ 18，Windows 10/11（macOS/Linux 代码就位，未经实机验证）
+**系统要求**：Node.js ≥ 18。Windows 10/11 为常用开发/验证平台；macOS/Linux 可 `npm run electron` 从源码运行（未做深度实机验证）。
 
 ```bash
 npm install
@@ -51,12 +55,16 @@ npm run electron
 
 > ⚠️ 若下载 Electron 二进制缓慢或失败，可配置镜像，见 [scripts/build-win.mjs](scripts/build-win.mjs) 头部注释。
 
-### 打包 Windows 产物
+### 打包各平台产物
 
 ```bash
-npm run build:win       # 产出 release/ 下 NSIS 安装包 + zip 便携版 + latest.yml
-npm run smoke:packaged  # 打包版冒烟自测
+npm run build:win       # Windows：NSIS 安装包 + zip 便携版 + latest.yml
+npm run build:mac       # macOS：dmg + zip（x64/arm64），需在 macOS 上运行（先生成 icon.icns）
+npm run build:linux     # Linux：AppImage + deb，需在 Linux 上运行（生成图标需 xvfb）
+npm run smoke:packaged  # Windows 打包版冒烟自测
 ```
+
+macOS/Linux 本地打包依赖平台自身工具（如 macOS 的 iconutil、Linux 的 xvfb），跨平台产物由 GitHub Actions 三平台并行构建。
 
 ### 发布新版本
 
@@ -67,7 +75,8 @@ git push && git tag vX.Y.Z && git push --tags
 ```
 
 推 `vX.Y.Z` 标签后，GitHub Actions（[.github/workflows/release.yml](.github/workflows/release.yml)）自动完成：
-构建 NSIS 安装包 + zip 便携版 → 打包版冒烟 → 创建 GitHub Release 并上传全部产物与 `latest.yml`。
+Windows / macOS / Linux 并行构建各平台产物 → 打包版冒烟（Windows）→ 创建 GitHub Release 并上传全部产物与
+`latest.yml` / `latest-mac.yml` / `latest-linux.yml`。
 
 ---
 

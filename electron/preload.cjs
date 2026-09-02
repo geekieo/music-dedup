@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('bridge', {
     ipcRenderer.on('scan:progress', listener);
     return () => ipcRenderer.removeListener('scan:progress', listener);
   },
+  // 更新下载进度事件订阅（{percent}）；返回取消订阅函数
+  onUpdateDownloadProgress: (cb) => {
+    const listener = (_event, data) => cb(data);
+    ipcRenderer.on('update:download-progress', listener);
+    return () => ipcRenderer.removeListener('update:download-progress', listener);
+  },
   // 无边框：平台标识 + 窗口控制（Linux 自绘按钮用；Win/mac 走原生控件）
   platform: process.platform,
   // 关闭确认：主进程发 app:confirm-close → 渲染层弹窗；确认后调 confirmClose()，

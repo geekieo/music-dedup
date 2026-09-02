@@ -55,6 +55,11 @@ function sendScan(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('scan:progress', data);
 }
 
+// 更新下载进度 → 渲染层（与 sendScan 并列，通道独立，避免复用 scan:progress 造成语义混淆）
+function sendUpdate(data) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update:download-progress', data);
+}
+
 // 统一图标：窗口/任务栏图标由渲染进程首启栅格化 favicon SVG 送达（不提交图片资产）
 // Windows/Linux: win.setIcon 更新任务栏+标题栏；macOS: Dock 图标走 app.dock
 function applyWindowIcon(dataUrl) {
@@ -320,7 +325,7 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
       seedSmokeLibrary(app.getPath('userData'));
     }
     mainWindow = createClientWindow();
-    registerApi({ send: sendScan });
+    registerApi({ send: sendScan, sendUpdate });
     registerWindowControls();
     // 统一图标：窗口/任务栏图标由渲染进程栅格化 favicon SVG 后经 win:icon 送达（不提交图片资产）
     ipcMain.on('win:icon', (_e, dataUrl) => { if (dataUrl) applyWindowIcon(dataUrl); });

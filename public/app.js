@@ -662,7 +662,7 @@ function App(){
       onClose:()=>setConfirmCloseOpen(false),
     }),
     // 更新检查反馈：发现新版本/自动下载完成 → App 级确认弹窗；其余状态行内显示（不插行）
-    upd.promptOpen&&upd.res?.hasUpdate&&e(UpdateModal,{res:upd.res,dl:upd.dl,dlError:upd.dlError,
+    upd.promptOpen&&upd.res?.hasUpdate&&e(UpdateModal,{res:upd.res,dl:upd.dl,dlPct:upd.dlPct,dlError:upd.dlError,
       onDownload:()=>upd.download(),onInstall:upd.install,
       onOpenExternal:url=>api.post('/api/external/open',{url}),onClose:upd.close})
   );

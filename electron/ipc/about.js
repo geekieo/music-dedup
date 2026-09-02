@@ -32,6 +32,13 @@ const PORTABLE_ASSET = 'MusicDedup-Portable.zip';
 // 运行形态：安装版 / 便携版 / 开发模式（模块加载时即定，smoke 不触碰更新路由无副作用）
 const MODE = isPortable() ? 'portable' : app.isPackaged ? 'installer' : 'dev';
 
+// 下载进度上行通道：main.js 注入（registerApi({sendUpdate}) → 绑定窗口 webContents）
+let sendProgress = null;
+export function setSend(fn) { sendProgress = fn; }
+function emitProgress(percent) {
+  if (sendProgress && typeof percent === 'number') sendProgress({ percent });
+}
+
 function parseVersion(v) {
   const parts = String(v || '').replace(/^v/i, '').split('.');
   return [0, 1, 2].map(i => parseInt(parts[i], 10) || 0);
@@ -82,27 +89,42 @@ async function checkPortable(current) {
 }
 
 // sidecar 下载：process.execPath + ELECTRON_RUN_AS_NODE=1 退化为纯 Node 跑 CLI
-//（与 fp-decode-pool.mjs 同一模式）。stdout 可能混有调试日志，JSON 取末行解析。
-function downloadTo(target, url) {
+//（与 fp-decode-pool.mjs 同一模式）。stdout 逐行 JSON：{progress} 实时上报，
+// 结尾 {done} 为最终结果（可能混有其它日志，逐行解析、忽略非 JSON 行）。
+function downloadTo(target, url, onProgress) {
   return new Promise((resolve) => {
     const cliPath = path.join(__dirname, '..', 'updater-download-cli.mjs');
     const child = spawn(process.execPath, [cliPath, url, target], {
       windowsHide: true,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     });
-    let out = '';
+    let buf = '';
+    let done = null;
+    const handleLine = (raw) => {
+      const line = raw.trim();
+      if (!line) return;
+      let o;
+      try { o = JSON.parse(line); } catch { return; }
+      if (o.progress) onProgress?.(o.progress);
+      else if (o.done) done = o.done;
+    };
     child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (d) => { out += d; });
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        handleLine(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+    });
     let settled = false;
     const finish = (err) => {
       if (settled) return;
       settled = true;
       if (err) { resolve({ ok: false, error: err.message }); return; }
-      const lines = out.trim().split(/\r?\n/);
-      let parsed = null;
-      try { parsed = JSON.parse(lines[lines.length - 1]); } catch { /* fall through */ }
-      if (parsed && parsed.ok) resolve({ ok: true, bytes: parsed.bytes });
-      else resolve({ ok: false, error: (parsed && parsed.error) || `下载进程异常退出：${lines[lines.length - 1] || ''}` });
+      if (buf.trim()) handleLine(buf); // 尾行无换行兜底
+      if (done && done.ok) resolve({ ok: true, bytes: done.bytes });
+      else resolve({ ok: false, error: (done && done.error) || '下载进程异常退出' });
     };
     child.on('error', (e) => finish(e));
     child.on('close', (code) => finish(code === 0 ? null : new Error('下载进程退出 code=' + code)));
@@ -139,7 +161,7 @@ async function unzipTo(zipPath, stage) {
 }
 
 // 便携版下载：zip 已下好（staging 存在）则直接复用 → 解压 staging → 记录 pending
-async function downloadPortable(body, version) {
+async function downloadPortable(body, version, onProgress) {
   const stage = portableStageDir(version);
   if (existsSync(path.join(stage, 'MusicDedup.exe'))) {
     setSetting(db, 'pending_update_version', version);
@@ -148,7 +170,7 @@ async function downloadPortable(body, version) {
   const url = body && body.url;
   if (!/^https:\/\//.test(url || '')) return { ok: false, error: '无效的下载地址' };
   const zipPath = portableZipPath(version);
-  const result = await downloadTo(zipPath, url);
+  const result = await downloadTo(zipPath, url, onProgress);
   if (!result.ok) return result;
   const digest = body && body.digest;
   if (digest && digest.startsWith('sha256:')) {
@@ -216,6 +238,10 @@ function getUpdater() {
     autoUpdater.on('update-downloaded', (info) => {
       updaterDownloadedVersion = (info && info.version) || null;
     });
+    // electron-updater 在 downloadUpdate() 期间高频发 download-progress → 转发渲染层
+    autoUpdater.on('download-progress', (p) => {
+      if (p && typeof p.percent === 'number') emitProgress(p.percent);
+    });
     _updater = autoUpdater;
   }
   return _updater;
@@ -236,6 +262,14 @@ async function checkInstaller(current) {
   const version = String(info.version).replace(/^v/i, '');
   const hasUpdate = cmpVersion(parseVersion(version), parseVersion(current)) > 0;
   if (!hasUpdate) return { hasUpdate: false, latest: null };
+  let body = releaseNotesText(info.releaseNotes);
+  if (!body) {
+    // latest.yml 未内嵌 releaseNotes → 回退取 GitHub Release 说明（取不到不阻断检查）
+    try {
+      const rel = await fetchLatestRelease();
+      if (rel) body = rel.body;
+    } catch { /* 忽略 */ }
+  }
   return {
     hasUpdate: true,
     latest: {
@@ -243,7 +277,7 @@ async function checkInstaller(current) {
       name: '',
       publishedAt: null,
       htmlUrl: `https://github.com/${REPO}/releases/tag/v${version}`,
-      body: releaseNotesText(info.releaseNotes),
+      body,
       asset: null,
     },
   };
@@ -266,7 +300,9 @@ export const routes = [
       return { ok: true, version };
     }
     if (MODE === 'portable') {
-      return downloadPortable(body, version);
+      return downloadPortable(body, version, (p) => {
+        if (p && typeof p.percent === 'number') emitProgress(p.percent);
+      });
     }
     return { ok: false, error: '开发模式不支持安装更新' };
   } },
