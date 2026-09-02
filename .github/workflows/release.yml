@@ -1,0 +1,57 @@
+# Release — 推 v* 标签后自动构建并发布
+#
+# 流程：推 vX.Y.Z 标签 → npm ci → electron-builder 构建（NSIS 安装包 + 便携 exe→zip，
+# latest.yml 由 electron-builder 生成）→ 打包版冒烟 → 创建 GitHub Release 并上传全部产物。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建（NSIS + 便携 exe→zip，不发布；latest.yml 照常生成）
+        run: node scripts/build-win.mjs nsis portable
+
+      - name: 打包版冒烟
+        run: node scripts/smoke-packaged.mjs
+
+      - name: 提取本版 CHANGELOG 作为 Release 说明
+        shell: pwsh
+        run: |
+          $ver = "$env:GITHUB_REF_NAME".TrimStart('v')
+          $lines = Get-Content CHANGELOG.md -Raw -Encoding UTF8
+          # 匹配 "## [<ver>] — date" 段直到下一个 "## ["
+          $m = [regex]::Match($lines, "(?ms)^## \[$([regex]::Escape($ver))\] .*?(?=^## \[|\z)")
+          $body = if ($m.Success) { $m.Value.Trim() } else { "Release v$ver" }
+          Set-Content -Path "$env:RUNNER_TEMP\release-body.md" -Value $body -Encoding UTF8
+
+      - name: 创建 Release 并上传产物
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "$env:GITHUB_REF_NAME"
+          $ver = $tag.TrimStart('v')
+          # 已存在（重跑）时回退 edit；upload --clobber 幂等
+          gh release create $tag --title "MusicDedup v$ver" --notes-file "$env:RUNNER_TEMP\release-body.md" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release edit $tag --title "MusicDedup v$ver" --notes-file "$env:RUNNER_TEMP\release-body.md"
+          }
+          gh release upload $tag "release/MusicDedup-Setup-*.exe" release/MusicDedup-Portable.zip release/latest.yml --clobber

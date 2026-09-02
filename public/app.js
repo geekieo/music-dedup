@@ -409,20 +409,23 @@ function App(){
     api.get('/api/settings').then(r=>{if(r.ok)setSettingsState(r.data);});
   },[]);
 
-  // 启动自动检查：settings 加载后按 auto_check_update 跑一次（静默，命中时由下方 effect 派生徽标）
+  // 启动自动检查：有 pending 未装版本（「稍后」遗留）时即使关闭自动检查也检查一次
   const autoCheckedRef=useRef(false);
   useEffect(()=>{
     if(!settings||autoCheckedRef.current)return;
     autoCheckedRef.current=true;
-    if(settings.auto_check_update!==false)upd.check({silent:true});
+    if(settings.auto_check_update!==false||settings.pending_update_version)upd.check({silent:true});
   },[settings]);
-  // 静默检查命中 → 「设置」标签徽标；自动下载开启时后台下载一次（只下载，安装待用户确认）
+  // 静默检查命中 → 「设置」标签徽标；后台下载一次（只下载，安装待确认）：
+  // pending 版本与最新一致（「稍后」恢复，命中缓存/staging 不重新下载）或自动下载开启
   useEffect(()=>{
     if(!upd.res?.hasUpdate||!upd.res.latest)return;
     setUpdateBadge(upd.res.latest.version);
-    if(settings?.auto_download_update&&upd.dl===null)upd.download({silent:true});
-  },[upd.res,upd.dl]);
-  // 自动下载完成 → 打开 App 级确认弹窗（安装需用户确认）；手动下载走 install 不触发
+    const pending=settings?.pending_update_version;
+    const isPending=!!pending&&pending===upd.res.latest.version;
+    if((isPending||settings?.auto_download_update)&&upd.dl===null)upd.download({silent:true});
+  },[upd.res,upd.dl,settings]);
+  // 下载完成 → 打开 App 级确认弹窗（安装需用户确认）
   useEffect(()=>{
     if(upd.dl==='downloaded'&&!upd.promptOpen)upd.setPromptOpen(true);
   },[upd.dl]);

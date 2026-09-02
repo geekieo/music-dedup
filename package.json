@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "audio-decode": "^3.10.1",
+    "electron-updater": "^6.8.9",
     "fast-glob": "^3.3.2",
     "music-metadata": "^10.5.0",
     "node-id3": "^0.2.9",
@@ -91,8 +92,19 @@
     ],
     "npmRebuild": false,
     "afterPack": "scripts/after-pack.cjs",
-    "electronLanguages": ["zh-CN", "zh-TW", "en-US"],
+    "electronLanguages": [
+      "zh-CN",
+      "zh-TW",
+      "en-US"
+    ],
     "compression": "maximum",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "geekieo",
+        "repo": "music-dedup"
+      }
+    ],
     "win": {
       "icon": "assets/icon.ico",
       "target": [
@@ -100,13 +112,16 @@
         "portable"
       ]
     },
+    "portable": {
+      "artifactName": "MusicDedup.exe"
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "MusicDedup",
-      "artifactName": "MusicDedup Setup ${version}.exe",
+      "artifactName": "MusicDedup-Setup-${version}.exe",
       "differentialPackage": false
     },
     "linux": {

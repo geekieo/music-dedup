@@ -32,10 +32,13 @@
 
 | 产物 | 说明 |
 |---|---|
-| `MusicDedup Setup 2.0.0.exe` | NSIS 安装包，自动创建带图标的任务栏/开始菜单快捷方式 |
-| `MusicDedup 2.0.0.exe` | 便携版，解压即用，免安装 |
+| `MusicDedup-Setup-<ver>.exe` | NSIS 安装包（安装版），自动创建带图标的任务栏/开始菜单快捷方式；支持自动更新 |
+| `MusicDedup-Portable.zip` | 便携版（绿色版），内含单个压缩 `MusicDedup.exe`（~78MB），解压后运行；数据在 exe 旁 `UserData/`；支持自动更新（替换程序文件，保留数据） |
 
 > 未签名程序在 Windows SmartScreen 会提示"未知发布者"——选择"仍要运行"即可。数据全程在本机，无任何云同步。
+>
+> **自动更新**：安装版与便携版都支持自动检查更新（自动下载，安装前征求确认）。安装版更新走系统安装器；
+> 便携版下载 zip 后替换程序文件。更新走 HTTPS 出站（GitHub Releases），不监听端口。
 
 ### 从源码运行
 
@@ -51,9 +54,20 @@ npm run electron
 ### 打包 Windows 产物
 
 ```bash
-npm run build:win      # 产出 release/ 下 NSIS 安装包 + 便携版
-npm run smoke:packaged # 打包版冒烟自测
+npm run build:win       # 产出 release/ 下 NSIS 安装包 + zip 便携版 + latest.yml
+npm run smoke:packaged  # 打包版冒烟自测
 ```
+
+### 发布新版本
+
+```bash
+npm run release patch   # 版本号同步（package.json / app.js APP_VERSION）+ CHANGELOG 占位
+git add . && git commit -m "release vX.Y.Z"
+git push && git tag vX.Y.Z && git push --tags
+```
+
+推 `vX.Y.Z` 标签后，GitHub Actions（[.github/workflows/release.yml](.github/workflows/release.yml)）自动完成：
+构建 NSIS 安装包 + zip 便携版 → 打包版冒烟 → 创建 GitHub Release 并上传全部产物与 `latest.yml`。
 
 ---
 
@@ -119,7 +133,7 @@ npm run smoke:packaged # 打包版冒烟自测
 
 ## 数据与隐私
 
-- 全部数据存储在本机（SQLite + 日志），无任何云端上传：安装版在 `%APPDATA%/MusicDedup/`，便携版在 exe 旁的 `MusicDedup-data/`（便携不留数据在宿主）
+- 全部数据存储在本机（SQLite + 日志），无任何云端上传：安装版在 `%APPDATA%/MusicDedup/UserData/`，便携版在 exe 旁的 `UserData/`（便携不留数据在宿主）
 - **首次启动自动迁移**：检测到 v1（Web 版）数据目录会交互式询问是否迁移，绝不静默覆盖
 - 删除操作一律进系统回收站，可撤销
 
@@ -145,11 +159,11 @@ npm run smoke:packaged # 打包版冒烟自测
 | `npm run electron` | 启动开发客户端 |
 | `npm run smoke` | 真实库全链路自测（IPC/流式/渲染/图标） |
 | `npm run test:setup` | 搭建隔离测试环境（备份生产库 + 复制重复曲目副本 + 建测试 userData） |
-| `npm run build:win` | 打包 Windows NSIS + 便携版 |
+| `npm run build:win` | 打包 Windows NSIS + zip 便携版 |
 
 **隔离测试**：`npm run test:setup` 后，用
 `npm run electron -- --userdata <测试userdata>` 启动测试实例（数据与生产
-`%APPDATA%/MusicDedup` 完全隔离，生产库备份在 `%APPDATA%/MusicDedup/backup/`），
+`%APPDATA%/MusicDedup/UserData` 完全隔离，生产库备份在 `%APPDATA%/MusicDedup/UserData/backup/`），
 验证完关窗、直接 `npm run electron` 即回到生产。详见 `scripts/setup-test-env.mjs` 头部说明。
 
 ### 架构
@@ -173,6 +187,7 @@ lib/{db,scanner,matcher,rules,scraper,tagger,fingerprint,...}.js → SQLite/文�
 
 - **扫描时窗口卡顿？** 2.0 起扫描已隔离到 worker 线程，若仍复现请带主进程日志提 issue。
 - **SmartScreen 提示"未知发布者"？** 程序未做代码签名，选择"仍要运行"；安装包与便携版皆如此。
+- **杀毒软件防火墙拦截联网/更新？** 程序只做 HTTPS 出站（GitHub Releases 检查/下载更新），不监听任何端口。部分第三方防火墙默认拦截所有未签名程序的出站连接，请将 MusicDedup 加入信任/允许联网（而不是关闭系统防护）。程序不会尝试绕过防火墙。
 - **如何启用 AcoustID / Chromaprint？** 设置页填写 AcoustID API Key；fpcalc.exe 放入项目根目录或设置其路径。
 
 ## License

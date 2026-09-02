@@ -1,8 +1,8 @@
 // scripts/setup-test-env.mjs — 隔离测试环境搭建
 //
-// 用途：不碰生产数据（%APPDATA%/MusicDedup，即 Electron userData）的前提下，
+// 用途：不碰生产数据（%APPDATA%/MusicDedup/UserData，即 Electron userData）的前提下，
 // ① 把当前重复组涉及的全部音轨复制到独立测试目录（保留目录结构）
-// ② 备份生产库到 %APPDATA%/MusicDedup/backup（VACUUM INTO 生成单文件快照，
+// ② 备份生产库到 %APPDATA%/MusicDedup/UserData/backup（VACUUM INTO 生成单文件快照，
 //    不依赖 WAL 边车；备份是生产数据的保险，放生产数据旁边、不进测试区）
 // ③ 建一个全新测试 userData 目录
 // 之后用 `npm run electron -- --userdata <测试userdata>` 启动隔离实例，
@@ -15,8 +15,8 @@
 //                          由重复文件公共根推导，如 <音乐目录> → <音乐目录>/musicdedup-test）
 //   --tracks <dir>      测试曲目根目录   （默认 <root>/tracks）
 //   --userdata <dir>    测试 userData    （默认 <root>/userdata）
-//   --backup-dir <dir>  生产库备份目录   （默认 %APPDATA%/MusicDedup/backup，不进测试区）
-//   --prod-db <path>    生产库路径       （默认 %APPDATA%/MusicDedup/musicdedup.db）
+//   --backup-dir <dir>  生产库备份目录   （默认 %APPDATA%/MusicDedup/UserData/backup，不进测试区）
+//   --prod-db <path>    生产库路径       （默认 %APPDATA%/MusicDedup/UserData/musicdedup.db）
 //   --copy-all          强制重拷全部文件（默认已存在则跳过）
 //   --no-copy           只备份 + 建目录，不拷文件
 //
@@ -38,7 +38,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function userDataDir() {
   const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-  return path.join(appData, 'MusicDedup');
+  return path.join(appData, 'MusicDedup', 'UserData');
 }
 
 // ---- 参数 ----

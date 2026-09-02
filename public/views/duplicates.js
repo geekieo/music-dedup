@@ -345,7 +345,6 @@ function TrackRow({track,onToggle,canToggle,onProps,onScrape,onCrossFill,player,
       e('div',{style:{display:'flex',alignItems:'center',gap:6,flexShrink:0}},
         player&&e('button',{
           onClick:()=>player.playTrack({id:track.id,title:track.title,artist:track.artist,src:queue?.[0]?.src||'duplicates',groupId:queue?.[0]?.groupId},queue),
-          title:'试听',
           style:{background:isCur?'var(--amber)':'rgba(0,0,0,.08)',border:'none',borderRadius:'50%',
             width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}},
           Icon(isCur&&player.playing?'pause':'play',{fontSize:16,color:isCur?'#fff':'var(--tx-muted)'})

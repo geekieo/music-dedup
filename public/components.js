@@ -394,12 +394,16 @@ function useUpdate(){
     }finally{ setChecking(false); }
   }
   async function download(opts={}){
-    const asset=res?.latest?.setupAsset;
-    if(!asset||dl)return;
+    const latest=res?.latest;
+    if(!latest||dl)return;
     setDl('downloading');setDlError(null);
     try{
-      const r=await api.post('/api/update/download',{url:asset.url,version:res.latest.version,auto:!!opts.silent});
-      if(r.ok)setDl(opts.silent?'downloaded':'installing');
+      // 安装版（electron-updater）无需 url/digest；便携版携带资产地址与 SHA256 供校验
+      const payload={version:latest.version};
+      if(latest.asset){payload.url=latest.asset.url;if(latest.asset.digest)payload.digest=latest.asset.digest;}
+      const r=await api.post('/api/update/download',payload);
+      // 下载只下载不安装：安装/替换由用户点「立即安装」走 install 触发
+      if(r.ok)setDl('downloaded');
       else{setDl(null);setDlError(r.error||'下载失败');}
     }catch(e){setDl(null);setDlError('下载失败，请检查网络');}
   }
@@ -428,6 +432,7 @@ function UpdateModal({res,dl,dlError,onDownload,onInstall,onOpenExternal,onClose
       e(Btn,{variant:'ghost',onClick:()=>onOpenExternal&&onOpenExternal(latest.htmlUrl)},'查看更新内容'),
       dl==='downloading'&&e(Btn,{icon:'loader',disabled:true},'正在下载更新…'),
       dl==='installing'&&e(Btn,{icon:'loader',disabled:true},'正在安装新版本…'),
+      dl==='downloaded'&&e(Btn,{variant:'ghost',onClick:onClose},'稍后'),
       dl==='downloaded'&&e(Btn,{icon:'download',onClick:onInstall},'立即安装'),
       dl===null&&e(Btn,{icon:'download',onClick:onDownload},'下载更新')
     )

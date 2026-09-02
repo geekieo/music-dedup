@@ -116,7 +116,7 @@ function WriteHistorySection({writeHistoryKey,player,onLocateFile,onLocate,onLoc
   ]);
 
   // [列名, 固定布局列宽] — 列宽总和 100%，fixed 布局下表格恒等于容器宽，不撑破设置列
-  const COLS=[['播放','6%'],['标题','16%'],['艺术家','12%'],['修改字段','18%'],['修改时间','12%'],['剩余天数','10%'],['操作','25%']];
+  const COLS=[['','32px'],['标题','40%'],['艺术家','25%'],['修改字段','35%'],['修改时间','80px'],['剩余天数','60px'],['操作','142px']];
 
   return e(Card,{id:'sec-history',style:{minHeight:100}},
     toast&&e(Toast,{msg:toast.msg,type:toast.type,onClose:()=>setToast(null)}),
@@ -258,7 +258,7 @@ function RetentionListSection({player,retentionListKey,onLocateFile,onLocate,onL
           e('div',{style:{maxHeight:'calc(100vh - 320px)',minHeight:80,overflowY:'auto',borderRadius:'var(--r-lg)',border:'0.5px solid var(--bd-default)'}},
             e('table',{style:{width:'100%',tableLayout:'fixed',borderCollapse:'collapse',fontSize:12}},
               e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)'}},
-                ...[['','7%'],['标题','23%'],['艺术家','17%'],['专辑','17%'],['格式','16%'],['操作','20%']].map(([h,w])=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11,width:w,overflow:'hidden'}},h))
+                ...[['','32px'],['标题','40%'],['艺术家','25%'],['专辑','35%'],['格式','140px'],['操作','142px']].map(([h,w])=>e('th',{key:h,style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',whiteSpace:'nowrap',fontSize:11,width:w,overflow:'hidden'}},h))
               )),
               e('tbody',null,filtered.length===0
                 ? e('tr',null,e('td',{colSpan:6,style:{padding:'18px',textAlign:'center',color:'var(--tx-faint)',fontSize:12}},'无匹配结果'))

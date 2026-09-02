@@ -289,7 +289,7 @@ const LibraryView=React.memo(function LibraryView({player,dirs,onAddDir,onRemove
             Icon('music-off',{fontSize:32,display:'block',margin:'0 auto 8px'}),'未找到匹配的曲目')
           :e('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12}},
             e('thead',null,e('tr',{style:{borderBottom:'0.5px solid var(--bd-default)',background:'var(--bg-subtle)',position:'sticky',top:0,zIndex:2}},
-              ...[['','36px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','72px'],['刮削','48px'],['时长','56px'],['大小','64px'],['操作','108px']].map(([h,w])=>
+              ...[['','32px'],['标题',''],['艺术家','18%'],['专辑','16%'],['格式','66px'],['刮削','48px'],['时长','56px'],['大小','64px'],['操作','108px']].map(([h,w])=>
                 e('th',{key:h,
                   onClick:['标题','艺术家','专辑','格式','时长','大小','刮削'].includes(h)?()=>toggleSort({标题:'title',艺术家:'artist',专辑:'album',格式:'format',时长:'duration',大小:'size',刮削:'scrape_tier'}[h]):undefined,
                   style:{padding:'8px 10px',textAlign:'left',fontWeight:600,color:'var(--tx-secondary)',

@@ -2,7 +2,7 @@
 //
 // 应用本体（静态资源 / rules-meta / cover / stream）走 musicdedup:// 协议，无 HTTP 层；
 // 路由在 electron/ipc/*。
-// 数据目录一律 userData（%APPDATA%/MusicDedup/）。
+// 数据目录一律 userData（安装版 %APPDATA%/MusicDedup/UserData，便携版 exe 旁 UserData）。
 // Smoke 自测：V2_SMOKE=1（npm run smoke）——真实库加载后从主进程经 IPC 打关键
 //   接口，验证 preload→ipc→lib 全链路，通过后自动退出。
 import { createRequire } from 'module';
@@ -314,6 +314,11 @@ if (isClientMode && !app.requestSingleInstanceLock()) {
     // 默认：客户端（IPC + 自定义协议，无 HTTP）
     // ipc/index.js 模块级即 getDB()（打开/创建目标库），动态 import 惰性加载
     const { registerApi } = await import('./ipc/index.js');
+    // 打包版冒烟种子：空库时写入 1 个 WAV，保证 /api/library 与流式路径可被验证
+    if (isSmoke && process.env.SMOKE_SEED === '1') {
+      const { seedSmokeLibrary } = await import('./smoke-seed.js');
+      seedSmokeLibrary(app.getPath('userData'));
+    }
     mainWindow = createClientWindow();
     registerApi({ send: sendScan });
     registerWindowControls();
